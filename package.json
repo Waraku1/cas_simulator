@@ -1,0 +1,36 @@
+{
+  "name": "cas-flight-simulator",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.32.1",
+  "scripts": {
+    "sync:cesium": "node scripts/sync-cesium.mjs",
+    "predev": "pnpm sync:cesium",
+    "dev": "vite dev",
+    "prebuild": "pnpm sync:cesium",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "deploy": "pnpm build && wrangler deploy",
+    "cf:typegen": "wrangler types",
+    "check": "tsc -b",
+    "validate:scaffold": "node scripts/verify-scaffold.mjs"
+  },
+  "dependencies": {
+    "cesium": "1.145.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.54.8",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "5.8.3",
+    "vite": "8.2.2",
+    "wrangler": "4.129.1"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}
