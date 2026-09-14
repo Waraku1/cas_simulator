@@ -1,0 +1,92 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #edf7ff;
+  background: #05070a;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+button, input { font: inherit; }
+
+.app-shell { position: relative; width: 100%; height: 100%; background: #05070a; }
+.earth-shell, .earth-shell__viewport { position: absolute; inset: 0; }
+
+.hud-header {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 18px 22px;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(5, 7, 10, 0.76), transparent);
+}
+
+.hud-header strong { display: block; font-size: 14px; letter-spacing: 0.12em; }
+.hud-header span, .hud-header__theater { display: block; margin-top: 4px; font-size: 11px; letter-spacing: 0.12em; opacity: 0.7; }
+
+.diagnostics {
+  position: absolute;
+  z-index: 10;
+  top: 82px;
+  right: 20px;
+  width: 176px;
+  padding: 12px 14px;
+  border: 1px solid rgba(197, 232, 255, 0.24);
+  border-radius: 8px;
+  background: rgba(4, 11, 17, 0.74);
+  backdrop-filter: blur(8px);
+}
+.diagnostics__title { margin-bottom: 10px; font-size: 10px; letter-spacing: 0.16em; opacity: 0.7; }
+.diagnostics dl { margin: 0; }
+.diagnostics dl > div { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; }
+.diagnostics dt { font-size: 10px; opacity: 0.62; }
+.diagnostics dd { margin: 0; font-variant-numeric: tabular-nums; font-size: 11px; }
+.diagnostics dd.ok { color: #d8ffe7; }
+.diagnostics dd.warn { color: #ffe1b8; }
+
+.center-card {
+  position: absolute;
+  z-index: 20;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(480px, calc(100% - 40px));
+  padding: 22px;
+  border: 1px solid rgba(197, 232, 255, 0.24);
+  border-radius: 12px;
+  background: rgba(4, 11, 17, 0.9);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.36);
+}
+.center-card h1 { margin: 0 0 8px; font-size: 18px; }
+.center-card p { margin: 0; line-height: 1.55; font-size: 13px; opacity: 0.78; }
+.center-card code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.center-card--error { border-color: rgba(255, 160, 160, 0.42); }
+
+.hud-footer {
+  position: absolute;
+  z-index: 10;
+  left: 20px;
+  bottom: 18px;
+  display: flex;
+  gap: 16px;
+  padding: 8px 10px;
+  font-size: 10px;
+  letter-spacing: 0.11em;
+  background: rgba(4, 11, 17, 0.64);
+  border-radius: 5px;
+  pointer-events: none;
+}
+
+.cesium-viewer-bottom, .cesium-viewer-toolbar { z-index: 5; }
+
+@media (max-width: 700px) {
+  .diagnostics { top: auto; right: 12px; bottom: 12px; width: 160px; }
+  .hud-header { padding: 14px; }
+  .hud-header__theater, .hud-footer { display: none; }
+}
