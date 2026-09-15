@@ -18,6 +18,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       VITE_CESIUM_ION_TOKEN: ${{ secrets.VITE_CESIUM_ION_TOKEN }}
+      PRODUCTION_URL: https://cas-flight-simulator.heleshiheiheleshihei.workers.dev
 
     steps:
       - name: Checkout
@@ -49,3 +50,12 @@ jobs:
 
       - name: Deploy to Cloudflare Workers
         run: pnpm exec wrangler deploy
+
+      - name: Verify production root
+        run: curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$PRODUCTION_URL/" > /dev/null
+
+      - name: Verify health endpoint
+        run: |
+          HEALTH_JSON="$(curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$PRODUCTION_URL/api/health")"
+          echo "$HEALTH_JSON"
+          HEALTH_JSON="$HEALTH_JSON" node -e 'const j = JSON.parse(process.env.HEALTH_JSON); if (j.ok !== true || j.stage !== "C0_FOUNDATION") process.exit(1)'
