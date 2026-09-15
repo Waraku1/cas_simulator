@@ -7,7 +7,8 @@
   "scripts": {
     "sync:cesium": "node scripts/sync-cesium.mjs",
     "predev": "pnpm sync:cesium",
-    "dev": "vite dev",
+    "dev": "vite dev --config vite.client.config.ts",
+    "dev:cloudflare": "vite dev",
     "prebuild": "pnpm sync:cesium",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
