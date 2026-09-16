@@ -1,0 +1,142 @@
+.multiplayer-panel {
+  position: absolute;
+  z-index: 14;
+  top: 176px;
+  left: 22px;
+  width: 192px;
+  padding: 11px 13px;
+  border: 1px solid rgba(163, 236, 255, 0.16);
+  border-left: 2px solid rgba(118, 234, 255, 0.72);
+  border-radius: 7px;
+  background: rgba(3, 13, 18, 0.62);
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+}
+
+.multiplayer-panel__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.multiplayer-panel__header span {
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  color: var(--hud-text-soft);
+}
+.multiplayer-panel__header strong {
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-align: right;
+}
+
+.multiplayer-panel__room {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  margin-top: 9px;
+}
+.multiplayer-panel input {
+  min-width: 0;
+  height: 29px;
+  padding: 0 8px;
+  border: 1px solid rgba(163, 236, 255, 0.18);
+  border-radius: 5px;
+  outline: none;
+  background: rgba(2, 9, 13, 0.62);
+  color: #effcff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.multiplayer-panel input:focus {
+  border-color: rgba(118, 234, 255, 0.58);
+  box-shadow: 0 0 0 2px rgba(118, 234, 255, 0.07);
+}
+.multiplayer-panel input:disabled { opacity: 0.62; }
+
+.multiplayer-panel button {
+  min-height: 29px;
+  padding: 0 9px;
+  border: 1px solid rgba(163, 236, 255, 0.18);
+  border-radius: 5px;
+  background: rgba(118, 234, 255, 0.07);
+  color: #eafcff;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.11em;
+  cursor: pointer;
+}
+.multiplayer-panel button:hover,
+.multiplayer-panel button:focus-visible {
+  border-color: rgba(118, 234, 255, 0.48);
+  background: rgba(118, 234, 255, 0.13);
+  outline: none;
+}
+.multiplayer-panel button:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
+.multiplayer-panel__actions {
+  display: grid;
+  margin-top: 6px;
+}
+
+.multiplayer-panel__code,
+.multiplayer-panel__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(163, 236, 255, 0.09);
+  color: var(--hud-text-soft);
+  font-size: 8px;
+  letter-spacing: 0.09em;
+}
+.multiplayer-panel__code strong {
+  color: #f1fdff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+}
+.multiplayer-panel__meta {
+  padding-top: 0;
+  border-top: 0;
+  font-size: 7px;
+}
+.multiplayer-panel__error {
+  margin: 7px 0 0;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 152, 152, 0.14);
+  color: #ffd0d0;
+  font-size: 7px;
+  line-height: 1.45;
+  letter-spacing: 0.05em;
+}
+
+.multiplayer-panel--connected {
+  border-left-color: #8fffc5;
+  box-shadow: 0 0 24px rgba(91, 255, 175, 0.05);
+}
+.multiplayer-panel--connected .multiplayer-panel__header strong { color: #caffdf; }
+.multiplayer-panel--waiting .multiplayer-panel__header strong,
+.multiplayer-panel--connecting .multiplayer-panel__header strong { color: #ffe4ad; }
+.multiplayer-panel--error {
+  border-left-color: #ff9b9b;
+  background: rgba(28, 12, 15, 0.68);
+}
+
+@media (max-width: 760px) {
+  .multiplayer-panel {
+    top: 172px;
+    left: 12px;
+    width: 166px;
+  }
+  .multiplayer-panel__room {
+    grid-template-columns: 1fr;
+  }
+}

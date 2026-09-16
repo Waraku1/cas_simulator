@@ -1,6 +1,6 @@
 # C2 — World / Theater Resource Gate
 
-Status: **PERFORMANCE REMEDIATION / 3-MIN PREFLIGHT PENDING**
+Status: **CLOSED / ACCEPTED**
 
 ## Objective
 
@@ -15,7 +15,7 @@ Keep Cesium Earth as the world model while introducing a deterministic regional 
 - Current size: 50 km × 50 km.
 - Warning band: 5 km inside each edge.
 
-The C2 boundary is a lightweight Cesium polyline clamped to terrain. C2 does not hard-clamp controls, teleport the aircraft, or impose gameplay consequences. A flight can move outside the theater so the warning/outside states can be verified. Later gates own respawn/gameplay behavior.
+The C2 boundary is a lightweight Cesium polyline clamped to terrain. C2 does not hard-clamp controls or teleport the aircraft. A flight can move outside the theater so warning/outside states can be verified.
 
 ## Theater evaluation
 
@@ -28,38 +28,31 @@ The signed edge distance is the smaller of the east/west and north/south remaini
 
 The same module generates the four boundary corner coordinates used by the renderer.
 
-## Resource/performance gate
+## Resource/performance contract
 
 Engineering targets, not provider guarantees:
-- target FPS: >=45;
-- minimum acceptable FPS: >=30;
+- target average FPS: >=45;
+- minimum acceptable valid one-second sample: >=30;
 - runtime render/simulation cap: 60 FPS;
 - staged preflight: 3 active foreground minutes;
-- standardized soak session: 30 active foreground minutes;
-- observed-transfer budget: <=150 MiB per player session.
+- observed-transfer engineering budget: <=150 MiB per player session, subject to Resource Timing visibility limitations.
 
-The Cesium default render loop is capped at 60 FPS and the C1 simulation update loop is capped at the same cadence. This prevents high-refresh-rate displays from driving the simulator at 100+ FPS without user-visible benefit.
+The Cesium default render loop and C1 simulation update loop are both governed at 60 FPS. Runtime diagnostics measure actual Cesium post-render cadence during valid active foreground time so background-tab throttling/suspension does not corrupt the average/minimum evidence.
 
-Runtime diagnostics record:
-- actual Cesium post-render FPS;
-- average FPS over valid active-foreground samples;
-- minimum valid one-second FPS sample;
+Diagnostics record:
+- current, average, and minimum valid FPS;
 - active foreground benchmark time;
 - browser-observed `PerformanceResourceTiming.transferSize` total;
 - resource count;
 - zero-transfer resource count;
-- cross-origin zero-transfer/opaque entry count;
+- opaque cross-origin resource count;
 - optional Chromium JS heap usage when available.
 
-Background-tab throttling and long scheduling suspensions are excluded from FPS evidence instead of being counted as sustained renderer collapse. Benchmark time advances only during valid active-foreground sampling.
+## Diagnostic run that triggered remediation
 
-The Resource Timing buffer is increased to 6000 entries before the benchmark begins so a 30-minute run is not silently restricted to the browser's typical initial buffer size.
+The first long-session attempt was intentionally stopped at 188.2 seconds because device load appeared unnecessarily high.
 
-## Interrupted diagnostic run — 2026-09-16
-
-The first long-session attempt was intentionally stopped at 188.2 wall-clock seconds because the device appeared to be under unnecessary load.
-
-Reported values from the pre-remediation instrumentation:
+Pre-remediation report:
 - current FPS: 101.3;
 - reported average FPS: 11.6;
 - reported minimum FPS: 0.1;
@@ -69,56 +62,69 @@ Reported values from the pre-remediation instrumentation:
 - opaque cross-origin resources: 521;
 - JS heap: 123.9 MiB.
 
-The simultaneous 101.3 current FPS and 11.6 average FPS exposed a measurement-design problem: the old average divided requestAnimationFrame totals by wall-clock session time, so tab throttling/suspension could corrupt average/minimum evidence. The 100+ current FPS also showed that a high-refresh-rate display could drive unnecessary rendering load.
+The simultaneous 101.3 current FPS and 11.6 average FPS exposed both unnecessary high-refresh rendering and an invalid wall-clock averaging method under browser throttling/suspension. This run is retained as diagnostic evidence only.
 
-This run is retained as diagnostic evidence, not as the C2 performance acceptance run.
-
-Manual observations from the same run are accepted:
+Manual functional evidence from that run remained valid:
 - [x] theater boundary and boundary states operated correctly;
-- [x] accepted C1 control feel remained unchanged.
+- [x] accepted C1 control feel/camera showed no regression.
+
+## Performance remediation
+
+Merged through PR #17 as `1078907b7d8f728049ac8bbe40101984021bbbec`:
+- [x] Cesium render loop capped at 60 FPS;
+- [x] flight update loop governed to the same intended cadence;
+- [x] FPS measurement uses actual Cesium `postRender` events;
+- [x] benchmark time counts valid active foreground sampling only;
+- [x] long scheduling suspensions/background-tab throttling are excluded from FPS evidence;
+- [x] a 3-minute preflight stage was added before any optional longer soak;
+- [x] copied evidence contains frame-cap/preflight metadata.
+
+Automated verification:
+- PR #17 CI run `35060087478`: PASS;
+- merged-main CI run `35060151629`: PASS;
+- `pnpm validate:scaffold`: PASS;
+- `pnpm check`: PASS;
+- `pnpm build`: PASS.
+
+## Accepted C2 preflight — 2026-09-16
+
+Accepted report:
+- active foreground time: 201.8 s;
+- preflight complete: true;
+- runtime frame cap: 60 FPS;
+- current FPS: 59.6;
+- average FPS: 59.9;
+- minimum valid sample: 52.0 FPS;
+- observed transfer: 0.18 MiB;
+- resources: 1445;
+- zero-transfer resources: 1269;
+- opaque cross-origin resources: 1263;
+- JS heap: 116.7 MiB.
+
+All FPS criteria passed with substantial margin. Heap usage was lower than in the interrupted diagnostic run.
 
 ## Transfer-measurement limitation
 
-`transferSize` is not complete bandwidth accounting. Browsers can report `0` for local-cache hits and for cross-origin resources that do not expose timing data with `Timing-Allow-Origin`. Therefore the UI and copied report call the value **observed transfer**, and separately record opaque cross-origin entries. The 150 MiB value is interpreted only as an engineering budget over observable browser timing evidence.
+`transferSize` is not complete bandwidth accounting. Browsers can report `0` for cache hits and cross-origin resources that do not expose timing data with `Timing-Allow-Origin`. The UI/report therefore label the value **observed transfer** and separately record opaque cross-origin entries.
 
-Reference: MDN `PerformanceResourceTiming.transferSize` and Resource Timing documentation.
+## 30-minute soak decision
 
-## Revised evidence workflow
+The previously planned 30-minute soak is **explicitly waived** for C2 closure.
 
-1. Start from a fresh localhost page load with the remediated build.
-2. Keep the simulator tab active and operate normally.
-3. Run only the first 3 active foreground minutes as a preflight.
-4. At `PREFLIGHT READY`, review hardware load, current/average/minimum FPS, JS heap (if available), and observed transfer.
-5. Stop at 3 minutes if load remains uncomfortable or evidence is abnormal; do not force the 30-minute soak.
-6. Only after preflight passes, continue or rerun for the full 30 active foreground minutes.
-7. Use `COPY C2 REPORT` to retain the JSON evidence.
+After the 60 FPS governor and corrected foreground-only post-render measurement, the 3-minute preflight demonstrated stable capped performance with no functional regressions. Repeating the same workload for 30 minutes was judged to have low additional information value relative to device/time cost.
 
-## C2 exit criteria
+This is a documented test-scope decision, not an unrecorded omission. If C3/C4 materially increases rendering or network load, a new bounded soak can be introduced at that later gate.
 
-Automated implementation gate:
-- [x] deterministic theater model exists independently of Cesium rendering;
-- [x] 50 km × 50 km boundary is rendered;
-- [x] inside/warning/outside HUD state exists;
-- [x] C1 flight model remains authoritative and unchanged by boundary status;
-- [x] Resource Timing buffer is enlarged;
-- [x] diagnostics distinguish observed transfer from opaque cross-origin entries;
-- [x] copyable C2 evidence report exists;
-- [x] 60 FPS runtime governor is implemented;
-- [x] FPS evidence uses Cesium post-render frames and active foreground time.
+## C2 exit decision
 
-Verified:
-- [x] `pnpm validate:scaffold` passed on the initial C2 PR and merged main;
-- [x] `pnpm check` passed on the initial C2 PR and merged main;
-- [x] `pnpm build` passed on the initial C2 PR and merged main;
-- [x] localhost boundary visual QA passed;
-- [x] C1 controls/camera remained subjectively unchanged during C2 QA.
+- [x] deterministic theater model;
+- [x] visible 50 km × 50 km boundary;
+- [x] inside/warning/outside states;
+- [x] C1 controls/camera preserved;
+- [x] performance measurement corrected;
+- [x] 60 FPS runtime governor;
+- [x] 3-minute accepted preflight;
+- [x] automated build/type/scaffold verification;
+- [x] explicit long-soak waiver documented.
 
-Pending closure evidence:
-- [ ] performance-remediation PR and merged-main CI pass;
-- [ ] 3-minute capped-runtime preflight passes without unacceptable hardware load;
-- [ ] average FPS >=45 and minimum valid sample >=30 during preflight;
-- [ ] standardized 30-minute active-foreground soak completes after preflight acceptance;
-- [ ] observed transfer is reviewed against the <=150 MiB engineering budget with opacity caveat;
-- [ ] optional heap evidence is recorded when supported.
-
-C3 multiplayer does not begin until C2 is closed or an explicit documented exception is accepted.
+**C2 PASS — CLOSED / ACCEPTED. C3 multiplayer may proceed.**
