@@ -1,4 +1,14 @@
+import { AIRCRAFT_CATALOG, isAircraftId } from "../shared/aircraft";
 import {
+  MATCHMAKING_ASSIGNMENT_REVEAL_MS,
+  MATCHMAKING_COUNTDOWN_MS,
+  MATCHMAKING_PATH,
+  parseClientMatchmakingMessage,
+  type ServerMatchmakingMessage,
+  type SpawnSide,
+} from "../shared/matchmaking";
+import {
+  generateRoomCode,
   isValidRoomCode,
   MAX_ROOM_PLAYERS,
   parseClientRoomMessage,
@@ -35,11 +45,19 @@ interface Env {
     fetch(request: Request): Promise<Response>;
   };
   ROOMS: DurableObjectNamespace;
+  MATCHMAKER: DurableObjectNamespace;
 }
 
 type SocketAttachment = Readonly<{
   playerId: string;
   slot: 1 | 2;
+}>;
+
+type MatchmakingAttachment = Readonly<{
+  clientId: string;
+  state: "connected" | "waiting" | "matched" | "cancelled";
+  queuedAtMs: number | null;
+  fixedAircraftId: string | null;
 }>;
 
 const ROOM_SOCKET_ROUTE = /^\/api\/rooms\/([ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6})\/ws$/;
@@ -54,7 +72,8 @@ const json = (body: unknown, init: ResponseInit = {}) => {
   });
 };
 
-const encode = (message: ServerRoomMessage) => JSON.stringify(message);
+const encodeRoom = (message: ServerRoomMessage) => JSON.stringify(message);
+const encodeMatchmaking = (message: ServerMatchmakingMessage) => JSON.stringify(message);
 
 function attachmentOf(socket: HibernatableWebSocket): SocketAttachment | null {
   const value = socket.deserializeAttachment();
@@ -71,6 +90,167 @@ function attachmentOf(socket: HibernatableWebSocket): SocketAttachment | null {
   return { playerId: value.playerId, slot: value.slot };
 }
 
+function matchmakingAttachmentOf(socket: HibernatableWebSocket): MatchmakingAttachment | null {
+  const value = socket.deserializeAttachment();
+  if (
+    typeof value !== "object"
+    || value === null
+    || !("clientId" in value)
+    || !("state" in value)
+    || !("queuedAtMs" in value)
+    || !("fixedAircraftId" in value)
+    || typeof value.clientId !== "string"
+    || !["connected", "waiting", "matched", "cancelled"].includes(String(value.state))
+    || (value.queuedAtMs !== null && typeof value.queuedAtMs !== "number")
+    || (value.fixedAircraftId !== null && !isAircraftId(value.fixedAircraftId))
+  ) {
+    return null;
+  }
+  return value as MatchmakingAttachment;
+}
+
+function randomIndex(maxExclusive: number) {
+  const values = new Uint32Array(1);
+  crypto.getRandomValues(values);
+  return values[0] % maxExclusive;
+}
+
+function assignedAircraftId(fixedAircraftId: string | null) {
+  if (fixedAircraftId && isAircraftId(fixedAircraftId)) return fixedAircraftId;
+  return AIRCRAFT_CATALOG[randomIndex(AIRCRAFT_CATALOG.length)].aircraftId;
+}
+
+export class RankedMatchmaker {
+  constructor(private readonly ctx: DurableObjectState, private readonly env: Env) {
+    void env;
+  }
+
+  private send(socket: HibernatableWebSocket, message: ServerMatchmakingMessage) {
+    if (socket.readyState !== WebSocket.OPEN) return;
+    try {
+      socket.send(encodeMatchmaking(message));
+    } catch {
+      // The queue client may disappear between selection and send.
+    }
+  }
+
+  private tryMatch() {
+    const waiting = this.ctx.getWebSockets()
+      .filter((socket) => socket.readyState === WebSocket.OPEN)
+      .map((socket) => ({ socket, attachment: matchmakingAttachmentOf(socket) }))
+      .filter((entry): entry is { socket: HibernatableWebSocket; attachment: MatchmakingAttachment } =>
+        entry.attachment !== null && entry.attachment.state === "waiting")
+      .sort((a, b) => (a.attachment.queuedAtMs ?? 0) - (b.attachment.queuedAtMs ?? 0));
+
+    while (waiting.length >= 2) {
+      const first = waiting.shift();
+      const second = waiting.shift();
+      if (!first || !second) return;
+
+      const matchedAtMs = Date.now();
+      const assignmentEndsAtMs = matchedAtMs + MATCHMAKING_ASSIGNMENT_REVEAL_MS;
+      const activeAtMs = assignmentEndsAtMs + MATCHMAKING_COUNTDOWN_MS;
+      const matchId = crypto.randomUUID();
+      const roomCode = generateRoomCode();
+      const firstAircraftId = assignedAircraftId(first.attachment.fixedAircraftId);
+      const secondAircraftId = assignedAircraftId(second.attachment.fixedAircraftId);
+      const firstSide: SpawnSide = randomIndex(2) === 0 ? "left" : "right";
+      const secondSide: SpawnSide = firstSide === "left" ? "right" : "left";
+
+      first.socket.serializeAttachment({ ...first.attachment, state: "matched" });
+      second.socket.serializeAttachment({ ...second.attachment, state: "matched" });
+
+      this.send(first.socket, {
+        type: "match_found",
+        assignment: {
+          matchId,
+          roomCode,
+          aircraftId: firstAircraftId,
+          peerAircraftId: secondAircraftId,
+          spawnSide: firstSide,
+          assignmentEndsAtMs,
+          activeAtMs,
+        },
+      });
+      this.send(second.socket, {
+        type: "match_found",
+        assignment: {
+          matchId,
+          roomCode,
+          aircraftId: secondAircraftId,
+          peerAircraftId: firstAircraftId,
+          spawnSide: secondSide,
+          assignmentEndsAtMs,
+          activeAtMs,
+        },
+      });
+    }
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      return json({ error: "websocket_required" }, { status: 426 });
+    }
+
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+    const attachment: MatchmakingAttachment = {
+      clientId: crypto.randomUUID(),
+      state: "connected",
+      queuedAtMs: null,
+      fixedAircraftId: null,
+    };
+    server.serializeAttachment(attachment);
+    this.ctx.acceptWebSocket(server);
+
+    const responseInit: ResponseInit & { webSocket: WebSocket } = {
+      status: 101,
+      webSocket: client,
+    };
+    return new Response(null, responseInit);
+  }
+
+  webSocketMessage(socket: HibernatableWebSocket, message: string | ArrayBuffer) {
+    if (typeof message !== "string") {
+      this.send(socket, { type: "error", code: "binary_unsupported", message: "Only bounded JSON text messages are accepted." });
+      return;
+    }
+
+    const parsed = parseClientMatchmakingMessage(message);
+    const attachment = matchmakingAttachmentOf(socket);
+    if (!parsed || !attachment) {
+      this.send(socket, { type: "error", code: "invalid_message", message: "Matchmaking request failed validation." });
+      return;
+    }
+
+    if (parsed.type === "cancel") {
+      socket.serializeAttachment({ ...attachment, state: "cancelled" });
+      socket.close(1000, "queue cancelled");
+      return;
+    }
+
+    if (attachment.state === "matched") {
+      this.send(socket, { type: "error", code: "already_matched", message: "This queue connection already has a match." });
+      return;
+    }
+
+    const queuedAtMs = Date.now();
+    const nextAttachment: MatchmakingAttachment = {
+      ...attachment,
+      state: "waiting",
+      queuedAtMs,
+      fixedAircraftId: parsed.fixedAircraftId,
+    };
+    socket.serializeAttachment(nextAttachment);
+    this.send(socket, { type: "queued", queuedAtMs });
+    this.tryMatch();
+  }
+
+  webSocketClose() {}
+  webSocketError() {}
+}
+
 export class MultiplayerRoom {
   constructor(private readonly ctx: DurableObjectState, private readonly env: Env) {
     void env;
@@ -85,7 +265,7 @@ export class MultiplayerRoom {
   private send(socket: HibernatableWebSocket, message: ServerRoomMessage) {
     if (socket.readyState !== WebSocket.OPEN) return;
     try {
-      socket.send(encode(message));
+      socket.send(encodeRoom(message));
     } catch {
       // A peer may disappear between readyState inspection and send.
     }
@@ -203,9 +383,17 @@ export default {
         ok: true,
         stage: "C0_FOUNDATION",
         service: "cas-flight-simulator",
-        features: { multiplayer: "C3_FOUNDATION" },
+        features: {
+          multiplayer: "C3_FOUNDATION",
+          matchmaking: "C4B_FOUNDATION",
+        },
         timestamp: new Date().toISOString(),
       });
+    }
+
+    if (url.pathname === MATCHMAKING_PATH) {
+      const id = env.MATCHMAKER.idFromName("ranked-global-v1");
+      return env.MATCHMAKER.get(id).fetch(request);
     }
 
     const roomMatch = url.pathname.match(ROOM_SOCKET_ROUTE);
