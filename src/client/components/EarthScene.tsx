@@ -34,10 +34,11 @@ const CONTROLLED_KEYS = new Set([
 const keyAxis = (keys: Set<string>, positive: string, negative: string) =>
   (keys.has(positive) ? 1 : 0) - (keys.has(negative) ? 1 : 0);
 
-// FlightState uses conventional navigation headings (0° = north, 90° = east).
-// Cesium HPR is east-referenced, so convert before orienting the entity.
+// FlightState uses navigation headings: 0° = north, 90° = east.
+// In Cesium's local ENU frame, +X points east. HPR heading rotates about -Z,
+// so north is -90° and east is 0°. Therefore: Cesium HPR = nav heading - 90°.
 const navigationHeadingToCesiumHprRadians = (headingDeg: number) =>
-  CesiumMath.toRadians(90 - headingDeg);
+  CesiumMath.toRadians(headingDeg - 90);
 
 export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTelemetry) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
