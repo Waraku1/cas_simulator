@@ -1,6 +1,6 @@
 # C1 — Flight Vertical Slice
 
-Status: C1.4 BODY-AXIS ATTITUDE IMPLEMENTED / LOCAL RE-VERIFY PENDING
+Status: C1.5 CONTROL RESPONSE DYNAMICS IMPLEMENTED / LOCAL RE-VERIFY PENDING
 
 ## Objective
 
@@ -10,17 +10,17 @@ The aircraft is fictional and generic. C1 remains a kinematic game-flight model 
 
 ## Canonical flight state
 
-C1.4 changes attitude representation fundamentally.
-
 Canonical state:
 - latitude / longitude;
 - altitude;
 - normalized orientation quaternion relative to local ENU;
+- pitch angular velocity;
+- roll angular velocity;
 - speed;
 - throttle;
 - vertical speed.
 
-`heading`, `pitch`, and `bank` are now telemetry derived from the quaternion for HUD display. They are not independently integrated control-state variables.
+`heading`, `pitch`, and `bank` are telemetry derived from the quaternion for HUD display. They are not independently integrated control-state variables.
 
 Body axes:
 - `+X = forward`;
@@ -34,8 +34,8 @@ Local geographic axes:
 
 ## Controls
 
-- `W` / `S`: pitch-rate input about the aircraft's own lateral axis;
-- `A` / `D`: roll-rate input about the aircraft's own forward axis;
+- `W` / `S`: pitch command about the aircraft's own lateral axis;
+- `A` / `D`: roll command about the aircraft's own forward axis;
 - `Q` / `E`: experimental direct-yaw input for C1 testing only;
 - `ArrowUp` / `ArrowDown`: throttle.
 
@@ -47,89 +47,110 @@ Pitch and roll are intrinsic aircraft-body rotations.
 
 - Pitch has no earth-relative angle clamp.
 - Roll/bank has no angle clamp.
-- Roll no longer auto-recenters when `A` / `D` are released.
 - Orientation is normalized as a quaternion after every input update, so continuous loops and rolls remain numerically stable.
 - W/S always rotates about the aircraft's own lateral axis, not a fixed world-horizontal axis.
 - A/D always rotates about the aircraft's own forward axis.
 
-This means the effect of pitch input depends on bank attitude. At approximately 0° bank, W/S primarily changes nose elevation. At approximately 90° bank, the aircraft lateral axis is approximately vertical relative to the Earth, so W/S primarily changes horizontal travel direction. This is the intended C1.4 behavior.
+This means the effect of pitch input depends on bank attitude. At approximately 0° bank, W/S primarily changes nose elevation. At approximately 90° bank, the aircraft lateral axis is approximately vertical relative to the Earth, so W/S primarily changes horizontal travel direction.
 
-C1.4 intentionally removes the earlier synthetic `bankTurn` term. Travel direction is now derived directly from the aircraft's quaternion forward vector; turns occur because the aircraft attitude itself changes.
+Travel direction is derived directly from the aircraft's quaternion forward vector; no synthetic bank-turn term exists.
 
-`Q/E` direct yaw remains temporary test instrumentation. Mandatory removal before final release is tracked separately in Issue #7.
+## C1.5 control-response dynamics
+
+C1.5 changes W/S and A/D from instantaneous angular-rate commands to accelerated angular response.
+
+Pitch:
+- maximum pitch rate: 34 deg/s;
+- acceleration while W/S is held: 70 deg/s²;
+- release deceleration: 180 deg/s².
+
+Roll:
+- maximum roll rate: 72 deg/s;
+- acceleration while A/D is held: 160 deg/s²;
+- release deceleration: 360 deg/s².
+
+The maximum rates intentionally preserve the established C1.4 control sensitivity. The new acceleration stage changes only how quickly those rates are reached.
+
+Operationally:
+1. pressing a pitch/roll key starts with a low angular velocity;
+2. continuing to hold the key increases angular velocity toward its bounded rate;
+3. releasing the key does not set angular velocity to zero instantly;
+4. a stronger release deceleration rapidly and continuously brings angular velocity to zero.
+
+This creates progressive control onset and short control overrun without introducing a real-aircraft aerodynamic model.
+
+### Near-level capture
+
+Small residual attitude is automatically returned to level only under a narrow capture condition.
+
+For pitch and bank independently:
+- the displayed angle must be within ±3°;
+- the relevant input must be released;
+- the relevant angular velocity must already be at or below 1.5 deg/s.
+
+When those conditions hold, the remaining angle is driven toward exactly 0° at up to 24 deg/s.
+
+Outside the ±3° capture region, C1.5 applies no auto-level authority. Full loops and continuous rolls therefore remain available exactly as in C1.4.
 
 ## Position integration
 
 The quaternion-derived local body-forward vector is also the velocity direction.
 
 Each update:
-1. apply body-axis pitch/roll/yaw-test rotations to the orientation quaternion;
-2. normalize the quaternion;
-3. derive the body forward vector in local ENU coordinates;
-4. advance east/north position from the forward vector's horizontal components;
-5. advance altitude from the forward vector's vertical component;
-6. apply the C1 altitude bounds.
+1. update pitch and roll angular velocities from the current input;
+2. apply body-axis pitch/roll/yaw-test rotations to the orientation quaternion;
+3. normalize the quaternion;
+4. apply near-level pitch/bank capture only when its narrow conditions are met;
+5. derive the body forward vector in local ENU coordinates;
+6. advance east/north position and altitude from that forward vector;
+7. apply the C1 altitude bounds.
 
 Altitude bounds remain independent of terrain collision during C1. Terrain/collision behavior belongs to later gates.
 
 ## Rendering alignment
 
-The flight model exports its canonical local body frame directly. The Cesium renderer converts that frame from local ENU to ECEF and uses the same frame for:
-- aircraft quaternion orientation;
-- asymmetric nose marker;
-- chase-camera position;
-- camera look direction.
+The flight model exports its canonical local body frame directly. The Cesium renderer converts that frame from local ENU to ECEF and uses the same frame for aircraft orientation, the asymmetric nose marker, chase-camera position, and camera look direction.
 
 Rendering therefore does not independently reconstruct heading/pitch/bank.
 
-This preserves the C1.3 correction that made aircraft nose, camera, and actual travel direction share one reference-frame contract.
-
 ## HUD telemetry
 
-The HUD shows:
-- speed;
-- altitude;
-- heading;
-- earth-relative pitch display;
-- wrapped bank display;
-- vertical speed;
-- throttle;
-- controls;
-- runtime diagnostics.
+The HUD shows speed, altitude, heading, earth-relative pitch display, wrapped bank display, vertical speed, throttle, controls, and runtime diagnostics.
 
 Because Euler-style heading/pitch/bank displays are derived from a full quaternion, conventional display ambiguity near vertical attitudes is expected. It does not constrain the actual orientation or controls.
 
-`Q/E` is labeled `YAW TEST` so the temporary direct-yaw path remains visibly experimental.
+`Q/E` is labeled `YAW TEST`; mandatory removal before final release remains tracked by Issue #7.
 
 ## Verification evidence
 
-Previous C1/C1.1/C1.2/C1.3 revisions passed GitHub Actions. C1.4 PR #9 and merged-main verification also pass:
+Previous C1 revisions through C1.4 passed GitHub Actions with:
 - `pnpm install --frozen-lockfile`: PASS;
 - `pnpm validate:scaffold`: PASS;
 - `pnpm check`: PASS;
 - `pnpm build`: PASS.
 
-C1.4 merged to main as `5a13d67a448592f3914d4b9e5082b1e8cc3712bf`; main verification run `35055910191` completed successfully.
+Local QA on 2026-09-16 confirmed that the C1.4 body-axis attitude model met the required baseline: corrected travel direction, unrestricted pitch and roll, bank-dependent pitch behavior, readable HUD, and acceptable control sensitivity.
 
-Local QA on 2026-09-16 previously confirmed Cesium Earth/HUD rendering, corrected travel direction, readable diagnostics, and approximately 97 FPS before C1.4.
-
-## C1.4 acceptance
+## C1.5 acceptance
 
 Automated:
-- [x] `pnpm validate:scaffold` exits 0.
-- [x] `pnpm check` exits 0.
-- [x] `pnpm build` exits 0.
-- [x] Orientation is normalized and finite by construction.
-- [x] No pitch or bank angle clamp exists in the canonical attitude state.
-- [x] No bank auto-recenter exists.
-- [x] No synthetic bank-turn term remains in the canonical position integration.
+- [ ] `pnpm validate:scaffold` exits 0.
+- [ ] `pnpm check` exits 0.
+- [ ] `pnpm build` exits 0.
+- [x] Orientation remains normalized and finite by construction.
+- [x] Pitch/roll angle authority remains unrestricted.
+- [x] Pitch/roll angular velocity now accelerates under sustained input.
+- [x] Pitch/roll angular velocity decelerates continuously after key release.
+- [x] Near-level capture is limited to ±3° and inactive during meaningful angular motion.
 
 Manual localhost re-verification:
-- [ ] A/D can roll continuously through 90°, 180°, and 360° without clamping or automatic return to level.
-- [ ] At near-level bank, W/S primarily changes climb/dive direction.
-- [ ] At approximately 90° bank, W/S primarily changes horizontal travel direction.
-- [ ] Aircraft nose, camera, and actual motion remain aligned through combined pitch/roll inputs.
-- [ ] `Q/E` remains visibly marked `YAW TEST`.
+- [ ] W/S begins gently and builds toward the previous useful pitch sensitivity while held.
+- [ ] A/D begins gently and builds toward the previous useful roll sensitivity while held.
+- [ ] Releasing W/S or A/D produces a short, smooth deceleration rather than an instantaneous stop.
+- [ ] Residual pitch within ±3° returns to 0° after pitch motion settles.
+- [ ] Residual bank within ±3° returns to 0° after roll motion settles.
+- [ ] Attitudes outside ±3° are not pulled toward level.
+- [ ] Full loops and continuous rolls remain available.
 - [ ] Runtime FPS remains acceptable.
 
 ## Deferred

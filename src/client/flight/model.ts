@@ -26,6 +26,8 @@ export type FlightState = Readonly<{
   longitudeDeg: number;
   altitudeM: number;
   orientation: QuaternionState;
+  pitchRateDegS: number;
+  rollRateDegS: number;
   speedMps: number;
   throttle: number;
   verticalSpeedMps: number;
@@ -47,8 +49,19 @@ const MAX_SPEED_MPS = 230;
 const MIN_ALTITUDE_M = 450;
 const MAX_ALTITUDE_M = 9_000;
 const SPEED_RESPONSE_MPS2 = 42;
-const PITCH_RATE_DEG_S = 34;
-const ROLL_RATE_DEG_S = 72;
+
+// C1.5 control-response contract. Angle authority remains unlimited; only
+// angular velocity is bounded so sustained input stays controllable.
+const MAX_PITCH_RATE_DEG_S = 34;
+const MAX_ROLL_RATE_DEG_S = 72;
+const PITCH_ACCEL_DEG_S2 = 70;
+const ROLL_ACCEL_DEG_S2 = 160;
+const PITCH_RELEASE_DECEL_DEG_S2 = 180;
+const ROLL_RELEASE_DECEL_DEG_S2 = 360;
+const LEVEL_CAPTURE_DEG = 3;
+const LEVEL_CAPTURE_RATE_DEG_S = 24;
+const LEVEL_CAPTURE_RATE_THRESHOLD_DEG_S = 1.5;
+
 const YAW_TEST_RATE_DEG_S = 12;
 const THROTTLE_RATE_PER_S = 0.42;
 const EPSILON = 1e-9;
@@ -151,16 +164,20 @@ function orientationFromNavigationAttitude(
   return multiplyQuaternion(multiplyQuaternion(yaw, pitch), roll);
 }
 
-export function getLocalBodyFrame(state: FlightState): LocalBodyFrame {
+function bodyFrameFromOrientation(orientation: QuaternionState): LocalBodyFrame {
   return {
-    forward: normalizeVec(rotateVector(state.orientation, [1, 0, 0])),
-    left: normalizeVec(rotateVector(state.orientation, [0, 1, 0])),
-    up: normalizeVec(rotateVector(state.orientation, [0, 0, 1])),
+    forward: normalizeVec(rotateVector(orientation, [1, 0, 0])),
+    left: normalizeVec(rotateVector(orientation, [0, 1, 0])),
+    up: normalizeVec(rotateVector(orientation, [0, 0, 1])),
   };
 }
 
-function attitudeTelemetry(state: FlightState) {
-  const frame = getLocalBodyFrame(state);
+export function getLocalBodyFrame(state: FlightState): LocalBodyFrame {
+  return bodyFrameFromOrientation(state.orientation);
+}
+
+function attitudeFromOrientation(orientation: QuaternionState) {
+  const frame = bodyFrameFromOrientation(orientation);
   const forward = frame.forward;
   const horizontalMagnitude = Math.hypot(forward[0], forward[1]);
 
@@ -184,12 +201,34 @@ function attitudeTelemetry(state: FlightState) {
   return { headingDeg, pitchDeg, bankDeg };
 }
 
+function updateAngularRate(
+  previousRateDegS: number,
+  input: number,
+  maxRateDegS: number,
+  accelerationDegS2: number,
+  releaseDecelerationDegS2: number,
+  dt: number,
+) {
+  if (Math.abs(input) > 0.01) {
+    return approach(previousRateDegS, input * maxRateDegS, accelerationDegS2 * dt);
+  }
+  return approach(previousRateDegS, 0, releaseDecelerationDegS2 * dt);
+}
+
+function correctionTowardZero(angleDeg: number, dt: number) {
+  if (Math.abs(angleDeg) > LEVEL_CAPTURE_DEG) return 0;
+  const step = Math.min(Math.abs(angleDeg), LEVEL_CAPTURE_RATE_DEG_S * dt);
+  return -Math.sign(angleDeg) * step;
+}
+
 export function createInitialFlightState(): FlightState {
   return {
     latitudeDeg: THEATER.centerLatitudeDeg,
     longitudeDeg: THEATER.centerLongitudeDeg,
     altitudeM: 5_400,
     orientation: orientationFromNavigationAttitude(35, 0, 0),
+    pitchRateDegS: 0,
+    rollRateDegS: 0,
     speedMps: 155,
     throttle: 0.56,
     verticalSpeedMps: 0,
@@ -211,17 +250,36 @@ export function integrateFlightState(
   const targetSpeedMps = MIN_SPEED_MPS + (MAX_SPEED_MPS - MIN_SPEED_MPS) * throttle;
   const speedMps = approach(previous.speedMps, targetSpeedMps, SPEED_RESPONSE_MPS2 * dt);
 
+  // Keyboard input now commands angular acceleration rather than instantaneous
+  // angular velocity. Holding a key builds pitch/roll rate; releasing it applies
+  // a stronger braking acceleration so the rate falls rapidly but continuously.
+  const pitchRateDegS = updateAngularRate(
+    previous.pitchRateDegS,
+    pitchInput,
+    MAX_PITCH_RATE_DEG_S,
+    PITCH_ACCEL_DEG_S2,
+    PITCH_RELEASE_DECEL_DEG_S2,
+    dt,
+  );
+  const rollRateDegS = updateAngularRate(
+    previous.rollRateDegS,
+    rollInput,
+    MAX_ROLL_RATE_DEG_S,
+    ROLL_ACCEL_DEG_S2,
+    ROLL_RELEASE_DECEL_DEG_S2,
+    dt,
+  );
+
   // Apply rotations in body coordinates. Because orientation maps body -> local
-  // ENU, post-multiplication makes W/S act about the aircraft's own lateral
-  // axis and A/D about its own forward axis. At 90° bank, pitch input therefore
-  // changes horizontal travel direction rather than earth-relative elevation.
+  // ENU, post-multiplication keeps W/S on the aircraft lateral axis and A/D on
+  // its forward axis at every bank attitude.
   const pitchDelta = axisAngleQuaternion(
     [0, 1, 0],
-    radians(-pitchInput * PITCH_RATE_DEG_S * dt),
+    radians(-pitchRateDegS * dt),
   );
   const rollDelta = axisAngleQuaternion(
     [1, 0, 0],
-    radians(rollInput * ROLL_RATE_DEG_S * dt),
+    radians(rollRateDegS * dt),
   );
   // Temporary C1 instrumentation only. E is positive input but right-yaw is a
   // negative body-Z rotation with this +Y-left body frame.
@@ -230,10 +288,42 @@ export function integrateFlightState(
     radians(-yawInput * YAW_TEST_RATE_DEG_S * dt),
   );
 
-  const orientation = multiplyQuaternion(
+  let orientation = multiplyQuaternion(
     multiplyQuaternion(multiplyQuaternion(previous.orientation, pitchDelta), rollDelta),
     yawTestDelta,
   );
+
+  // Near level, and only after the commanded angular rate has essentially
+  // stopped, capture small pitch/bank errors back to exactly 0°. Outside ±3°
+  // there is no auto-level authority, preserving the unrestricted attitude
+  // envelope introduced in C1.4.
+  let attitude = attitudeFromOrientation(orientation);
+  if (
+    Math.abs(pitchInput) <= 0.01
+    && Math.abs(pitchRateDegS) <= LEVEL_CAPTURE_RATE_THRESHOLD_DEG_S
+  ) {
+    const pitchCorrectionDeg = correctionTowardZero(attitude.pitchDeg, dt);
+    if (pitchCorrectionDeg !== 0) {
+      orientation = multiplyQuaternion(
+        orientation,
+        axisAngleQuaternion([0, 1, 0], radians(-pitchCorrectionDeg)),
+      );
+    }
+  }
+
+  attitude = attitudeFromOrientation(orientation);
+  if (
+    Math.abs(rollInput) <= 0.01
+    && Math.abs(rollRateDegS) <= LEVEL_CAPTURE_RATE_THRESHOLD_DEG_S
+  ) {
+    const bankCorrectionDeg = correctionTowardZero(attitude.bankDeg, dt);
+    if (bankCorrectionDeg !== 0) {
+      orientation = multiplyQuaternion(
+        orientation,
+        axisAngleQuaternion([1, 0, 0], radians(bankCorrectionDeg)),
+      );
+    }
+  }
 
   const forward = rotateVector(orientation, [1, 0, 0]);
   const rawVerticalSpeedMps = speedMps * forward[2];
@@ -253,6 +343,8 @@ export function integrateFlightState(
     longitudeDeg: wrapLongitude(degrees(longitudeRad)),
     altitudeM,
     orientation,
+    pitchRateDegS,
+    rollRateDegS,
     speedMps,
     throttle,
     verticalSpeedMps,
@@ -266,6 +358,8 @@ export function integrateFlightState(
     next.orientation.x,
     next.orientation.y,
     next.orientation.z,
+    next.pitchRateDegS,
+    next.rollRateDegS,
     next.speedMps,
     next.throttle,
     next.verticalSpeedMps,
@@ -275,7 +369,7 @@ export function integrateFlightState(
 }
 
 export function toFlightTelemetry(state: FlightState): FlightTelemetry {
-  const attitude = attitudeTelemetry(state);
+  const attitude = attitudeFromOrientation(state.orientation);
   return {
     speedKph: state.speedMps * 3.6,
     altitudeM: state.altitudeM,
