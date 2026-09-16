@@ -1,6 +1,6 @@
 # C3 — Multiplayer Foundation
 
-Status: **IMPLEMENTED + DEPLOYED / MANUAL TWO-BROWSER UI QA PENDING**
+Status: **IMPLEMENTED + DEPLOYED / SCHOOL LOCAL BROWSER QA PENDING**
 
 ## Objective
 
@@ -12,16 +12,15 @@ C3 is transport/presence only. It does not add C4 competition or scoring semanti
 
 - Private room code: 6 characters.
 - Alphabet excludes visually ambiguous characters.
-- One Cloudflare Durable Object instance per room code.
 - Maximum clients per room: 2.
 - No account/auth/database dependency in v1.
-- A full room rejects a third WebSocket before upgrade.
+- A full room rejects a third WebSocket before normal participation.
 
-## Worker / Durable Object architecture
+## Production Worker / Durable Object architecture
 
 Route: `/api/rooms/{ROOM}/ws`.
 
-The Worker maps the normalized room code to `ROOMS.idFromName(roomCode)` and forwards the upgrade request to that Durable Object.
+The production Worker maps the normalized room code to `ROOMS.idFromName(roomCode)` and forwards the upgrade request to that Durable Object.
 
 `MultiplayerRoom` uses Cloudflare's Hibernation WebSocket API. Each accepted socket stores a compact attachment containing the generated player ID and slot number. The room uses no periodic server timer: valid incoming pose snapshots are relayed directly to the peer.
 
@@ -29,7 +28,7 @@ The namespace is SQLite-backed through the `c3-v1` `new_sqlite_classes` migratio
 
 ## Protocol
 
-Canonical definitions live in `src/shared/multiplayer.ts` and are shared by browser and Worker builds.
+Canonical browser/production definitions live in `src/shared/multiplayer.ts`.
 
 Client -> room:
 - `pose` only.
@@ -50,19 +49,33 @@ Local aircraft simulation remains at the C2-governed 60 FPS cap. When connected,
 
 The compact room UI exposes create, join, leave, room code, connection state, and peer presence. Form controls are guarded so room-code input does not trigger flight controls.
 
-## School-network split
+## School-local transport compatibility
 
-The normal school development path remains client-only `pnpm dev` at `127.0.0.1:5173`. Because that path does not host the Worker API, multiplayer connection attempts may show a bounded backend-unavailable state without breaking flight/theater/diagnostics.
+The managed school Mac has two independent constraints:
 
-Human-visible two-browser verification is performed against the deployed Worker on an allowed network. School filtering is not bypassed.
+- public `workers.dev` is blocked by managed-network policy;
+- macOS 12.3 is below the current workerd runtime requirement, so Cloudflare Vite/Miniflare cannot start locally on that device.
+
+School mode therefore preserves the C3 browser-facing protocol but swaps only the local transport implementation:
+
+- Vite client: `127.0.0.1:5173`;
+- dependency-free Node relay: `127.0.0.1:8787`;
+- `vite.school.config.ts` proxies `/api/*` and WebSocket upgrades to the relay;
+- browser code continues using `/api/health` and `/api/rooms/{ROOM}/ws` without a school-specific client code path.
+
+The Node relay implements the bounded semantics required by C3 school use: room validation, two-player capacity, server identity/slot assignment, welcome/presence, pose validation/relay, and disconnect presence updates. It is not a replacement for the production Durable Object implementation and is not deployed publicly.
+
+`pnpm dev:school` starts the local relay and school Vite client together. `pnpm verify:school` first validates local C3 health, then connects two WebSocket clients, verifies presence, and verifies one peer-pose relay.
+
+This school path avoids both the blocked production hostname and unsupported local workerd binary without bypassing school network controls.
 
 ## Performance contract
 
 - local simulation/render cap remains 60 FPS;
 - network publish cadence: ~5 Hz per client;
 - no server simulation tick;
-- no server broadcast timer;
-- server relays only validated snapshots;
+- production room has no server broadcast timer;
+- school relay is event-driven and relays only validated snapshots;
 - C2 diagnostics remain active for regression comparison.
 
 ## Automated implementation evidence
@@ -77,7 +90,6 @@ C3 implementation merged through PR #27 as main commit `d57a6f60ae248d87bfe1bdcf
 - [x] client create/join/leave UI compiles.
 - [x] local ~5 Hz pose publication compiles.
 - [x] remote interpolation/rendering compiles.
-- [x] localhost backend-unavailable state is non-fatal.
 - [x] PR CI run `35061807978`: PASS.
 - [x] merged-main CI run `35061871273`: PASS.
 
@@ -90,18 +102,20 @@ Production deployment succeeded through GitHub Actions. Wrangler confirmed:
 - `/api/health` reports `features.multiplayer = C3_FOUNDATION`;
 - deployed Cloudflare version `ff2ad6f3-1e0f-47a5-980e-f9ea44626928`.
 
-An automated production WebSocket smoke test then connected two independent clients to the same generated room, verified 2-player presence, sent pose sequence `1` from client 1, and verified that client 2 received the relayed peer pose with matching server identity. Actions run `35062194182` passed.
+An automated production WebSocket smoke test connected two independent clients to the same generated room, verified 2-player presence, sent pose sequence `1` from client 1, and verified that client 2 received the relayed peer pose with matching server identity. Actions run `35062194182` passed.
 
 The smoke test is retained as `scripts/verify-production-multiplayer.mjs` and is part of the production deployment verification workflow.
 
 ## Remaining C3 closure evidence
 
-- [ ] Open the production UI in two browser contexts/devices on an allowed network.
-- [ ] Browser A creates a room and Browser B joins the same code.
+- [ ] On the managed school Mac, `pnpm dev:school` starts without workerd/macOS failure.
+- [ ] `curl http://127.0.0.1:5173/api/health` returns JSON with `features.multiplayer = C3_FOUNDATION` and the school-local runtime marker.
+- [ ] `pnpm verify:school` passes.
+- [ ] Two independent browser contexts create/join the same local room.
 - [ ] Both panels show connected/peer online.
 - [ ] Each browser visibly renders the peer aircraft.
-- [ ] Peer movement and orientation interpolation are subjectively usable/stable.
+- [ ] Peer movement/orientation interpolation is usable and stable.
 - [ ] Leave/rejoin behavior does not break the remaining client.
 - [ ] No obvious C1/C2 UI or performance regression.
 
-C3 remains OPEN only for this final human-visible two-browser interpolation/UI QA.
+C3 remains OPEN only for this final school-Mac human-visible multiplayer QA.
