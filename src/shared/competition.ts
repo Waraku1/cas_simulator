@@ -1,3 +1,4 @@
+import { isAircraftId } from "./aircraft";
 import type { MatchResultReason } from "./product";
 
 export const COMPETITION_MESSAGE_MAX_BYTES = 1_024;
@@ -86,8 +87,48 @@ const record = (value: unknown): value is Record<string, unknown> =>
 const finite = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
+const COMPETITION_PHASES = new Set<CompetitionPhase>([
+  "countdown",
+  "active",
+  "overtime",
+  "completed",
+  "no-contest",
+]);
+
+const ACTION_FEEDBACK_CODES = new Set<CompetitionActionFeedbackCode>([
+  "accepted",
+  "not_active",
+  "cooldown",
+  "peer_unavailable",
+  "pose_stale",
+  "outside_interaction",
+]);
+
+const RESULT_REASONS = new Set<MatchResultReason>([
+  "heart-points-depleted",
+  "regulation-heart-points",
+  "overtime-heart-points",
+  "overtime-draw",
+  "forfeit",
+  "infrastructure-failure",
+]);
+
 function byteLength(text: string) {
   return new TextEncoder().encode(text).byteLength;
+}
+
+function validParticipant(value: unknown): value is CompetitionParticipantSnapshot {
+  if (!record(value)) return false;
+  return (value.slot === 1 || value.slot === 2)
+    && isAircraftId(value.aircraftId)
+    && finite(value.heartPoints)
+    && value.heartPoints >= 0
+    && value.heartPoints <= 100
+    && typeof value.connected === "boolean"
+    && finite(value.nextActionAtMs)
+    && value.nextActionAtMs >= 0
+    && (value.disconnectDeadlineMs === null
+      || (finite(value.disconnectDeadlineMs) && value.disconnectDeadlineMs >= 0));
 }
 
 export function parseClientCompetitionMessage(text: string): ClientCompetitionMessage | null {
@@ -100,6 +141,61 @@ export function parseClientCompetitionMessage(text: string): ClientCompetitionMe
       return { type: "action", clientTimeMs: value.clientTimeMs };
     }
     return null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseServerCompetitionMessage(text: string): ServerCompetitionMessage | null {
+  if (byteLength(text) > COMPETITION_MESSAGE_MAX_BYTES * 4) return null;
+  try {
+    const value: unknown = JSON.parse(text);
+    if (!record(value) || typeof value.type !== "string") return null;
+
+    if (value.type === "action_feedback") {
+      if (
+        typeof value.accepted !== "boolean"
+        || typeof value.code !== "string"
+        || !ACTION_FEEDBACK_CODES.has(value.code as CompetitionActionFeedbackCode)
+        || !finite(value.nextActionAtMs)
+        || value.nextActionAtMs < 0
+      ) {
+        return null;
+      }
+      return value as ServerCompetitionMessage;
+    }
+
+    if (value.type !== "match_state" || !record(value.state)) return null;
+    const state = value.state;
+    if (
+      typeof state.matchId !== "string"
+      || state.matchId.length < 8
+      || typeof state.phase !== "string"
+      || !COMPETITION_PHASES.has(state.phase as CompetitionPhase)
+      || !finite(state.serverTimeMs)
+      || !finite(state.activeAtMs)
+      || !finite(state.regulationEndsAtMs)
+      || !finite(state.overtimeEndsAtMs)
+      || !Array.isArray(state.participants)
+      || state.participants.length !== 2
+      || !validParticipant(state.participants[0])
+      || !validParticipant(state.participants[1])
+    ) {
+      return null;
+    }
+
+    if (state.result !== null) {
+      if (
+        !record(state.result)
+        || (state.result.winnerSlot !== null && state.result.winnerSlot !== 1 && state.result.winnerSlot !== 2)
+        || typeof state.result.reason !== "string"
+        || !RESULT_REASONS.has(state.result.reason as MatchResultReason)
+      ) {
+        return null;
+      }
+    }
+
+    return value as ServerCompetitionMessage;
   } catch {
     return null;
   }
