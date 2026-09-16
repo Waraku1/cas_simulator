@@ -76,6 +76,25 @@ if (forfeit.result?.winnerSlot !== 1 || forfeit.result?.reason !== "forfeit") {
   throw new Error("disconnect grace forfeit failed");
 }
 
+state = baseState();
+state = markSchoolRankedConnected(state, 1, 10_001);
+if (advanceSchoolRankedRuntime(state, 29_999).result !== null) {
+  throw new Error("initial connection grace ended early");
+}
+const initialForfeit = advanceSchoolRankedRuntime(state, 30_000);
+if (initialForfeit.result?.winnerSlot !== 1 || initialForfeit.result?.reason !== "forfeit") {
+  throw new Error("initial missing participant did not forfeit after grace");
+}
+
+state = baseState();
+if (advanceSchoolRankedRuntime(state, 29_999).result !== null) {
+  throw new Error("dual initial connection grace ended early");
+}
+const initialNoContest = advanceSchoolRankedRuntime(state, 30_000);
+if (initialNoContest.phase !== "no-contest" || initialNoContest.result?.winnerSlot !== null || initialNoContest.result?.reason !== "infrastructure-failure") {
+  throw new Error("dual initial absence did not resolve NO CONTEST after grace");
+}
+
 console.log(JSON.stringify({
   ok: true,
   gate: "C4C_RUNTIME_CONTRACT",
@@ -83,4 +102,6 @@ console.log(JSON.stringify({
   overtimeFullDuration: "PASS",
   draw: "PASS",
   disconnectGrace20s: "PASS",
+  initialConnectionGrace20s: "PASS",
+  dualInitialAbsenceNoContest: "PASS",
 }, null, 2));
