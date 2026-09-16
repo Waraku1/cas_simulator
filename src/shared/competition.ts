@@ -42,7 +42,7 @@ export type CompetitionStateSnapshot = Readonly<{
   activeAtMs: number;
   regulationEndsAtMs: number;
   overtimeEndsAtMs: number;
-  participants: readonly [CompetitionParticipantSnapshot, CompetitionParticipantSnapshot];
+  participants: readonly CompetitionParticipantSnapshot[];
   result: CompetitionResultSnapshot | null;
 }>;
 
