@@ -1,12 +1,23 @@
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import aircraftCatalog from "../src/shared/aircraft-catalog.json" with { type: "json" };
+import {
+  advanceSchoolRankedRuntime,
+  createSchoolRankedRuntime,
+  forfeitSchoolRanked,
+  markSchoolRankedConnected,
+  markSchoolRankedDisconnected,
+  nextSchoolRankedDeadline,
+  resolveSchoolRankedAction,
+  schoolRankedSnapshot,
+} from "./school-ranked-runtime.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.SCHOOL_BACKEND_PORT ?? 8787);
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ROOM_CODE_PATTERN = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/;
 const ROOM_SOCKET_ROUTE = /^\/api\/rooms\/([ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6})\/ws$/;
+const RANKED_MATCH_SOCKET_ROUTE = /^\/api\/matches\/([0-9a-f-]{36})\/ws$/i;
 const MATCHMAKING_SOCKET_ROUTE = "/api/matchmaking/ws";
 const MAX_ROOM_PLAYERS = 2;
 const MAX_ROOM_MESSAGE_BYTES = 2_048;
@@ -19,6 +30,8 @@ const AIRCRAFT_IDS = new Set(aircraftCatalog.map((aircraft) => aircraft.aircraft
 const rooms = new Map();
 /** @type {Set<any>} */
 const matchmakingClients = new Set();
+/** @type {Map<string, {state: any, clients: Map<number, any>, timer: NodeJS.Timeout | null}>} */
+const rankedMatches = new Map();
 
 function writeJson(response, status, body) {
   const payload = JSON.stringify(body);
@@ -79,6 +92,42 @@ function broadcastPresence(roomCode) {
   for (const client of open) sendJson(client, message);
 }
 
+function broadcastRankedPresence(match) {
+  const open = [...match.clients.values()].filter((client) => !client.closed && !client.socket.destroyed);
+  const message = {
+    type: "presence",
+    playerCount: open.length,
+    peerConnected: open.length >= 2,
+  };
+  for (const client of open) sendJson(client, message);
+}
+
+function broadcastRankedState(match, nowMs = Date.now()) {
+  const message = { type: "match_state", state: schoolRankedSnapshot(match.state, nowMs) };
+  for (const client of match.clients.values()) sendJson(client, message);
+}
+
+function scheduleRankedMatch(match) {
+  if (match.timer) clearTimeout(match.timer);
+  match.timer = null;
+  const nowMs = Date.now();
+  const deadline = nextSchoolRankedDeadline(match.state, nowMs);
+  if (deadline === null) return;
+  match.timer = setTimeout(() => {
+    const tickNowMs = Date.now();
+    match.state = advanceSchoolRankedRuntime(match.state, tickNowMs);
+    broadcastRankedState(match, tickNowMs);
+    scheduleRankedMatch(match);
+  }, Math.max(0, deadline - nowMs));
+  match.timer.unref?.();
+}
+
+function updateRankedState(match, state, nowMs = Date.now(), broadcast = true) {
+  match.state = advanceSchoolRankedRuntime(state, nowMs);
+  scheduleRankedMatch(match);
+  if (broadcast) broadcastRankedState(match, nowMs);
+}
+
 function cleanupClient(client) {
   if (client.closed) return;
   client.closed = true;
@@ -90,6 +139,20 @@ function cleanupClient(client) {
       if (room.size === 0) rooms.delete(client.roomCode);
     }
     broadcastPresence(client.roomCode);
+    return;
+  }
+
+  if (client.kind === "ranked") {
+    const match = rankedMatches.get(client.matchId);
+    if (!match) return;
+    if (match.clients.get(client.slot) === client) {
+      match.clients.delete(client.slot);
+      if (!match.state.result) {
+        const nowMs = Date.now();
+        updateRankedState(match, markSchoolRankedDisconnected(match.state, client.slot, nowMs), nowMs);
+      }
+    }
+    broadcastRankedPresence(match);
     return;
   }
 
@@ -169,6 +232,75 @@ function handleRoomTextMessage(client, payload) {
   }
 }
 
+function handleRankedTextMessage(client, payload) {
+  let value;
+  try {
+    value = JSON.parse(payload.toString("utf8"));
+  } catch {
+    value = null;
+  }
+  if (typeof value !== "object" || value === null || typeof value.type !== "string") {
+    sendJson(client, { type: "error", code: "invalid_message", message: "Ranked match payload failed validation." });
+    return;
+  }
+
+  const match = rankedMatches.get(client.matchId);
+  if (!match) {
+    sendJson(client, { type: "error", code: "missing_match", message: "Match state is unavailable." });
+    return;
+  }
+  const nowMs = Date.now();
+  const advanced = advanceSchoolRankedRuntime(match.state, nowMs);
+  if (advanced !== match.state) updateRankedState(match, advanced, nowMs);
+
+  if (value.type === "pose" && validPoseSnapshot(value.pose)) {
+    client.latestPose = value.pose;
+    client.latestPoseReceivedAtMs = nowMs;
+    const peer = match.clients.get(client.slot === 1 ? 2 : 1);
+    if (peer) {
+      sendJson(peer, {
+        type: "peer_pose",
+        playerId: client.playerId,
+        serverTimeMs: nowMs,
+        pose: value.pose,
+      });
+    }
+    return;
+  }
+
+  if (value.type === "leave_match") {
+    updateRankedState(match, forfeitSchoolRanked(match.state, client.slot, nowMs), nowMs);
+    closeClient(client, 1000, "match forfeited");
+    return;
+  }
+
+  if (value.type === "action" && finite(value.clientTimeMs) && value.clientTimeMs >= 0) {
+    const peerSlot = client.slot === 1 ? 2 : 1;
+    const peer = match.clients.get(peerSlot);
+    const resolution = resolveSchoolRankedAction(
+      match.state,
+      client.slot,
+      nowMs,
+      client.latestPose && client.latestPoseReceivedAtMs !== null
+        ? { pose: client.latestPose, receivedAtMs: client.latestPoseReceivedAtMs }
+        : null,
+      peer?.latestPose && peer.latestPoseReceivedAtMs !== null
+        ? { pose: peer.latestPose, receivedAtMs: peer.latestPoseReceivedAtMs }
+        : null,
+    );
+    updateRankedState(match, resolution.state, nowMs);
+    sendJson(client, {
+      type: "action_feedback",
+      accepted: resolution.accepted,
+      code: resolution.code,
+      nextActionAtMs: resolution.nextActionAtMs,
+    });
+    return;
+  }
+
+  sendJson(client, { type: "error", code: "invalid_message", message: "Ranked match payload failed validation." });
+}
+
 function tryMatchmaking() {
   const waiting = [...matchmakingClients]
     .filter((client) => !client.closed && !client.socket.destroyed && client.queueState === "waiting")
@@ -186,16 +318,32 @@ function tryMatchmaking() {
     const activeAtMs = assignmentEndsAtMs + COUNTDOWN_MS;
     const matchId = randomUUID();
     const roomCode = generateRoomCode();
+    const firstJoinToken = randomUUID();
+    const secondJoinToken = randomUUID();
     const firstAircraftId = assignedAircraftId(first.fixedAircraftId);
     const secondAircraftId = assignedAircraftId(second.fixedAircraftId);
     const firstSide = randomInt(2) === 0 ? "left" : "right";
     const secondSide = firstSide === "left" ? "right" : "left";
+
+    const state = createSchoolRankedRuntime({
+      matchId,
+      roomCode,
+      activeAtMs,
+      participants: [
+        { slot: 1, joinToken: firstJoinToken, aircraftId: firstAircraftId, spawnSide: firstSide },
+        { slot: 2, joinToken: secondJoinToken, aircraftId: secondAircraftId, spawnSide: secondSide },
+      ],
+    });
+    const match = { state, clients: new Map(), timer: null };
+    rankedMatches.set(matchId, match);
+    scheduleRankedMatch(match);
 
     sendJson(first, {
       type: "match_found",
       assignment: {
         matchId,
         roomCode,
+        joinToken: firstJoinToken,
         aircraftId: firstAircraftId,
         peerAircraftId: secondAircraftId,
         spawnSide: firstSide,
@@ -208,6 +356,7 @@ function tryMatchmaking() {
       assignment: {
         matchId,
         roomCode,
+        joinToken: secondJoinToken,
         aircraftId: secondAircraftId,
         peerAircraftId: firstAircraftId,
         spawnSide: secondSide,
@@ -327,6 +476,7 @@ function consumeFrames(client, chunk) {
     }
 
     if (client.kind === "matchmaking") handleMatchmakingTextMessage(client, payload);
+    else if (client.kind === "ranked") handleRankedTextMessage(client, payload);
     else handleRoomTextMessage(client, payload);
   }
 }
@@ -341,6 +491,7 @@ const server = createServer((request, response) => {
       features: {
         multiplayer: "C3_FOUNDATION",
         matchmaking: "C4B_FOUNDATION",
+        competition: "C4C_FOUNDATION",
       },
       runtime: "SCHOOL_NODE_LOCAL_RELAY",
       timestamp: new Date().toISOString(),
@@ -365,19 +516,25 @@ function acceptUpgrade(request, socket, key) {
   ].join("\r\n"));
 }
 
+function rejectUpgrade(socket, status, message) {
+  socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n${JSON.stringify({ error: message })}`);
+  socket.destroy();
+}
+
 server.on("upgrade", (request, socket, head) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${HOST}:${PORT}`}`);
   const key = request.headers["sec-websocket-key"];
   const isMatchmaking = url.pathname === MATCHMAKING_SOCKET_ROUTE;
+  const rankedMatchId = url.pathname.match(RANKED_MATCH_SOCKET_ROUTE)?.[1] ?? "";
+  const isRanked = rankedMatchId.length > 0;
   const roomCode = url.pathname.match(ROOM_SOCKET_ROUTE)?.[1] ?? "";
 
   if (
     request.headers.upgrade?.toLowerCase() !== "websocket"
     || typeof key !== "string"
-    || (!isMatchmaking && !ROOM_CODE_PATTERN.test(roomCode))
+    || (!isMatchmaking && !isRanked && !ROOM_CODE_PATTERN.test(roomCode))
   ) {
-    socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
-    socket.destroy();
+    rejectUpgrade(socket, "400 Bad Request", "bad_request");
     return;
   }
 
@@ -401,13 +558,63 @@ server.on("upgrade", (request, socket, head) => {
     return;
   }
 
+  if (isRanked) {
+    const match = rankedMatches.get(rankedMatchId);
+    if (!match) {
+      rejectUpgrade(socket, "404 Not Found", "match_not_initialized");
+      return;
+    }
+    const joinToken = url.searchParams.get("token") ?? "";
+    const participant = match.state.participants.find((entry) => entry.joinToken === joinToken);
+    if (!participant) {
+      rejectUpgrade(socket, "403 Forbidden", "invalid_join_token");
+      return;
+    }
+
+    const existing = match.clients.get(participant.slot);
+    if (existing && !existing.closed) closeClient(existing, 4001, "participant reconnected");
+
+    acceptUpgrade(request, socket, key);
+    const client = {
+      kind: "ranked",
+      socket,
+      matchId: rankedMatchId,
+      roomCode: match.state.roomCode,
+      playerId: randomUUID(),
+      slot: participant.slot,
+      joinToken,
+      latestPose: null,
+      latestPoseReceivedAtMs: null,
+      buffer: Buffer.alloc(0),
+      closed: false,
+    };
+    match.clients.set(participant.slot, client);
+    const nowMs = Date.now();
+    updateRankedState(match, markSchoolRankedConnected(match.state, participant.slot, nowMs), nowMs, false);
+
+    sendJson(client, {
+      type: "welcome",
+      roomCode: match.state.roomCode,
+      playerId: client.playerId,
+      slot: client.slot,
+      peerConnected: match.clients.size >= 2,
+    });
+    broadcastRankedPresence(match);
+    broadcastRankedState(match, nowMs);
+
+    socket.on("data", (chunk) => consumeFrames(client, chunk));
+    socket.on("close", () => cleanupClient(client));
+    socket.on("error", () => cleanupClient(client));
+    if (head.length > 0) consumeFrames(client, head);
+    return;
+  }
+
   const room = rooms.get(roomCode) ?? new Set();
   for (const client of room) {
     if (client.closed || client.socket.destroyed) room.delete(client);
   }
   if (room.size >= MAX_ROOM_PLAYERS) {
-    socket.write("HTTP/1.1 409 Conflict\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n{\"error\":\"room_full\"}");
-    socket.destroy();
+    rejectUpgrade(socket, "409 Conflict", "room_full");
     return;
   }
 
@@ -451,6 +658,10 @@ server.listen(PORT, HOST, () => {
 function shutdown() {
   for (const room of rooms.values()) {
     for (const client of room) closeClient(client, 1001, "server shutdown");
+  }
+  for (const match of rankedMatches.values()) {
+    if (match.timer) clearTimeout(match.timer);
+    for (const client of [...match.clients.values()]) closeClient(client, 1001, "server shutdown");
   }
   for (const client of [...matchmakingClients]) closeClient(client, 1001, "server shutdown");
   server.close(() => process.exit(0));

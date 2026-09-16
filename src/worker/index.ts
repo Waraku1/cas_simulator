@@ -1,4 +1,5 @@
 import { AIRCRAFT_CATALOG, isAircraftId } from "../shared/aircraft";
+import type { CompetitionRoomInit } from "../shared/competition";
 import {
   MATCHMAKING_ASSIGNMENT_REVEAL_MS,
   MATCHMAKING_COUNTDOWN_MS,
@@ -14,6 +15,9 @@ import {
   parseClientRoomMessage,
   type ServerRoomMessage,
 } from "../shared/multiplayer";
+import { RankedMatch } from "./ranked-match";
+
+export { RankedMatch };
 
 interface DurableObjectId {}
 
@@ -46,6 +50,7 @@ interface Env {
   };
   ROOMS: DurableObjectNamespace;
   MATCHMAKER: DurableObjectNamespace;
+  MATCHES: DurableObjectNamespace;
 }
 
 type SocketAttachment = Readonly<{
@@ -61,6 +66,8 @@ type MatchmakingAttachment = Readonly<{
 }>;
 
 const ROOM_SOCKET_ROUTE = /^\/api\/rooms\/([ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6})\/ws$/;
+const RANKED_MATCH_SOCKET_ROUTE = /^\/api\/matches\/([0-9a-f-]{36})\/ws$/i;
+const MATCH_INIT_URL = "https://ranked-match.internal/__internal/competition-init";
 
 const json = (body: unknown, init: ResponseInit = {}) => {
   const headers = new Headers(init.headers);
@@ -121,9 +128,7 @@ function assignedAircraftId(fixedAircraftId: string | null) {
 }
 
 export class RankedMatchmaker {
-  constructor(private readonly ctx: DurableObjectState, private readonly env: Env) {
-    void env;
-  }
+  constructor(private readonly ctx: DurableObjectState, private readonly env: Env) {}
 
   private send(socket: HibernatableWebSocket, message: ServerMatchmakingMessage) {
     if (socket.readyState !== WebSocket.OPEN) return;
@@ -134,7 +139,16 @@ export class RankedMatchmaker {
     }
   }
 
-  private tryMatch() {
+  private async initializeMatch(init: CompetitionRoomInit) {
+    const id = this.env.MATCHES.idFromName(init.matchId);
+    return this.env.MATCHES.get(id).fetch(new Request(MATCH_INIT_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(init),
+    }));
+  }
+
+  private async tryMatch() {
     const waiting = this.ctx.getWebSockets()
       .filter((socket) => socket.readyState === WebSocket.OPEN)
       .map((socket) => ({ socket, attachment: matchmakingAttachmentOf(socket) }))
@@ -152,6 +166,8 @@ export class RankedMatchmaker {
       const activeAtMs = assignmentEndsAtMs + MATCHMAKING_COUNTDOWN_MS;
       const matchId = crypto.randomUUID();
       const roomCode = generateRoomCode();
+      const firstJoinToken = crypto.randomUUID();
+      const secondJoinToken = crypto.randomUUID();
       const firstAircraftId = assignedAircraftId(first.attachment.fixedAircraftId);
       const secondAircraftId = assignedAircraftId(second.attachment.fixedAircraftId);
       const firstSide: SpawnSide = randomIndex(2) === 0 ? "left" : "right";
@@ -160,11 +176,35 @@ export class RankedMatchmaker {
       first.socket.serializeAttachment({ ...first.attachment, state: "matched" });
       second.socket.serializeAttachment({ ...second.attachment, state: "matched" });
 
+      const init: CompetitionRoomInit = {
+        matchId,
+        roomCode,
+        activeAtMs,
+        participants: [
+          { slot: 1, joinToken: firstJoinToken, aircraftId: firstAircraftId, spawnSide: firstSide },
+          { slot: 2, joinToken: secondJoinToken, aircraftId: secondAircraftId, spawnSide: secondSide },
+        ],
+      };
+      const initialized = await this.initializeMatch(init);
+      if (!initialized.ok) {
+        const failure: ServerMatchmakingMessage = {
+          type: "error",
+          code: "match_init_failed",
+          message: "The ranked match authority could not be initialized.",
+        };
+        this.send(first.socket, failure);
+        this.send(second.socket, failure);
+        first.socket.close(1011, "match init failed");
+        second.socket.close(1011, "match init failed");
+        continue;
+      }
+
       this.send(first.socket, {
         type: "match_found",
         assignment: {
           matchId,
           roomCode,
+          joinToken: firstJoinToken,
           aircraftId: firstAircraftId,
           peerAircraftId: secondAircraftId,
           spawnSide: firstSide,
@@ -177,6 +217,7 @@ export class RankedMatchmaker {
         assignment: {
           matchId,
           roomCode,
+          joinToken: secondJoinToken,
           aircraftId: secondAircraftId,
           peerAircraftId: firstAircraftId,
           spawnSide: secondSide,
@@ -211,7 +252,7 @@ export class RankedMatchmaker {
     return new Response(null, responseInit);
   }
 
-  webSocketMessage(socket: HibernatableWebSocket, message: string | ArrayBuffer) {
+  async webSocketMessage(socket: HibernatableWebSocket, message: string | ArrayBuffer) {
     if (typeof message !== "string") {
       this.send(socket, { type: "error", code: "binary_unsupported", message: "Only bounded JSON text messages are accepted." });
       return;
@@ -244,7 +285,7 @@ export class RankedMatchmaker {
     };
     socket.serializeAttachment(nextAttachment);
     this.send(socket, { type: "queued", queuedAtMs });
-    this.tryMatch();
+    await this.tryMatch();
   }
 
   webSocketClose() {}
@@ -335,7 +376,7 @@ export class MultiplayerRoom {
     }
 
     const parsed = parseClientRoomMessage(message);
-    if (!parsed) {
+    if (!parsed || parsed.type !== "pose") {
       this.send(socket, {
         type: "error",
         code: "invalid_message",
@@ -386,6 +427,7 @@ export default {
         features: {
           multiplayer: "C3_FOUNDATION",
           matchmaking: "C4B_FOUNDATION",
+          competition: "C4C_FOUNDATION",
         },
         timestamp: new Date().toISOString(),
       });
@@ -394,6 +436,13 @@ export default {
     if (url.pathname === MATCHMAKING_PATH) {
       const id = env.MATCHMAKER.idFromName("ranked-global-v1");
       return env.MATCHMAKER.get(id).fetch(request);
+    }
+
+    const rankedMatch = url.pathname.match(RANKED_MATCH_SOCKET_ROUTE);
+    if (rankedMatch) {
+      const matchId = rankedMatch[1];
+      const id = env.MATCHES.idFromName(matchId);
+      return env.MATCHES.get(id).fetch(request);
     }
 
     const roomMatch = url.pathname.match(ROOM_SOCKET_ROUTE);

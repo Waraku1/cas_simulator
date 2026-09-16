@@ -1,3 +1,10 @@
+import {
+  parseClientCompetitionMessage,
+  parseServerCompetitionMessage,
+  type ClientCompetitionMessage,
+  type ServerCompetitionMessage,
+} from "./competition";
+
 export const ROOM_CODE_LENGTH = 6;
 export const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 export const ROOM_CODE_PATTERN = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/;
@@ -24,10 +31,12 @@ export type PoseSnapshot = AircraftPose & Readonly<{
   clientTimeMs: number;
 }>;
 
-export type ClientRoomMessage = Readonly<{
-  type: "pose";
-  pose: PoseSnapshot;
-}>;
+export type ClientRoomMessage =
+  | Readonly<{
+      type: "pose";
+      pose: PoseSnapshot;
+    }>
+  | ClientCompetitionMessage;
 
 export type ServerRoomMessage =
   | Readonly<{
@@ -52,7 +61,8 @@ export type ServerRoomMessage =
       type: "error";
       code: string;
       message: string;
-    }>;
+    }>
+  | ServerCompetitionMessage;
 
 const finite = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
@@ -124,15 +134,18 @@ export function parseClientRoomMessage(text: string): ClientRoomMessage | null {
   if (new TextEncoder().encode(text).byteLength > MAX_ROOM_MESSAGE_BYTES) return null;
   try {
     const value: unknown = JSON.parse(text);
-    if (!record(value) || value.type !== "pose" || !isPoseSnapshot(value.pose)) return null;
-    return { type: "pose", pose: value.pose };
+    if (!record(value) || typeof value.type !== "string") return null;
+    if (value.type === "pose" && isPoseSnapshot(value.pose)) {
+      return { type: "pose", pose: value.pose };
+    }
+    return parseClientCompetitionMessage(text);
   } catch {
     return null;
   }
 }
 
 export function parseServerRoomMessage(text: string): ServerRoomMessage | null {
-  if (new TextEncoder().encode(text).byteLength > MAX_ROOM_MESSAGE_BYTES) return null;
+  if (new TextEncoder().encode(text).byteLength > MAX_ROOM_MESSAGE_BYTES * 2) return null;
   try {
     const value: unknown = JSON.parse(text);
     if (!record(value) || typeof value.type !== "string") return null;
@@ -176,7 +189,7 @@ export function parseServerRoomMessage(text: string): ServerRoomMessage | null {
       return value as ServerRoomMessage;
     }
 
-    return null;
+    return parseServerCompetitionMessage(text);
   } catch {
     return null;
   }

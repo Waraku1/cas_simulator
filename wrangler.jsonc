@@ -17,6 +17,10 @@
       {
         "name": "MATCHMAKER",
         "class_name": "RankedMatchmaker"
+      },
+      {
+        "name": "MATCHES",
+        "class_name": "RankedMatch"
       }
     ]
   },
@@ -28,6 +32,10 @@
     {
       "tag": "c4b-v1",
       "new_sqlite_classes": ["RankedMatchmaker"]
+    },
+    {
+      "tag": "c4c-v1",
+      "new_sqlite_classes": ["RankedMatch"]
     }
   ],
   "observability": {

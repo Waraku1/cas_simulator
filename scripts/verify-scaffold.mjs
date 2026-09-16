@@ -20,16 +20,24 @@ const required = [
   "src/client/theater/model.ts",
   "src/client/c3.css",
   "src/worker/index.ts",
+  "src/worker/ranked-match.ts",
+  "src/worker/competition-runtime.ts",
   "src/shared/config.ts",
   "src/shared/multiplayer.ts",
   "src/shared/product.ts",
   "src/shared/aircraft.ts",
   "src/shared/aircraft-catalog.json",
+  "src/shared/action-modules.ts",
+  "src/shared/action-module-catalog.json",
+  "src/shared/competition.ts",
   "src/shared/matchmaking.ts",
   "scripts/dev-school.mjs",
   "scripts/school-local-backend.mjs",
+  "scripts/school-ranked-runtime.mjs",
   "scripts/verify-production-multiplayer.mjs",
   "scripts/verify-school-matchmaking.mjs",
+  "scripts/verify-school-competition.mjs",
+  "scripts/verify-c4c-runtime.mjs",
   "docs/architecture/C0_FOUNDATION.md",
   "docs/architecture/C1_FLIGHT.md",
   "docs/architecture/C2_WORLD_THEATER.md",
@@ -49,6 +57,9 @@ if (!pkg.scripts?.["dev:school"]?.includes("scripts/dev-school.mjs")) {
 }
 if (!pkg.scripts?.["verify:school"]) throw new Error("Missing school multiplayer verification script");
 if (!pkg.scripts?.["verify:school:c4b"]) throw new Error("Missing C4B school matchmaking verification script");
+if (!pkg.scripts?.["verify:school:c4c"] || !pkg.scripts?.["verify:c4c:runtime"]) {
+  throw new Error("Missing C4C competition verification scripts");
+}
 
 const schoolConfig = await readFile(join(root, "vite.school.config.ts"), "utf8");
 if (!schoolConfig.includes('target: "http://127.0.0.1:8787"') || !schoolConfig.includes("ws: true")) {
@@ -62,6 +73,9 @@ if (!wrangler.includes('"new_sqlite_classes": ["MultiplayerRoom"]')) {
 }
 if (!wrangler.includes('"name": "MATCHMAKER"') || !wrangler.includes('"new_sqlite_classes": ["RankedMatchmaker"]')) {
   throw new Error("Missing C4B ranked matchmaker Durable Object contract");
+}
+if (!wrangler.includes('"name": "MATCHES"') || !wrangler.includes('"new_sqlite_classes": ["RankedMatch"]')) {
+  throw new Error("Missing C4C ranked match Durable Object contract");
 }
 
 const deployWorkflow = await readFile(join(root, ".github/workflows/deploy.yml"), "utf8");
