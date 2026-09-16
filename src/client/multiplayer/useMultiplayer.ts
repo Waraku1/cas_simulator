@@ -26,6 +26,7 @@ export type MultiplayerController = Readonly<{
   status: MultiplayerStatus;
   roomCode: string;
   playerId: string | null;
+  slot: 1 | 2 | null;
   peerConnected: boolean;
   remotePose: RemotePoseBuffer | null;
   errorMessage: string;
@@ -47,6 +48,7 @@ export function useMultiplayer(): MultiplayerController {
   const [status, setStatus] = useState<MultiplayerStatus>("offline");
   const [roomCode, setRoomCode] = useState("");
   const [playerId, setPlayerId] = useState<string | null>(null);
+  const [slot, setSlot] = useState<1 | 2 | null>(null);
   const [peerConnected, setPeerConnected] = useState(false);
   const [remotePose, setRemotePose] = useState<RemotePoseBuffer | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
@@ -62,6 +64,7 @@ export function useMultiplayer(): MultiplayerController {
     setRemotePose(null);
     setPeerConnected(false);
     setPlayerId(null);
+    setSlot(null);
     setStatus("offline");
     setErrorMessage("");
   }, []);
@@ -82,6 +85,7 @@ export function useMultiplayer(): MultiplayerController {
 
     setRoomCode(normalized);
     setPlayerId(null);
+    setSlot(null);
     setPeerConnected(false);
     setRemotePose(null);
     latestPeerPoseRef.current = null;
@@ -107,6 +111,7 @@ export function useMultiplayer(): MultiplayerController {
 
       if (message.type === "welcome") {
         setPlayerId(message.playerId);
+        setSlot(message.slot);
         setPeerConnected(message.peerConnected);
         setStatus(message.peerConnected ? "connected" : "waiting");
         return;
@@ -142,6 +147,7 @@ export function useMultiplayer(): MultiplayerController {
       socketRef.current = null;
       setPeerConnected(false);
       setPlayerId(null);
+      setSlot(null);
       if (event.code === 1000) {
         setStatus("offline");
         setErrorMessage("");
@@ -156,7 +162,7 @@ export function useMultiplayer(): MultiplayerController {
       setStatus("error");
       setErrorMessage(
         window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost"
-          ? "CLOUD BACKEND UNAVAILABLE IN CLIENT-ONLY LOCALHOST MODE"
+          ? "LOCAL MULTIPLAYER ENDPOINT UNAVAILABLE"
           : "MULTIPLAYER CONNECTION ERROR",
       );
     });
@@ -197,6 +203,7 @@ export function useMultiplayer(): MultiplayerController {
     status,
     roomCode,
     playerId,
+    slot,
     peerConnected,
     remotePose,
     errorMessage,
