@@ -7,6 +7,7 @@ Browser-based CAS flight-simulator project built on Cesium Earth.
 - React 19 + TypeScript + Vite
 - CesiumJS 1.145
 - Cloudflare Workers + Static Assets
+- Fictional bounded flight model (C1)
 - Regional Theater contract: 50 km × 50 km
 - Durable Objects/WebSocket multiplayer reserved for C3
 
@@ -43,6 +44,15 @@ http://127.0.0.1:5173
 
 This is the canonical school-day development/demo path. Do not bypass TLS warnings or school filtering controls.
 
+## C1 flight controls
+
+- `W` / `S`: pitch
+- `A` / `D`: bank
+- `Q` / `E`: yaw input
+- `R` / `F`: throttle
+
+The C1 aircraft is fictional and uses bounded game-oriented dynamics rather than real-aircraft performance data.
+
 ## Production mode
 
 Production build/deployment is executed through GitHub Actions using repository secrets for Cloudflare and Cesium credentials. Production runtime health is verified automatically after deployment.
@@ -66,10 +76,10 @@ pnpm build
 ## Project gates
 
 - C0 Foundation — CLOSED (engineering foundation)
-- C1 Flight
+- C1 Flight — IMPLEMENTED / manual localhost QA pending
 - C2 World / Theater resource gate
 - C3 Multiplayer
 - C4 Game loop
 - C5 Release
 
-See `docs/architecture/C0_FOUNDATION.md`, `docs/architecture/C0_STATUS.md`, and `docs/operations/SCHOOL_NETWORK_COMPATIBILITY.md`.
+See `docs/architecture/C0_FOUNDATION.md`, `docs/architecture/C0_STATUS.md`, `docs/architecture/C1_FLIGHT.md`, and `docs/operations/SCHOOL_NETWORK_COMPATIBILITY.md`.

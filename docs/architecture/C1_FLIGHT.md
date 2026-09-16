@@ -1,6 +1,6 @@
 # C1 — Flight Vertical Slice
 
-Status: IMPLEMENTATION IN PROGRESS
+Status: IMPLEMENTED / MANUAL LOCAL QA PENDING
 
 ## Objective
 
@@ -47,16 +47,30 @@ The HUD preserves the central viewport and places information around the edges:
 
 The layout adapts at narrower widths and respects `prefers-reduced-motion` for HUD transitions.
 
+## Verification evidence
+
+GitHub Actions verified the C1 branch and merged `main` commit `64a03e4a3908b9d609d08eb6ac528f0b079d16ce` with:
+- `pnpm install --frozen-lockfile`: PASS;
+- `pnpm validate:scaffold`: PASS;
+- `pnpm check`: PASS;
+- `pnpm build`: PASS.
+
 ## C1 acceptance
 
-- `pnpm validate:scaffold` exits 0.
-- `pnpm check` exits 0.
-- `pnpm build` exits 0.
-- Cesium Earth remains visible and interactive as the flight world.
-- Fictional aircraft moves continuously from bounded control inputs.
-- Chase camera follows the aircraft.
-- HUD telemetry updates without full React-frame rendering.
-- No real-aircraft performance model, multiplayer, scoring, damage, or target/tag mechanics are introduced.
+Automated:
+- [x] `pnpm validate:scaffold` exits 0.
+- [x] `pnpm check` exits 0.
+- [x] `pnpm build` exits 0.
+- [x] Flight state is bounded and finite by construction.
+- [x] HUD telemetry is decoupled from the high-frequency Cesium render loop.
+- [x] No real-aircraft performance model, multiplayer, scoring, damage, or target/tag mechanics are introduced.
+
+Manual localhost QA still required:
+- [ ] Cesium Earth renders with the new flight HUD.
+- [ ] Fictional aircraft moves continuously from keyboard input.
+- [ ] Chase camera follows without visible breakage.
+- [ ] HUD remains legible and central viewport remains usable.
+- [ ] Runtime diagnostics remain visible and performance remains acceptable.
 
 ## Deferred
 
