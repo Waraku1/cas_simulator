@@ -1,4 +1,3 @@
-import type { AircraftPose } from "./multiplayer";
 import type { MatchResultReason } from "./product";
 
 export const COMPETITION_MESSAGE_MAX_BYTES = 1_024;
@@ -75,6 +74,12 @@ export type ServerCompetitionMessage =
       nextActionAtMs: number;
     }>;
 
+export type CompetitionPosition = Readonly<{
+  latitudeDeg: number;
+  longitudeDeg: number;
+  altitudeM: number;
+}>;
+
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
@@ -100,7 +105,7 @@ export function parseClientCompetitionMessage(text: string): ClientCompetitionMe
   }
 }
 
-export function competitionDistanceM(a: AircraftPose, b: AircraftPose) {
+export function competitionDistanceM(a: CompetitionPosition, b: CompetitionPosition) {
   const earthRadiusM = 6_371_000;
   const toRad = Math.PI / 180;
   const lat1 = a.latitudeDeg * toRad;
