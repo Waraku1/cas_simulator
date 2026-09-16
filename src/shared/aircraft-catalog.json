@@ -1,0 +1,35 @@
+[
+  {
+    "aircraftId": "orbit-a1",
+    "displayName": "ORBIT // A1",
+    "minimumSpeedMps": 55,
+    "maximumSpeedMps": 155,
+    "pitchAccelerationDegS2": 48,
+    "rollAccelerationDegS2": 88,
+    "visualScale": 1.0,
+    "appearanceKey": "orbit-a1",
+    "actionModuleId": "vector-link"
+  },
+  {
+    "aircraftId": "strata-b2",
+    "displayName": "STRATA // B2",
+    "minimumSpeedMps": 70,
+    "maximumSpeedMps": 175,
+    "pitchAccelerationDegS2": 40,
+    "rollAccelerationDegS2": 72,
+    "visualScale": 1.08,
+    "appearanceKey": "strata-b2",
+    "actionModuleId": "tempo-link"
+  },
+  {
+    "aircraftId": "kite-c3",
+    "displayName": "KITE // C3",
+    "minimumSpeedMps": 50,
+    "maximumSpeedMps": 140,
+    "pitchAccelerationDegS2": 60,
+    "rollAccelerationDegS2": 108,
+    "visualScale": 0.88,
+    "appearanceKey": "kite-c3",
+    "actionModuleId": "focus-link"
+  }
+]
