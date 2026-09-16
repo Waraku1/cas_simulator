@@ -1,4 +1,4 @@
-name: C0 CI
+name: Project CI
 
 on:
   push:
