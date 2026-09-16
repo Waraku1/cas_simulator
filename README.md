@@ -1,6 +1,6 @@
 # CAS Flight Simulator
 
-C0 foundation for a two-player, browser-based flight experience built on Cesium Earth.
+Browser-based CAS flight-simulator project built on Cesium Earth.
 
 ## Architecture
 
@@ -27,43 +27,49 @@ VITE_CESIUM_ION_TOKEN=...
 
 Do not commit `.env.local`.
 
-## Run
+## School development mode
+
+The managed school network blocks the current Cloudflare `workers.dev` production hostname. Development therefore uses the client-only localhost mode:
 
 ```bash
 pnpm dev
 ```
 
-Health endpoint:
+Open:
 
 ```text
-/api/health
+http://127.0.0.1:5173
 ```
+
+This is the canonical school-day development/demo path. Do not bypass TLS warnings or school filtering controls.
+
+## Production mode
+
+Production build/deployment is executed through GitHub Actions using repository secrets for Cloudflare and Cesium credentials. Production runtime health is verified automatically after deployment.
+
+Current production health endpoint:
+
+```text
+https://cas-flight-simulator.heleshiheiheleshihei.workers.dev/api/health
+```
+
+Production browser verification is performed on an allowed network before C5 release closure.
 
 ## Validate
 
 ```bash
+pnpm validate:scaffold
 pnpm check
 pnpm build
-pnpm preview
 ```
-
-## Deploy target
-
-Authenticate Wrangler once on the development machine, then:
-
-```bash
-pnpm deploy
-```
-
-The Cloudflare Vite plugin deploys the client assets and Worker as one unit.
 
 ## Project gates
 
-- C0 Foundation
+- C0 Foundation — CLOSED (engineering foundation)
 - C1 Flight
 - C2 World / Theater resource gate
 - C3 Multiplayer
 - C4 Game loop
 - C5 Release
 
-See `docs/architecture/C0_FOUNDATION.md` for the C0 contract.
+See `docs/architecture/C0_FOUNDATION.md`, `docs/architecture/C0_STATUS.md`, and `docs/operations/SCHOOL_NETWORK_COMPATIBILITY.md`.
