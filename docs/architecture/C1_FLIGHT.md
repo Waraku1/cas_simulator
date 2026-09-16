@@ -1,109 +1,133 @@
 # C1 — Flight Vertical Slice
 
-Status: C1.3 ATTITUDE/MOTION ALIGNMENT IMPLEMENTED / LOCAL RE-VERIFY PENDING
+Status: C1.4 BODY-AXIS ATTITUDE IMPLEMENTED / LOCAL RE-VERIFY PENDING
 
 ## Objective
 
 Create the first interactive flight experience on top of the C0 Cesium foundation without introducing multiplayer or game-loop mechanics.
 
-## Flight model boundary
+The aircraft is fictional and generic. C1 remains a kinematic game-flight model rather than a reproduction of any real aircraft's aerodynamic performance or procedures.
 
-The aircraft is fictional and generic. The model is designed for stable, readable game interaction rather than reproduction of any real aircraft's performance, procedures, or handling qualities.
+## Canonical flight state
 
-State:
+C1.4 changes attitude representation fundamentally.
+
+Canonical state:
 - latitude / longitude;
 - altitude;
-- heading;
-- pitch;
-- bank;
+- normalized orientation quaternion relative to local ENU;
 - speed;
 - throttle;
 - vertical speed.
 
-Controls:
-- `W` / `S`: pitch-rate input;
-- `A` / `D`: bank input;
+`heading`, `pitch`, and `bank` are now telemetry derived from the quaternion for HUD display. They are not independently integrated control-state variables.
+
+Body axes:
+- `+X = forward`;
+- `+Y = left`;
+- `+Z = up`.
+
+Local geographic axes:
+- `+X = east`;
+- `+Y = north`;
+- `+Z = up`.
+
+## Controls
+
+- `W` / `S`: pitch-rate input about the aircraft's own lateral axis;
+- `A` / `D`: roll-rate input about the aircraft's own forward axis;
 - `Q` / `E`: experimental direct-yaw input for C1 testing only;
 - `ArrowUp` / `ArrowDown`: throttle.
 
 `ArrowLeft`, `ArrowRight`, and `Space` are not part of C1 flight control. They remain reserved for a later abstract C4 game-action interface.
 
-## C1.3 attitude envelope
+## C1.4 body-axis attitude contract
 
-Local QA found the original attitude envelope too restrictive.
+Pitch and roll are intrinsic aircraft-body rotations.
 
-- Pitch is no longer clamped to a narrow maximum.
-- Pitch is stored as a wrapped signed angle so continuous 360° loops are possible while the numeric state remains finite.
-- Releasing `W` / `S` preserves the attained pitch instead of automatically returning to level.
-- Bank authority is expanded from ±55° to ±85°.
-- Bank still recenters when `A` / `D` are released for the current arcade-oriented C1 control model.
-- `Q` / `E` direct yaw is explicitly experimental and must be removed before final release; bank-induced turning is the canonical turning path.
+- Pitch has no earth-relative angle clamp.
+- Roll/bank has no angle clamp.
+- Roll no longer auto-recenters when `A` / `D` are released.
+- Orientation is normalized as a quaternion after every input update, so continuous loops and rolls remain numerically stable.
+- W/S always rotates about the aircraft's own lateral axis, not a fixed world-horizontal axis.
+- A/D always rotates about the aircraft's own forward axis.
 
-Altitude remains bounded independently of attitude during C1; terrain/collision behavior belongs to later gates.
+This means the effect of pitch input depends on bank attitude. At approximately 0° bank, W/S primarily changes nose elevation. At approximately 90° bank, the aircraft lateral axis is approximately vertical relative to the Earth, so W/S primarily changes horizontal travel direction. This is the intended C1.4 behavior.
 
-## Spawn and motion/orientation alignment
+C1.4 intentionally removes the earlier synthetic `bankTurn` term. Travel direction is now derived directly from the aircraft's quaternion forward vector; turns occur because the aircraft attitude itself changes.
 
-The theater center is close to high terrain, so startup uses an absolute altitude of 5,400 m and level initial pitch.
+`Q/E` direct yaw remains temporary test instrumentation. Mandatory removal before final release is tracked separately in Issue #7.
 
-Two rounds of HPR-sign correction were insufficient to eliminate a localhost-observed forward-direction mismatch. C1.3 therefore removes Cesium HPR heading interpretation from the aircraft/camera alignment path entirely.
+## Position integration
 
-The renderer now constructs a body frame directly from the same state variables used by the flight integrator:
+The quaternion-derived local body-forward vector is also the velocity direction.
 
-- navigation heading defines horizontal forward (`0° = north`, `90° = east`);
-- pitch rotates that forward vector toward local up/down;
-- bank rotates the body left/up axes about the forward axis;
-- body axes are `+X = forward`, `+Y = left`, `+Z = up`.
+Each update:
+1. apply body-axis pitch/roll/yaw-test rotations to the orientation quaternion;
+2. normalize the quaternion;
+3. derive the body forward vector in local ENU coordinates;
+4. advance east/north position from the forward vector's horizontal components;
+5. advance altitude from the forward vector's vertical component;
+6. apply the C1 altitude bounds.
 
-The same body-forward vector drives:
+Altitude bounds remain independent of terrain collision during C1. Terrain/collision behavior belongs to later gates.
+
+## Rendering alignment
+
+The flight model exports its canonical local body frame directly. The Cesium renderer converts that frame from local ENU to ECEF and uses the same frame for:
 - aircraft quaternion orientation;
-- an asymmetric nose marker;
+- asymmetric nose marker;
 - chase-camera position;
 - camera look direction.
 
-This makes visual forward and simulated motion share one reference-frame contract rather than relying on separate heading conventions.
+Rendering therefore does not independently reconstruct heading/pitch/bank.
 
-## Rendering architecture
+This preserves the C1.3 correction that made aircraft nose, camera, and actual travel direction share one reference-frame contract.
 
-Cesium owns the high-frequency visual loop. React does not re-render at display refresh rate: flight state updates via `requestAnimationFrame`, aircraft pose and camera are applied directly to Cesium properties, and compact telemetry is published to React at roughly 10 Hz for the HUD.
+## HUD telemetry
 
-The aircraft representation uses simple Cesium geometry, including an asymmetric nose marker, so C1 adds no external 3D-model dependency or asset-fetch cost. The camera is positioned directly from the computed aircraft body frame using world-space direction/up vectors.
+The HUD shows:
+- speed;
+- altitude;
+- heading;
+- earth-relative pitch display;
+- wrapped bank display;
+- vertical speed;
+- throttle;
+- controls;
+- runtime diagnostics.
 
-## HUD contract
+Because Euler-style heading/pitch/bank displays are derived from a full quaternion, conventional display ambiguity near vertical attitudes is expected. It does not constrain the actual orientation or controls.
 
-The HUD preserves the central viewport and places information around the edges:
-- speed left;
-- altitude right;
-- attitude ladder and reticle center;
-- heading / pitch / bank / vertical speed below center;
-- throttle lower center;
-- controls lower left;
-- runtime diagnostics upper right;
-- lightweight fictional cockpit/nose reference at the lower center.
-
-`Q/E` is labeled `YAW TEST` so the temporary nature of direct-yaw control is visible during development.
+`Q/E` is labeled `YAW TEST` so the temporary direct-yaw path remains visibly experimental.
 
 ## Verification evidence
 
-Initial C1 verification and previous QA corrections passed GitHub Actions with:
+Previous C1/C1.1/C1.2/C1.3 revisions passed GitHub Actions with:
 - `pnpm install --frozen-lockfile`: PASS;
 - `pnpm validate:scaffold`: PASS;
 - `pnpm check`: PASS;
 - `pnpm build`: PASS.
 
-Local QA on 2026-09-16 confirmed Cesium Earth/HUD rendering, readable diagnostics, and approximately 97 FPS before C1.3.
+Local QA on 2026-09-16 confirmed Cesium Earth/HUD rendering, corrected travel direction, relaxed pitch/bank behavior, readable diagnostics, and approximately 97 FPS before C1.4.
 
-## C1 acceptance
+## C1.4 acceptance
 
 Automated:
-- [x] Flight state remains finite by construction.
-- [x] HUD telemetry is decoupled from the high-frequency Cesium render loop.
-- [x] No real-aircraft performance model, multiplayer, scoring, damage, or realistic weapon mechanics are introduced.
+- [ ] `pnpm validate:scaffold` exits 0.
+- [ ] `pnpm check` exits 0.
+- [ ] `pnpm build` exits 0.
+- [x] Orientation is normalized and finite by construction.
+- [x] No pitch or bank angle clamp exists in the canonical attitude state.
+- [x] No bank auto-recenter exists.
+- [x] No synthetic bank-turn term remains in the canonical position integration.
 
-Manual localhost re-verification required after C1.3:
-- [ ] Visual aircraft nose, camera view, and actual travel direction agree.
-- [ ] Full-range pitch input can pass through ±90° and continue through a loop without snapping to level.
-- [ ] Bank reaches the expanded ±85° envelope and remains controllable.
-- [ ] `Q/E` remains clearly identified as experimental only.
+Manual localhost re-verification:
+- [ ] A/D can roll continuously through 90°, 180°, and 360° without clamping or automatic return to level.
+- [ ] At near-level bank, W/S primarily changes climb/dive direction.
+- [ ] At approximately 90° bank, W/S primarily changes horizontal travel direction.
+- [ ] Aircraft nose, camera, and actual motion remain aligned through combined pitch/roll inputs.
+- [ ] `Q/E` remains visibly marked `YAW TEST`.
 - [ ] Runtime FPS remains acceptable.
 
 ## Deferred
