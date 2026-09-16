@@ -1,3 +1,5 @@
+import type { LeaderboardProfile } from "../../shared/auth";
+
 export type StoredUser = Readonly<{
   userId: string;
   loginId: string;
@@ -10,6 +12,7 @@ export type StoredUser = Readonly<{
   losses: number;
   draws: number;
   fixedAircraftId: string | null;
+  fixableAircraftId: string | null;
   createdAtMs: number;
   updatedAtMs: number;
 }>;
@@ -31,20 +34,26 @@ export interface AuthRepository {
   findUserBySessionHash(sessionTokenHash: string, nowMs: number): Promise<StoredUser | null>;
   deleteSession(sessionTokenHash: string): Promise<void>;
   deleteExpiredSessions(nowMs: number): Promise<void>;
+  updateFixedAircraft(userId: string, aircraftId: string | null, nowMs: number): Promise<void>;
+  updateFixableAircraft(userId: string, aircraftId: string, nowMs: number): Promise<void>;
+  listLeaderboard(limit: number): Promise<readonly LeaderboardProfile[]>;
 }
 
-interface D1ResultLike {
+export interface D1ResultLike {
   success: boolean;
+  meta?: Readonly<{ changes?: number }>;
 }
 
-interface D1PreparedStatementLike {
+export interface D1PreparedStatementLike {
   bind(...values: unknown[]): D1PreparedStatementLike;
   first<T>(): Promise<T | null>;
+  all?<T>(): Promise<Readonly<{ results: T[] }>>;
   run(): Promise<D1ResultLike>;
 }
 
 export interface D1DatabaseLike {
   prepare(query: string): D1PreparedStatementLike;
+  batch?(statements: D1PreparedStatementLike[]): Promise<D1ResultLike[]>;
 }
 
 type UserRow = Readonly<{
@@ -59,8 +68,18 @@ type UserRow = Readonly<{
   losses: number;
   draws: number;
   fixed_aircraft_id: string | null;
+  fixable_aircraft_id: string | null;
   created_at_ms: number;
   updated_at_ms: number;
+}>;
+
+type LeaderboardRow = Readonly<{
+  user_id: string;
+  display_name: string;
+  rating: number;
+  wins: number;
+  losses: number;
+  draws: number;
 }>;
 
 function toStoredUser(row: UserRow): StoredUser {
@@ -76,6 +95,7 @@ function toStoredUser(row: UserRow): StoredUser {
     losses: row.losses,
     draws: row.draws,
     fixedAircraftId: row.fixed_aircraft_id,
+    fixableAircraftId: row.fixable_aircraft_id,
     createdAtMs: row.created_at_ms,
     updatedAtMs: row.updated_at_ms,
   };
@@ -84,7 +104,7 @@ function toStoredUser(row: UserRow): StoredUser {
 const USER_COLUMNS = `
   user_id, login_id, display_name, password_hash, password_salt,
   password_iterations, rating, wins, losses, draws, fixed_aircraft_id,
-  created_at_ms, updated_at_ms
+  fixable_aircraft_id, created_at_ms, updated_at_ms
 `;
 
 export class D1AuthRepository implements AuthRepository {
@@ -111,8 +131,8 @@ export class D1AuthRepository implements AuthRepository {
       INSERT INTO users (
         user_id, login_id, display_name, password_hash, password_salt,
         password_iterations, rating, wins, losses, draws, fixed_aircraft_id,
-        created_at_ms, updated_at_ms
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        fixable_aircraft_id, created_at_ms, updated_at_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       user.userId,
       user.loginId,
@@ -125,6 +145,7 @@ export class D1AuthRepository implements AuthRepository {
       user.losses,
       user.draws,
       user.fixedAircraftId,
+      user.fixableAircraftId,
       user.createdAtMs,
       user.updatedAtMs,
     ).run();
@@ -145,8 +166,9 @@ export class D1AuthRepository implements AuthRepository {
   }
 
   async findUserBySessionHash(sessionTokenHash: string, nowMs: number) {
+    const qualified = USER_COLUMNS.replace(/\b(user_id|login_id|display_name|password_hash|password_salt|password_iterations|rating|wins|losses|draws|fixed_aircraft_id|fixable_aircraft_id|created_at_ms|updated_at_ms)\b/g, "u.$1");
     const row = await this.db.prepare(`
-      SELECT ${USER_COLUMNS.replace(/\b(user_id|login_id|display_name|password_hash|password_salt|password_iterations|rating|wins|losses|draws|fixed_aircraft_id|created_at_ms|updated_at_ms)\b/g, "u.$1")}
+      SELECT ${qualified}
       FROM sessions s
       JOIN users u ON u.user_id = s.user_id
       WHERE s.session_token_hash = ? AND s.expires_at_ms > ?
@@ -167,5 +189,39 @@ export class D1AuthRepository implements AuthRepository {
       .prepare("DELETE FROM sessions WHERE expires_at_ms <= ?")
       .bind(nowMs)
       .run();
+  }
+
+  async updateFixedAircraft(userId: string, aircraftId: string | null, nowMs: number) {
+    const result = await this.db.prepare(`
+      UPDATE users SET fixed_aircraft_id = ?, updated_at_ms = ? WHERE user_id = ?
+    `).bind(aircraftId, nowMs, userId).run();
+    if (!result.success) throw new Error("D1 fixed-aircraft update failed.");
+  }
+
+  async updateFixableAircraft(userId: string, aircraftId: string, nowMs: number) {
+    const result = await this.db.prepare(`
+      UPDATE users SET fixable_aircraft_id = ?, updated_at_ms = ? WHERE user_id = ?
+    `).bind(aircraftId, nowMs, userId).run();
+    if (!result.success) throw new Error("D1 fixable-aircraft update failed.");
+  }
+
+  async listLeaderboard(limit: number) {
+    const statement = this.db.prepare(`
+      SELECT user_id, display_name, rating, wins, losses, draws
+      FROM users
+      ORDER BY rating DESC, wins DESC, user_id ASC
+      LIMIT ?
+    `).bind(limit);
+    if (!statement.all) throw new Error("D1 leaderboard query is unavailable.");
+    const { results } = await statement.all<LeaderboardRow>();
+    return results.map((row, index) => ({
+      rank: index + 1,
+      userId: row.user_id,
+      displayName: row.display_name,
+      rating: row.rating,
+      wins: row.wins,
+      losses: row.losses,
+      draws: row.draws,
+    }));
   }
 }
