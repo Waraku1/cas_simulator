@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import net from "node:net";
 
 const children = new Set();
 let shuttingDown = false;
+const schoolInternalToken = randomUUID();
 
 function portIsListening(port) {
   return new Promise((resolve) => {
@@ -45,10 +47,10 @@ async function assertSchoolPortsAvailable() {
   process.exit(1);
 }
 
-function start(command, args, label) {
+function start(command, args, label, extraEnv = {}) {
   const child = spawn(command, args, {
     cwd: process.cwd(),
-    env: process.env,
+    env: { ...process.env, ...extraEnv },
     stdio: "inherit",
   });
   children.add(child);
@@ -81,8 +83,9 @@ function shutdown(exitCode = 0) {
 
 await assertSchoolPortsAvailable();
 
-start(process.execPath, ["scripts/school-local-backend.mjs"], "school local multiplayer backend");
-start(process.execPath, ["scripts/school-account-backend.mjs"], "school local account backend");
+const internalEnv = { SCHOOL_INTERNAL_TOKEN: schoolInternalToken };
+start(process.execPath, ["scripts/school-local-backend.mjs"], "school local multiplayer backend", internalEnv);
+start(process.execPath, ["scripts/school-account-backend.mjs"], "school local account backend", internalEnv);
 start("pnpm", ["exec", "vite", "dev", "--config", "vite.school.config.ts"], "Vite school client");
 
 process.on("SIGINT", () => shutdown(0));
