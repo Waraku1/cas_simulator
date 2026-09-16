@@ -35,7 +35,7 @@ export function createSchoolRankedRuntime(init) {
       heartPoints: STARTING_HP,
       connected: false,
       nextActionAtMs: init.activeAtMs,
-      disconnectDeadlineMs: null,
+      disconnectDeadlineMs: init.activeAtMs + DISCONNECT_GRACE_MS,
     })),
     result: null,
   };
