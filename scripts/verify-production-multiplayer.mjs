@@ -4,16 +4,58 @@ const targetUrl = process.env.PRODUCTION_URL ?? process.env.SCHOOL_URL;
 if (!targetUrl) throw new Error("PRODUCTION_URL or SCHOOL_URL is required");
 if (typeof WebSocket !== "function") throw new Error("Global WebSocket is unavailable in this Node runtime");
 
+const isSchoolMode = Boolean(process.env.SCHOOL_URL) && !process.env.PRODUCTION_URL;
 const gate = process.env.PRODUCTION_URL
   ? "C3_MULTIPLAYER_SMOKE"
   : "SCHOOL_LOCAL_MULTIPLAYER_SMOKE";
+const baseUrl = targetUrl.replace(/\/$/, "");
+const healthUrl = `${baseUrl}/api/health`;
+
+async function verifyHealth() {
+  const abortController = new AbortController();
+  const timer = setTimeout(() => abortController.abort(), 4_000);
+
+  try {
+    const response = await fetch(healthUrl, { signal: abortController.signal });
+    const contentType = response.headers.get("content-type") ?? "";
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    if (!contentType.includes("application/json")) {
+      throw new Error(`expected JSON health response, received ${contentType || "unknown content type"}`);
+    }
+
+    const health = await response.json();
+    if (health?.ok !== true || health?.features?.multiplayer !== "C3_FOUNDATION") {
+      throw new Error(`unexpected health payload: ${JSON.stringify(health)}`);
+    }
+
+    return health;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (isSchoolMode) {
+      throw new Error(
+        `School full-stack server is not available at ${baseUrl}. ` +
+        `Start it in another terminal with "pnpm dev:school" and keep that process running. ` +
+        `If port 5173 is already in use, stop any older "pnpm dev" client-only server first. ` +
+        `Health check failed: ${detail}`,
+      );
+    }
+    throw new Error(`Production health check failed at ${healthUrl}: ${detail}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+await verifyHealth();
 
 const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const random = randomBytes(6);
 let roomCode = "";
 for (const byte of random) roomCode += alphabet[byte % alphabet.length];
 
-const wsBase = targetUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
+const wsBase = baseUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
 const roomUrl = `${wsBase}/api/rooms/${roomCode}/ws`;
 const timeoutMs = 8_000;
 
@@ -39,14 +81,22 @@ function makeClient(label) {
   });
 
   const opened = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} open timeout`)), timeoutMs);
+    const timer = setTimeout(() => {
+      const hint = isSchoolMode
+        ? ' Confirm that the separate "pnpm dev:school" terminal is still running and that no client-only Vite server owns port 5173.'
+        : "";
+      reject(new Error(`${label} open timeout.${hint}`));
+    }, timeoutMs);
     socket.addEventListener("open", () => {
       clearTimeout(timer);
       resolve();
     }, { once: true });
     socket.addEventListener("error", () => {
       clearTimeout(timer);
-      reject(new Error(`${label} WebSocket error before open`));
+      const hint = isSchoolMode
+        ? ' Confirm that the separate "pnpm dev:school" terminal is still running.'
+        : "";
+      reject(new Error(`${label} WebSocket error before open.${hint}`));
     }, { once: true });
   });
 
