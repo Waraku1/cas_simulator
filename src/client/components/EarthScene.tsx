@@ -14,6 +14,11 @@ import {
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { useEffect, useRef, useState } from "react";
 import { C2_RESOURCE_BUDGET } from "../../shared/config";
+import {
+  SNAPSHOT_INTERVAL_MS,
+  type AircraftPose,
+  type NetworkQuaternion,
+} from "../../shared/multiplayer";
 import { recordRenderedFrame } from "../diagnostics/useRuntimeDiagnostics";
 import {
   createInitialFlightState,
@@ -24,6 +29,7 @@ import {
   type FlightState,
   type FlightTelemetry,
 } from "../flight/model";
+import type { RemotePoseBuffer } from "../multiplayer/useMultiplayer";
 import {
   evaluateTheaterPosition,
   getTheaterBoundaryDegrees,
@@ -49,6 +55,12 @@ const CAMERA_LOOK_AHEAD_M = 72;
 const NOSE_OFFSET_M = 11;
 const SIMULATION_FRAME_INTERVAL_MS = 1_000 / C2_RESOURCE_BUDGET.runtimeFrameCapFps;
 
+type LocalAxes = Readonly<{
+  forward: readonly [number, number, number];
+  left: readonly [number, number, number];
+  up: readonly [number, number, number];
+}>;
+
 type FlightFrame = Readonly<{
   forward: Cartesian3;
   left: Cartesian3;
@@ -58,12 +70,12 @@ type FlightFrame = Readonly<{
 type EarthSceneProps = Readonly<{
   onTelemetry: (telemetry: FlightTelemetry) => void;
   onTheaterStatus: (status: TheaterStatus) => void;
+  onLocalPose: (pose: AircraftPose) => void;
+  remotePose: RemotePoseBuffer | null;
 }>;
 
-function computeFlightFrame(position: Cartesian3, state: FlightState): FlightFrame {
+function computeFixedFrame(position: Cartesian3, localFrame: LocalAxes): FlightFrame {
   const enu = Transforms.eastNorthUpToFixedFrame(position);
-  const localFrame = getLocalBodyFrame(state);
-
   const toFixed = (value: readonly [number, number, number]) => {
     const fixed = Matrix4.multiplyByPointAsVector(
       enu,
@@ -80,6 +92,59 @@ function computeFlightFrame(position: Cartesian3, state: FlightState): FlightFra
   };
 }
 
+function computeFlightFrame(position: Cartesian3, state: FlightState): FlightFrame {
+  return computeFixedFrame(position, getLocalBodyFrame(state));
+}
+
+function rotateNetworkVector(
+  orientation: NetworkQuaternion,
+  value: readonly [number, number, number],
+): readonly [number, number, number] {
+  const length = Math.hypot(
+    orientation.w,
+    orientation.x,
+    orientation.y,
+    orientation.z,
+  ) || 1;
+  const w = orientation.w / length;
+  const x = orientation.x / length;
+  const y = orientation.y / length;
+  const z = orientation.z / length;
+  const [vx, vy, vz] = value;
+  const dot = x * vx + y * vy + z * vz;
+  const uu = x * x + y * y + z * z;
+  const cx = y * vz - z * vy;
+  const cy = z * vx - x * vz;
+  const cz = x * vy - y * vx;
+  return [
+    2 * dot * x + (w * w - uu) * vx + 2 * w * cx,
+    2 * dot * y + (w * w - uu) * vy + 2 * w * cy,
+    2 * dot * z + (w * w - uu) * vz + 2 * w * cz,
+  ];
+}
+
+function computeNetworkFlightFrame(
+  position: Cartesian3,
+  orientation: NetworkQuaternion,
+): FlightFrame {
+  return computeFixedFrame(position, {
+    forward: rotateNetworkVector(orientation, [1, 0, 0]),
+    left: rotateNetworkVector(orientation, [0, 1, 0]),
+    up: rotateNetworkVector(orientation, [0, 0, 1]),
+  });
+}
+
+function interpolateNetworkOrientation(
+  from: NetworkQuaternion,
+  to: NetworkQuaternion,
+  amount: number,
+): NetworkQuaternion {
+  const start = new Quaternion(from.x, from.y, from.z, from.w);
+  const end = new Quaternion(to.x, to.y, to.z, to.w);
+  const result = Quaternion.slerp(start, end, amount, new Quaternion());
+  return { w: result.w, x: result.x, y: result.y, z: result.z };
+}
+
 function orientationFromFrame(frame: FlightFrame) {
   const rotation = Matrix3.clone(Matrix3.IDENTITY, new Matrix3());
   Matrix3.setColumn(rotation, 0, frame.forward, rotation);
@@ -93,10 +158,27 @@ function offsetFrom(position: Cartesian3, direction: Cartesian3, distanceM: numb
   return Cartesian3.add(position, offset, offset);
 }
 
-export function EarthScene({ onTelemetry, onTheaterStatus }: EarthSceneProps) {
+function isFormTarget(target: EventTarget | null) {
+  return target instanceof HTMLInputElement
+    || target instanceof HTMLButtonElement
+    || target instanceof HTMLTextAreaElement
+    || (target instanceof HTMLElement && target.isContentEditable);
+}
+
+export function EarthScene({
+  onTelemetry,
+  onTheaterStatus,
+  onLocalPose,
+  remotePose,
+}: EarthSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const remotePoseRef = useRef(remotePose);
   const [status, setStatus] = useState<"booting" | "ready" | "missing-token" | "error">("booting");
   const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    remotePoseRef.current = remotePose;
+  }, [remotePose]);
 
   useEffect(() => {
     const token = import.meta.env.VITE_CESIUM_ION_TOKEN?.trim();
@@ -114,18 +196,20 @@ export function EarthScene({ onTelemetry, onTheaterStatus }: EarthSceneProps) {
     let cancelled = false;
     let lastFrameTime = performance.now();
     let lastTelemetryTime = 0;
+    let lastNetworkSnapshotTime = 0;
     let flightState = createInitialFlightState();
     const pressedKeys = new Set<string>();
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!CONTROLLED_KEYS.has(event.code)) return;
+      if (!CONTROLLED_KEYS.has(event.code) || isFormTarget(event.target)) return;
       event.preventDefault();
       pressedKeys.add(event.code);
     };
     const handleKeyUp = (event: KeyboardEvent) => {
       if (!CONTROLLED_KEYS.has(event.code)) return;
-      event.preventDefault();
       pressedKeys.delete(event.code);
+      if (isFormTarget(event.target)) return;
+      event.preventDefault();
     };
     const handleBlur = () => pressedKeys.clear();
 
@@ -208,6 +292,48 @@ export function EarthScene({ onTelemetry, onTheaterStatus }: EarthSceneProps) {
         },
       });
 
+      const remotePositionProperty = new ConstantPositionProperty(initialPosition);
+      const remoteNosePositionProperty = new ConstantPositionProperty(initialPosition);
+      const remoteOrientationProperty = new ConstantProperty(initialOrientation);
+      const remoteMaterial = Color.fromCssColorString("#ffd48a").withAlpha(0.9);
+      const remoteAccent = Color.fromCssColorString("#ff9f43").withAlpha(0.9);
+      const remoteEntities = [
+        viewer.entities.add({
+          name: "C3 peer aircraft",
+          show: false,
+          position: remotePositionProperty,
+          orientation: remoteOrientationProperty,
+          box: {
+            dimensions: new Cartesian3(18, 3.2, 2.1),
+            material: remoteMaterial,
+            outline: true,
+            outlineColor: remoteAccent,
+          },
+        }),
+        viewer.entities.add({
+          name: "C3 peer wings",
+          show: false,
+          position: remotePositionProperty,
+          orientation: remoteOrientationProperty,
+          box: {
+            dimensions: new Cartesian3(4.2, 22, 0.7),
+            material: remoteAccent.withAlpha(0.72),
+          },
+        }),
+        viewer.entities.add({
+          name: "C3 peer nose",
+          show: false,
+          position: remoteNosePositionProperty,
+          orientation: remoteOrientationProperty,
+          box: {
+            dimensions: new Cartesian3(5.2, 2.4, 1.4),
+            material: remoteAccent,
+            outline: true,
+            outlineColor: Color.WHITE.withAlpha(0.68),
+          },
+        }),
+      ];
+
       const updateCamera = (position: Cartesian3, frame: FlightFrame) => {
         if (!viewer) return;
         const cameraPosition = offsetFrom(position, frame.forward, -CAMERA_BACK_M);
@@ -228,9 +354,47 @@ export function EarthScene({ onTelemetry, onTheaterStatus }: EarthSceneProps) {
         });
       };
 
+      const updateRemoteAircraft = (now: number) => {
+        const buffer = remotePoseRef.current;
+        for (const entity of remoteEntities) entity.show = buffer !== null;
+        if (!buffer) return;
+
+        const alpha = Math.min(1, Math.max(0, (now - buffer.receivedAtMs) / SNAPSHOT_INTERVAL_MS));
+        const latitudeDeg = buffer.from.latitudeDeg
+          + (buffer.to.latitudeDeg - buffer.from.latitudeDeg) * alpha;
+        const longitudeDeg = buffer.from.longitudeDeg
+          + (buffer.to.longitudeDeg - buffer.from.longitudeDeg) * alpha;
+        const altitudeM = buffer.from.altitudeM
+          + (buffer.to.altitudeM - buffer.from.altitudeM) * alpha;
+        const orientation = interpolateNetworkOrientation(
+          buffer.from.orientation,
+          buffer.to.orientation,
+          alpha,
+        );
+        const position = Cartesian3.fromDegrees(longitudeDeg, latitudeDeg, altitudeM);
+        const frame = computeNetworkFlightFrame(position, orientation);
+        remotePositionProperty.setValue(position);
+        remoteNosePositionProperty.setValue(offsetFrom(position, frame.forward, NOSE_OFFSET_M));
+        remoteOrientationProperty.setValue(orientationFromFrame(frame));
+      };
+
       const publishFlightState = () => {
         onTelemetry(toFlightTelemetry(flightState));
         onTheaterStatus(evaluateTheaterPosition(flightState.latitudeDeg, flightState.longitudeDeg));
+      };
+
+      const publishNetworkPose = () => {
+        onLocalPose({
+          latitudeDeg: flightState.latitudeDeg,
+          longitudeDeg: flightState.longitudeDeg,
+          altitudeM: flightState.altitudeM,
+          orientation: {
+            w: flightState.orientation.w,
+            x: flightState.orientation.x,
+            y: flightState.orientation.y,
+            z: flightState.orientation.z,
+          },
+        });
       };
 
       const animate = (now: number) => {
@@ -262,10 +426,15 @@ export function EarthScene({ onTelemetry, onTheaterStatus }: EarthSceneProps) {
         nosePositionProperty.setValue(offsetFrom(position, flightFrame.forward, NOSE_OFFSET_M));
         orientationProperty.setValue(orientationFromFrame(flightFrame));
         updateCamera(position, flightFrame);
+        updateRemoteAircraft(now);
 
         if (now - lastTelemetryTime >= 90) {
           lastTelemetryTime = now;
           publishFlightState();
+        }
+        if (now - lastNetworkSnapshotTime >= SNAPSHOT_INTERVAL_MS) {
+          lastNetworkSnapshotTime = now;
+          publishNetworkPose();
         }
         frameId = requestAnimationFrame(animate);
       };
@@ -275,6 +444,7 @@ export function EarthScene({ onTelemetry, onTheaterStatus }: EarthSceneProps) {
       window.addEventListener("blur", handleBlur);
       updateCamera(initialPosition, initialFrame);
       publishFlightState();
+      updateRemoteAircraft(performance.now());
       frameId = requestAnimationFrame(animate);
       if (!cancelled) setStatus("ready");
     } catch (error) {
@@ -291,7 +461,7 @@ export function EarthScene({ onTelemetry, onTheaterStatus }: EarthSceneProps) {
       window.removeEventListener("blur", handleBlur);
       if (viewer && !viewer.isDestroyed()) viewer.destroy();
     };
-  }, [onTelemetry, onTheaterStatus]);
+  }, [onLocalPose, onTelemetry, onTheaterStatus]);
 
   return (
     <section className="earth-shell" aria-label="Cesium Earth flight viewport">
