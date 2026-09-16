@@ -41,3 +41,34 @@ jobs:
 
       - name: Production build
         run: pnpm build
+
+      - name: Verify school full-stack localhost mode
+        run: |
+          set -euo pipefail
+          pnpm dev:school > /tmp/school-dev.log 2>&1 &
+          DEV_PID=$!
+          cleanup() {
+            kill "$DEV_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          READY=0
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:5173/api/health > /tmp/school-health.json; then
+              READY=1
+              break
+            fi
+            if ! kill -0 "$DEV_PID" 2>/dev/null; then
+              cat /tmp/school-dev.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+          if [ "$READY" -ne 1 ]; then
+            cat /tmp/school-dev.log
+            exit 1
+          fi
+
+          cat /tmp/school-health.json
+          pnpm verify:school

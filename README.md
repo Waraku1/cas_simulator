@@ -24,15 +24,39 @@ Create a Cesium ion browser token with only the minimum read permissions needed 
 
 ## School development mode
 
-The managed school network blocks the current Cloudflare `workers.dev` production hostname. Development therefore uses the client-only localhost path:
+The managed school network blocks the current public Cloudflare `workers.dev` production hostname before application content loads. School use therefore does not depend on that hostname.
+
+The canonical school mode is the full-stack localhost runtime:
+
+```bash
+pnpm dev:school
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173
+```
+
+This uses the Cloudflare Vite plugin locally, so the application, Worker API, WebSocket room endpoint, and Durable Object execute on the development Mac. The browser still uses the existing Cesium ion connection for Earth data, which has already been verified on the school network.
+
+For a quick backend/multiplayer self-test, leave `pnpm dev:school` running and use a second terminal:
+
+```bash
+pnpm verify:school
+```
+
+That check creates two local WebSocket clients, joins them to one generated room, verifies two-player presence, and verifies one pose relay.
+
+The previous client-only mode remains available:
 
 ```bash
 pnpm dev
 ```
 
-Open `http://127.0.0.1:5173`. Do not bypass TLS warnings or school filtering controls.
+Use client-only mode only when the Worker/Durable Object backend is intentionally unnecessary.
 
-The client-only localhost server does not host the Cloudflare Worker/Durable Object backend. C3 room connection attempts therefore fail gracefully in this mode while flight, theater, HUD, and diagnostics remain usable. Real two-browser multiplayer verification is performed against the deployed Worker on an allowed network.
+Two independent browser contexts on the same Mac can use the local room backend. Separate school-managed devices are not assumed to reach a laptop-hosted service across the managed Wi-Fi. Do not bypass TLS warnings or school filtering controls, and do not expose the development server on the managed LAN without explicit authorization.
 
 ## Flight controls
 
@@ -62,7 +86,7 @@ C3 introduces a bounded private two-player room layer:
 - the room validates and relays snapshots without running a server simulation tick;
 - the receiving client interpolates the peer aircraft locally.
 
-C3 is implemented and deployed. Production health, Durable Object binding, two-client presence, and pose relay have passed automated production verification. Final C3 closure now requires only human-visible two-browser UI/interpolation QA on an allowed network.
+C3 is implemented and deployed. Production health, Durable Object binding, two-client presence, and pose relay have passed automated production verification. The same Worker/Durable Object contract is also exercised locally by the school full-stack mode.
 
 C3 contains networking/presence only. Later competition/scoring behavior remains outside this gate.
 
@@ -76,7 +100,7 @@ Current production health endpoint:
 https://cas-flight-simulator.heleshiheiheleshihei.workers.dev/api/health
 ```
 
-Production browser verification is performed on an allowed network before C3/release closure.
+The public production hostname remains subject to the school-managed network policy. School development/demo uses `pnpm dev:school` instead of attempting to bypass that policy.
 
 ## Validate
 
@@ -86,12 +110,20 @@ pnpm check
 pnpm build
 ```
 
+For school full-stack validation:
+
+```bash
+pnpm dev:school
+# in another terminal
+pnpm verify:school
+```
+
 ## Project gates
 
 - C0 Foundation — CLOSED
 - C1 Flight — CLOSED / ACCEPTED
 - C2 World / Theater resource gate — CLOSED / ACCEPTED
-- C3 Multiplayer — IMPLEMENTED + DEPLOYED / MANUAL TWO-BROWSER UI QA PENDING
+- C3 Multiplayer — IMPLEMENTED + DEPLOYED / SCHOOL LOCAL-FULL-STACK QA PENDING
 - C4 Competition loop — pending
 - C5 Release — pending
 
