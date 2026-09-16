@@ -61,6 +61,7 @@ const required = [
   "docs/architecture/C2_WORLD_THEATER.md",
   "docs/architecture/C3_MULTIPLAYER.md",
   "docs/architecture/C4_PRODUCT_CONTRACT.md",
+  "docs/architecture/C4D_RATING.md",
 ];
 
 for (const relative of required) {
@@ -110,6 +111,42 @@ if (!rankedClient.includes("/api/matches/") || !rankedClient.includes("joinToken
 
 const accountClient = await readFile(join(root, "src/client/product/useAccount.ts"), "utf8");
 if (!accountClient.includes("/api/auth") && !accountClient.includes("ACCOUNT_API")) throw new Error("C4D product client must use live account APIs");
+
+const workerApp = await readFile(join(root, "src/worker/app.ts"), "utf8");
+if (!workerApp.includes("authenticateRequest") || !workerApp.includes('headers.set(AUTHENTICATED_USER_HEADER, user.userId)')) {
+  throw new Error("C4D production Worker must authenticate ranked transport and overwrite public identity headers");
+}
+if (!workerApp.includes('headers.set(FIXED_AIRCRAFT_HEADER, user.fixedAircraftId ?? "")')) {
+  throw new Error("C4D production Worker must inject fixed-aircraft state from the authenticated account");
+}
+
+const matchmaker = await readFile(join(root, "src/worker/index.ts"), "utf8");
+if (!matchmaker.includes("accountUserId: first.attachment.userId") || !matchmaker.includes("randomAssignment:")) {
+  throw new Error("C4D production match init must carry server-only account/provenance metadata");
+}
+if (matchmaker.includes("fixedAircraftId: parsed.fixedAircraftId")) {
+  throw new Error("C4D production matchmaking must not trust client-supplied fixedAircraftId");
+}
+if (!matchmaker.includes("entry.attachment.userId !== first.attachment.userId")) {
+  throw new Error("C4D production matchmaking must reject same-account pairing");
+}
+
+const rankedAuthority = await readFile(join(root, "src/worker/ranked-match.ts"), "utf8");
+if (!rankedAuthority.includes("D1RatingRepository") || !rankedAuthority.includes("RATING_FINALIZED_KEY") || !rankedAuthority.includes("RATING_RETRY_MS")) {
+  throw new Error("C4D RankedMatch must contain idempotent D1 result finalization with retry scheduling");
+}
+if (!rankedAuthority.includes("updateFixableAircraft") || !rankedAuthority.includes("invalid_participant_identity")) {
+  throw new Error("C4D RankedMatch must enforce participant identity and post-match fixable-aircraft persistence");
+}
+
+const competitionRuntime = await readFile(join(root, "src/worker/competition-runtime.ts"), "utf8");
+const snapshotSource = competitionRuntime.split("export function competitionSnapshot")[1]?.split("export function nextCompetitionDeadline")[0] ?? "";
+if (!competitionRuntime.includes("accountUserId: string | null") || !competitionRuntime.includes("randomAssignment: boolean")) {
+  throw new Error("C4D competition runtime must persist server-only account/provenance metadata");
+}
+if (snapshotSource.includes("accountUserId") || snapshotSource.includes("randomAssignment")) {
+  throw new Error("C4D server-only account/provenance metadata must not appear in client competition snapshots");
+}
 
 const deployWorkflow = await readFile(join(root, ".github/workflows/deploy.yml"), "utf8");
 if (!deployWorkflow.includes("verify-production-multiplayer.mjs")) throw new Error("Missing C3 production multiplayer deploy verification");
