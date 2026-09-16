@@ -14,6 +14,7 @@ export function DiagnosticsPanel() {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const fpsClass = diagnostics.fps >= C2_RESOURCE_BUDGET.minimumFps ? "ok" : "warn";
   const averageFpsClass = diagnostics.averageFps >= C2_RESOURCE_BUDGET.targetFps ? "ok" : "warn";
+  const minimumFpsClass = diagnostics.minimumFps >= C2_RESOURCE_BUDGET.minimumFps ? "ok" : "warn";
   const transferClass = diagnostics.transferredMiB <= C2_RESOURCE_BUDGET.targetTransferMiBPerPlayerSession
     ? "ok"
     : "warn";
@@ -75,7 +76,7 @@ export function DiagnosticsPanel() {
       <dl>
         <div><dt>FPS NOW</dt><dd className={fpsClass}>{diagnostics.fps.toFixed(0)}</dd></div>
         <div><dt>FPS AVG</dt><dd className={averageFpsClass}>{diagnostics.averageFps.toFixed(0)}</dd></div>
-        <div><dt>FPS MIN</dt><dd className={fpsClass}>{diagnostics.minimumFps.toFixed(0)}</dd></div>
+        <div><dt>FPS MIN</dt><dd className={minimumFpsClass}>{diagnostics.minimumFps.toFixed(0)}</dd></div>
         <div><dt>OBS TRANSFER</dt><dd className={transferClass}>{diagnostics.transferredMiB.toFixed(1)} MiB</dd></div>
         <div><dt>RESOURCES</dt><dd>{diagnostics.resourceCount}</dd></div>
         <div><dt>OPAQUE X-ORIGIN</dt><dd>{diagnostics.opaqueCrossOriginResourceCount}</dd></div>
