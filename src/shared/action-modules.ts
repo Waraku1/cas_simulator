@@ -1,31 +1,7 @@
+import catalogJson from "./action-module-catalog.json";
 import type { ActionModuleSpec } from "./product";
 
-export const ACTION_MODULE_CATALOG = Object.freeze([
-  {
-    actionModuleId: "vector-link",
-    displayName: "VECTOR LINK",
-    heartPointEffect: 12,
-    cooldownMs: 4_500,
-    activationRadiusM: 240,
-    activationProfile: "balanced",
-  },
-  {
-    actionModuleId: "tempo-link",
-    displayName: "TEMPO LINK",
-    heartPointEffect: 7,
-    cooldownMs: 2_500,
-    activationRadiusM: 180,
-    activationProfile: "close",
-  },
-  {
-    actionModuleId: "focus-link",
-    displayName: "FOCUS LINK",
-    heartPointEffect: 18,
-    cooldownMs: 7_000,
-    activationRadiusM: 125,
-    activationProfile: "precision",
-  },
-] satisfies readonly ActionModuleSpec[]);
+export const ACTION_MODULE_CATALOG = catalogJson as readonly ActionModuleSpec[];
 
 const ACTION_MODULE_BY_ID = new Map(
   ACTION_MODULE_CATALOG.map((module) => [module.actionModuleId, module]),
