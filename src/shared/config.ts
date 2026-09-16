@@ -13,6 +13,8 @@ export const THEATER = Object.freeze({
 export const C2_RESOURCE_BUDGET = Object.freeze({
   targetFps: 45,
   minimumFps: 30,
+  runtimeFrameCapFps: 60,
+  preflightMinutes: 3,
   benchmarkMinutes: 30,
   targetTransferMiBPerPlayerSession: 150,
   resourceTimingBufferSize: 6_000,

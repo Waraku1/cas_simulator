@@ -15,9 +15,23 @@ export interface RuntimeDiagnostics {
 }
 
 const MEBIBYTE = 1024 * 1024;
+let renderedFrameCount = 0;
 
 if (typeof performance !== "undefined" && typeof performance.setResourceTimingBufferSize === "function") {
   performance.setResourceTimingBufferSize(C2_RESOURCE_BUDGET.resourceTimingBufferSize);
+}
+
+/** Called from Cesium's post-render event so C2 reports actual rendered frames. */
+export function recordRenderedFrame() {
+  if (typeof document === "undefined" || document.visibilityState === "visible") {
+    renderedFrameCount += 1;
+  }
+}
+
+function consumeRenderedFrames() {
+  const count = renderedFrameCount;
+  renderedFrameCount = 0;
+  return count;
 }
 
 function readNetworkUsage(): Pick<
@@ -61,6 +75,11 @@ function readUsedHeapMiB() {
     : null;
 }
 
+/**
+ * C2 measures Cesium render cadence during active foreground time only.
+ * Background-tab throttling and long browser suspension are excluded from the
+ * benchmark instead of being misclassified as sustained low FPS.
+ */
 export function useRuntimeDiagnostics(): RuntimeDiagnostics {
   const [diagnostics, setDiagnostics] = useState<RuntimeDiagnostics>({
     fps: 0,
@@ -76,44 +95,65 @@ export function useRuntimeDiagnostics(): RuntimeDiagnostics {
   });
 
   useEffect(() => {
-    let animationFrame = 0;
-    let frameCount = 0;
-    let totalFrameCount = 0;
+    let timerId = 0;
+    let sampleStartedAt = performance.now();
+    let activeSeconds = 0;
+    let weightedFpsTotal = 0;
+    let validSampleSeconds = 0;
     let minimumFps = Number.POSITIVE_INFINITY;
-    const sessionStartedAt = performance.now();
-    let sampleStartedAt = sessionStartedAt;
+    let started = false;
 
-    const sample = (now: number) => {
-      frameCount += 1;
-      totalFrameCount += 1;
-      const sampleElapsedMs = now - sampleStartedAt;
-
-      if (sampleElapsedMs >= 1_000) {
-        const sessionElapsedMs = Math.max(1, now - sessionStartedAt);
-        const fps = (frameCount * 1_000) / sampleElapsedMs;
-        minimumFps = Math.min(minimumFps, fps);
-        const sessionSeconds = sessionElapsedMs / 1_000;
-        const network = readNetworkUsage();
-
-        setDiagnostics({
-          fps,
-          averageFps: (totalFrameCount * 1_000) / sessionElapsedMs,
-          minimumFps: Number.isFinite(minimumFps) ? minimumFps : fps,
-          ...network,
-          sessionSeconds,
-          benchmarkComplete: sessionSeconds >= C2_RESOURCE_BUDGET.benchmarkMinutes * 60,
-          usedHeapMiB: readUsedHeapMiB(),
-        });
-
-        frameCount = 0;
-        sampleStartedAt = now;
-      }
-
-      animationFrame = requestAnimationFrame(sample);
+    const resetSampleWindow = (now: number) => {
+      consumeRenderedFrames();
+      sampleStartedAt = now;
     };
 
-    animationFrame = requestAnimationFrame(sample);
-    return () => cancelAnimationFrame(animationFrame);
+    const handleVisibilityChange = () => {
+      resetSampleWindow(performance.now());
+    };
+
+    const sample = () => {
+      const now = performance.now();
+      const sampleElapsedMs = now - sampleStartedAt;
+      const frames = consumeRenderedFrames();
+
+      if (document.visibilityState === "visible" && sampleElapsedMs >= 750 && sampleElapsedMs <= 1_500) {
+        const sampleSeconds = sampleElapsedMs / 1_000;
+        const fps = frames / sampleSeconds;
+
+        // Ignore initialization before Cesium has rendered its first useful frame.
+        if (started || frames > 0) {
+          started = true;
+          activeSeconds += sampleSeconds;
+          weightedFpsTotal += fps * sampleSeconds;
+          validSampleSeconds += sampleSeconds;
+          minimumFps = Math.min(minimumFps, fps);
+
+          const network = readNetworkUsage();
+          setDiagnostics({
+            fps,
+            averageFps: validSampleSeconds > 0 ? weightedFpsTotal / validSampleSeconds : fps,
+            minimumFps: Number.isFinite(minimumFps) ? minimumFps : fps,
+            ...network,
+            sessionSeconds: activeSeconds,
+            benchmarkComplete: activeSeconds >= C2_RESOURCE_BUDGET.benchmarkMinutes * 60,
+            usedHeapMiB: readUsedHeapMiB(),
+          });
+        }
+      }
+
+      sampleStartedAt = now;
+      timerId = window.setTimeout(sample, 1_000);
+    };
+
+    renderedFrameCount = 0;
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    timerId = window.setTimeout(sample, 1_000);
+    return () => {
+      window.clearTimeout(timerId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      renderedFrameCount = 0;
+    };
   }, []);
 
   return diagnostics;

@@ -22,20 +22,30 @@ export function DiagnosticsPanel() {
     1,
     diagnostics.sessionSeconds / (C2_RESOURCE_BUDGET.benchmarkMinutes * 60),
   );
+  const preflightComplete = diagnostics.sessionSeconds >= C2_RESOURCE_BUDGET.preflightMinutes * 60;
+  const benchmarkLabel = diagnostics.benchmarkComplete
+    ? "30 MIN COMPLETE"
+    : preflightComplete
+      ? "PREFLIGHT READY"
+      : "PREFLIGHT ACTIVE";
 
   const copyReport = async () => {
     const report = {
       gate: "C2_WORLD_THEATER",
       capturedAt: new Date().toISOString(),
+      preflightMinutesTarget: C2_RESOURCE_BUDGET.preflightMinutes,
+      preflightComplete,
       benchmarkMinutesTarget: C2_RESOURCE_BUDGET.benchmarkMinutes,
-      elapsedSeconds: Number(diagnostics.sessionSeconds.toFixed(1)),
+      elapsedActiveSeconds: Number(diagnostics.sessionSeconds.toFixed(1)),
       benchmarkComplete: diagnostics.benchmarkComplete,
+      runtimeFrameCapFps: C2_RESOURCE_BUDGET.runtimeFrameCapFps,
       fps: {
         current: Number(diagnostics.fps.toFixed(1)),
         average: Number(diagnostics.averageFps.toFixed(1)),
         minimum: Number(diagnostics.minimumFps.toFixed(1)),
         target: C2_RESOURCE_BUDGET.targetFps,
         minimumTarget: C2_RESOURCE_BUDGET.minimumFps,
+        measurement: "Cesium post-render frames during active foreground time",
       },
       network: {
         observedTransferMiB: Number(diagnostics.transferredMiB.toFixed(2)),
@@ -64,7 +74,7 @@ export function DiagnosticsPanel() {
       <div className="diagnostics__header">
         <div>
           <div className="diagnostics__title">C2 RESOURCE GATE</div>
-          <strong>{diagnostics.benchmarkComplete ? "30 MIN COMPLETE" : "BENCHMARK ACTIVE"}</strong>
+          <strong>{benchmarkLabel}</strong>
         </div>
         <span>{formatDuration(diagnostics.sessionSeconds)}</span>
       </div>
@@ -77,6 +87,7 @@ export function DiagnosticsPanel() {
         <div><dt>FPS NOW</dt><dd className={fpsClass}>{diagnostics.fps.toFixed(0)}</dd></div>
         <div><dt>FPS AVG</dt><dd className={averageFpsClass}>{diagnostics.averageFps.toFixed(0)}</dd></div>
         <div><dt>FPS MIN</dt><dd className={minimumFpsClass}>{diagnostics.minimumFps.toFixed(0)}</dd></div>
+        <div><dt>FRAME CAP</dt><dd>{C2_RESOURCE_BUDGET.runtimeFrameCapFps}</dd></div>
         <div><dt>OBS TRANSFER</dt><dd className={transferClass}>{diagnostics.transferredMiB.toFixed(1)} MiB</dd></div>
         <div><dt>RESOURCES</dt><dd>{diagnostics.resourceCount}</dd></div>
         <div><dt>OPAQUE X-ORIGIN</dt><dd>{diagnostics.opaqueCrossOriginResourceCount}</dd></div>
@@ -86,7 +97,7 @@ export function DiagnosticsPanel() {
       </dl>
 
       <p className="diagnostics__caveat">
-        Transfer is observable browser timing data, not complete provider bandwidth.
+        Active foreground Cesium render FPS. Transfer is observable timing data, not complete provider bandwidth.
       </p>
       <button className="diagnostics__copy" type="button" onClick={copyReport}>
         {copyState === "copied" ? "REPORT COPIED" : copyState === "failed" ? "COPY FAILED" : "COPY C2 REPORT"}

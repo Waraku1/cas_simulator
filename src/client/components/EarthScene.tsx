@@ -13,6 +13,8 @@ import {
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { useEffect, useRef, useState } from "react";
+import { C2_RESOURCE_BUDGET } from "../../shared/config";
+import { recordRenderedFrame } from "../diagnostics/useRuntimeDiagnostics";
 import {
   createInitialFlightState,
   getLocalBodyFrame,
@@ -45,6 +47,7 @@ const CAMERA_BACK_M = 108;
 const CAMERA_UP_M = 16;
 const CAMERA_LOOK_AHEAD_M = 72;
 const NOSE_OFFSET_M = 11;
+const SIMULATION_FRAME_INTERVAL_MS = 1_000 / C2_RESOURCE_BUDGET.runtimeFrameCapFps;
 
 type FlightFrame = Readonly<{
   forward: Cartesian3;
@@ -106,6 +109,7 @@ export function EarthScene({ onTelemetry, onTheaterStatus }: EarthSceneProps) {
 
     Ion.defaultAccessToken = token;
     let viewer: Viewer | undefined;
+    let removePostRenderListener: (() => void) | undefined;
     let frameId = 0;
     let cancelled = false;
     let lastFrameTime = performance.now();
@@ -137,6 +141,7 @@ export function EarthScene({ onTelemetry, onTheaterStatus }: EarthSceneProps) {
         navigationHelpButton: false,
         sceneModePicker: false,
         selectionIndicator: false,
+        targetFrameRate: C2_RESOURCE_BUDGET.runtimeFrameCapFps,
         timeline: false,
       });
 
@@ -144,6 +149,7 @@ export function EarthScene({ onTelemetry, onTheaterStatus }: EarthSceneProps) {
       viewer.scene.fog.enabled = true;
       viewer.scene.requestRenderMode = false;
       viewer.scene.screenSpaceCameraController.enableInputs = false;
+      removePostRenderListener = viewer.scene.postRender.addEventListener(recordRenderedFrame);
 
       const boundaryPositions = getTheaterBoundaryDegrees().map(([longitudeDeg, latitudeDeg]) =>
         Cartesian3.fromDegrees(longitudeDeg, latitudeDeg),
@@ -229,7 +235,13 @@ export function EarthScene({ onTelemetry, onTheaterStatus }: EarthSceneProps) {
 
       const animate = (now: number) => {
         if (cancelled || !viewer) return;
-        const deltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
+        const elapsedMs = now - lastFrameTime;
+        if (elapsedMs < SIMULATION_FRAME_INTERVAL_MS) {
+          frameId = requestAnimationFrame(animate);
+          return;
+        }
+
+        const deltaSeconds = Math.min(elapsedMs / 1_000, 0.05);
         lastFrameTime = now;
 
         const input: FlightInput = {
@@ -273,6 +285,7 @@ export function EarthScene({ onTelemetry, onTheaterStatus }: EarthSceneProps) {
     return () => {
       cancelled = true;
       cancelAnimationFrame(frameId);
+      removePostRenderListener?.();
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleBlur);
