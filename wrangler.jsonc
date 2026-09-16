@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "cas-flight-simulator",
   "compatibility_date": "2026-09-14",
-  "main": "./src/worker/index.ts",
+  "main": "./src/worker/app.ts",
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",

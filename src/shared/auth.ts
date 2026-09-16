@@ -8,6 +8,15 @@ export const AUTH_CONTRACT = Object.freeze({
   maximumDisplayNameLength: 24,
 });
 
+export const ACCOUNT_API = Object.freeze({
+  register: "/api/auth/register",
+  login: "/api/auth/login",
+  session: "/api/auth/session",
+  logout: "/api/auth/logout",
+  fixedAircraft: "/api/account/fixed-aircraft",
+  leaderboard: "/api/leaderboard",
+});
+
 export type PublicUserProfile = Readonly<{
   userId: string;
   loginId: string;
@@ -17,6 +26,7 @@ export type PublicUserProfile = Readonly<{
   losses: number;
   draws: number;
   fixedAircraftId: string | null;
+  fixableAircraftId: string | null;
 }>;
 
 export type RegisterRequest = Readonly<{
@@ -30,6 +40,25 @@ export type LoginRequest = Readonly<{
   password: string;
 }>;
 
+export type FixedAircraftRequest = Readonly<{
+  aircraftId: string | null;
+}>;
+
+export type LeaderboardProfile = Readonly<{
+  rank: number;
+  userId: string;
+  displayName: string;
+  rating: number;
+  wins: number;
+  losses: number;
+  draws: number;
+}>;
+
+export type LeaderboardResponse = Readonly<{
+  ok: true;
+  entries: readonly LeaderboardProfile[];
+}>;
+
 export type AuthSuccessResponse = Readonly<{
   ok: true;
   user: PublicUserProfile;
@@ -40,7 +69,9 @@ export type AuthErrorCode =
   | "LOGIN_ID_TAKEN"
   | "INVALID_CREDENTIALS"
   | "NOT_AUTHENTICATED"
+  | "AIRCRAFT_NOT_FIXABLE"
   | "RATE_LIMITED"
+  | "STORAGE_UNAVAILABLE"
   | "INTERNAL_ERROR";
 
 export type AuthErrorResponse = Readonly<{

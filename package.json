@@ -13,6 +13,7 @@
     "verify:school": "SCHOOL_URL=http://127.0.0.1:5173 node scripts/verify-production-multiplayer.mjs",
     "verify:school:c4b": "SCHOOL_URL=http://127.0.0.1:5173 node scripts/verify-school-matchmaking.mjs",
     "verify:school:c4c": "SCHOOL_URL=http://127.0.0.1:5173 node scripts/verify-school-competition.mjs",
+    "verify:school:c4d": "SCHOOL_URL=http://127.0.0.1:5173 node scripts/verify-school-accounts.mjs",
     "verify:c4c:runtime": "node scripts/verify-c4c-runtime.mjs",
     "prebuild": "pnpm sync:cesium",
     "build": "tsc -b && vite build",
