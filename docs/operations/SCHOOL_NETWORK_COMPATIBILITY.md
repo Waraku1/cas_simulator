@@ -2,15 +2,18 @@
 
 ## Status
 
-School-network usability is now a formal project requirement.
+School-network usability is a formal project requirement.
 
-The school-managed network blocks the current public Cloudflare `workers.dev` production hostname before application content loads. Chrome reports `NET::ERR_CERT_AUTHORITY_INVALID` and identifies Fortinet.
+Two independent constraints are now confirmed on the managed school Mac:
 
-The same development Mac and school Wi-Fi successfully run the Cesium Earth client through `http://127.0.0.1:5173`. GitHub-hosted infrastructure also reaches the deployed production root, health endpoint, Durable Object binding, and production WebSocket relay successfully. The remaining incompatibility is therefore managed-network reachability to the public Worker hostname, not the simulator, Cesium client, or C3 room implementation.
+1. the school network blocks the public Cloudflare `workers.dev` production hostname before application content loads; Chrome reports `NET::ERR_CERT_AUTHORITY_INVALID` and identifies Fortinet;
+2. the Mac runs macOS 12.3, while the current Cloudflare `workerd` binary used by Miniflare/Vite local Worker development requires macOS 13.5 or later.
+
+The Cesium Earth client itself works through `http://127.0.0.1:5173`, and GitHub-hosted infrastructure verifies the production Worker, Durable Object binding, and WebSocket relay. The school compatibility problem is therefore environmental, not a failure of the C1/C2/C3 application logic.
 
 ## Canonical school operating plan
 
-### Full-stack school mode
+### Full school mode without workerd
 
 Use:
 
@@ -24,14 +27,27 @@ Open:
 http://127.0.0.1:5173
 ```
 
-`dev:school` synchronizes the Cesium runtime assets and starts the normal Cloudflare Vite configuration locally. The Cloudflare Vite plugin/Miniflare provides local Worker and Durable Object resources, so these application paths remain on the development Mac:
+The command starts two localhost processes:
+
+- Vite/Cesium client at `127.0.0.1:5173`;
+- dependency-free Node multiplayer relay at `127.0.0.1:8787`.
+
+`vite.school.config.ts` proxies `/api/*` and WebSocket upgrades from port 5173 to the relay. Browser code therefore keeps using the same-origin paths used in production:
 
 - `/api/health`;
-- `/api/rooms/{ROOM}/ws`;
-- `MultiplayerRoom` Durable Object instances;
-- two-client presence and pose relay.
+- `/api/rooms/{ROOM}/ws`.
 
-This mode does not require browser access to the blocked public `workers.dev` hostname.
+The Node relay implements only the bounded C3 contract needed for school use:
+
+- 6-character room validation;
+- maximum 2 clients;
+- server-generated player identity and slot;
+- welcome/presence messages;
+- bounded text snapshot validation;
+- peer pose relay;
+- disconnect presence update.
+
+It does not replace the production architecture. Production remains Cloudflare Worker + SQLite-backed Durable Object + Hibernation WebSocket API.
 
 ### Automated school-local multiplayer check
 
@@ -50,7 +66,7 @@ Expected result includes:
 "relaySequence": 1
 ```
 
-This verifies two local WebSocket clients, shared-room presence, and one peer-pose relay through the local Durable Object.
+Before opening WebSockets, the verifier confirms that `/api/health` returns the C3 multiplayer feature. It then verifies two local clients, shared-room presence, and one peer-pose relay.
 
 ### Browser demonstration
 
@@ -66,13 +82,19 @@ The previous client-only mode remains available:
 pnpm dev
 ```
 
-Use it only when the Worker/Durable Object backend is intentionally unnecessary.
+Use it only when multiplayer/backend behavior is intentionally unnecessary.
+
+## Why Cloudflare local runtime is not used at school
+
+The current Cloudflare Vite plugin starts Miniflare/workerd for local Worker and Durable Object development. On the managed Mac this exits before server startup because macOS 12.3 is below the current workerd minimum supported macOS version.
+
+The project does not pin an obsolete workerd build merely to bypass that platform requirement. Doing so would create an unsupported compatibility surface against the current C3 Durable Object configuration. The school Node relay instead keeps the production protocol stable while removing workerd only from the school execution path.
 
 ## Separate-device boundary
 
-This plan guarantees full-stack school use on the development Mac. It does **not** assume that a second school-managed device can reach a server hosted on that Mac across the managed Wi-Fi.
+This plan guarantees school use on the development Mac. It does **not** assume that a second school-managed device can reach a server hosted on that Mac across managed Wi-Fi.
 
-Do not expose the local Vite/Worker server on the school LAN unless that use is explicitly permitted. If separate-device school multiplayer becomes a mandatory requirement, it needs a network/hostname path permitted by school policy; it must not be implemented by evading the existing filter.
+Do not expose the local Vite/relay server on the school LAN unless that use is explicitly permitted. If separate-device school multiplayer becomes mandatory, it needs a network/hostname path permitted by school policy; it must not be implemented by evading the existing filter.
 
 ## Production deployment and backend verification
 
@@ -91,4 +113,4 @@ Do not:
 - modify the application hostname solely to evade a block;
 - expose a development server to the managed school LAN without authorization.
 
-The compatibility solution is local execution of the application's own Worker/Durable Object development runtime, not circumvention of the managed network policy.
+The compatibility solution is supported localhost application execution, not circumvention of the managed network policy.
