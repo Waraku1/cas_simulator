@@ -1,8 +1,9 @@
 import { ACCOUNT_API } from "../shared/auth";
 import { MATCHMAKING_PATH } from "../shared/matchmaking";
-import coreWorker, { MultiplayerRoom, RankedMatch, RankedMatchmaker } from "./index";
+import coreWorker, { MultiplayerRoom, RankedMatchmaker } from "./index";
 import { D1AuthRepository, type D1DatabaseLike } from "./auth/repository";
 import { authenticateRequest, handleAccountApi } from "./auth/service";
+import { RankedMatch } from "./ranked-match-integrity";
 
 export { MultiplayerRoom, RankedMatch, RankedMatchmaker };
 

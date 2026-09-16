@@ -3,9 +3,10 @@
 ## Status
 
 - C4C authoritative match runtime: **CLOSED / ACCEPTED** after human QA.
-- C4D school-local rated product: **AUTOMATED E2E PASS** on main `a6cec45697d9e076bf984843b186660b2671e556`.
-- C4D production Worker/Durable Object integration: **IMPLEMENTATION IN PROGRESS** on `c4d/production-rated-integration`.
-- Production D1 provisioning, binding, migration, deployment, and public rated-product smoke: **PENDING**.
+- C4D school-local rated product: **AUTOMATED E2E PASS** on main `a6cec45697d9e076bf984843b186660b2671e556` and retained by later main CI.
+- C4D production Worker/Durable Object authority code: **IMPLEMENTED / CI GREEN** on main `e2470fa005ac8f6abd405ba071ba62f6bfb64011`.
+- One-account/one-active-rated-match integrity hardening: **IMPLEMENTED / CI PENDING** on `c4d/active-match-integrity`.
+- Production D1 provisioning, binding, migration, deployment, and public rated-product smoke: **BLOCKED ON CLOUDFLARE D1 API AUTHORIZATION**.
 
 C4D is not closed until the production persistence gate is completed.
 
@@ -48,8 +49,31 @@ After a result exists:
 5. A durable `rating-finalized-v1` marker is written only after required account mutations succeed.
 6. If D1 mutation fails, the Durable Object keeps the match result and schedules an alarm retry rather than losing or recomputing the result.
 7. Repeated calls are safe because the D1 `rated_matches` ledger rejects duplicate application by `match_id`.
+8. The global active-match lock is released only after the account-finalization marker exists; lock-release failure is retried by Durable Object alarm.
 
-This means a transient persistence failure does not invalidate the already-determined match result and does not create a double rating update.
+This means a transient persistence failure does not invalidate the already-determined match result, does not create a double rating update, and does not prematurely allow the same account to enter another rated match before finalization completes.
+
+## One active rated match per account
+
+`RankedMatchmaker` persists a global map from authenticated `userId` to authoritative `matchId` in its Durable Object storage.
+
+- A user already present in this map cannot enter a second rated queue/match from another browser context or tab.
+- Self-matching of the same account remains prohibited independently.
+- Both participants are locked before RankedMatch initialization.
+- Initialization failure rolls back only locks that still point to the failed `matchId`.
+- Match completion releases a lock only when `active[userId] === matchId`; delayed completion from an older match therefore cannot clear a newer lock.
+- `RankedMatch` uses the production integrity wrapper to release both participant locks only after account finalization has completed.
+- Lock release is idempotent and alarm-retried on internal failure.
+
+## Initial connection integrity
+
+A participant who receives a ranked assignment but never establishes the RankedMatch connection no longer leaves the match indefinitely pending.
+
+- Initial deadline: `activeAtMs + 20 seconds`.
+- Connecting before that deadline clears the participant deadline.
+- If one participant remains absent when the deadline expires, the connected participant wins by FORFEIT.
+- If both participants remain absent, the match resolves as NO CONTEST / `infrastructure-failure`.
+- The school-local runtime mirrors this behavior and the pure runtime CI gate verifies both outcomes.
 
 ## Fixed-aircraft contract
 
@@ -77,7 +101,7 @@ The CI gate `C4D_AUTHENTICATED_RATED_PRODUCT_SMOKE` covers:
 - rejection of a non-fixable aircraft;
 - fixed-aircraft persistence into the next match.
 
-The same CI run also retains C3, C4B, C4C, and account regression gates.
+The pure runtime gate additionally verifies 20-second reconnect grace, initial-connect grace, and dual-initial-absence NO CONTEST behavior. The same CI run retains C3, C4B, C4C, and account regression gates.
 
 ## Production D1 deployment gate
 
@@ -88,13 +112,12 @@ The repository contains migrations:
 
 The production `ACCOUNTS` D1 binding is intentionally not configured with a placeholder database ID. A real Cloudflare D1 database must first be provisioned, and the resulting real `database_id` must then be bound as `ACCOUNTS` and both migrations applied.
 
-Until that binding exists:
+An isolated GitHub Actions provisioning attempt was executed before any production deployment. Cloudflare rejected `wrangler d1 list --json` with API authentication error code `10000`. No D1 database, migration, binding, or Worker deployment was created by that failed run. The existing production service therefore remained unchanged.
+
+Until D1 authorization is available:
 
 - existing C3 production room functionality remains available;
-- account and authenticated ranked-product routes fail closed with `STORAGE_UNAVAILABLE` rather than falling back to client identity.
+- account and authenticated ranked-product routes fail closed with `STORAGE_UNAVAILABLE` rather than falling back to client identity;
+- the D1 provisioning workflow remains safely rerunnable after the Cloudflare token is granted D1 access.
 
-After provisioning, C4D requires a production smoke covering account creation/session, two-account matchmaking, one completed rated result, account refresh, leaderboard update, and duplicate-result protection before C4D can be closed.
-
-## Remaining security hardening
-
-Before C5 release closure, review concurrent multi-tab ranked participation for the same account and decide whether to add a persistent one-active-rated-match-per-account lock in the global matchmaker. Self-matching of the same account is already prohibited; the remaining concern is simultaneous matches against different opponents from multiple browser contexts.
+After provisioning, C4D requires a production smoke covering account creation/session, two-account matchmaking, one completed rated result, account refresh, leaderboard update, duplicate-result protection, active-match lock behavior, and fixed-aircraft persistence before C4D can be closed.

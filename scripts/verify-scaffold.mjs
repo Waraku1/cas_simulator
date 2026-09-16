@@ -28,6 +28,7 @@ const required = [
   "src/worker/app.ts",
   "src/worker/index.ts",
   "src/worker/ranked-match.ts",
+  "src/worker/ranked-match-integrity.ts",
   "src/worker/competition-runtime.ts",
   "src/worker/auth/crypto.ts",
   "src/worker/auth/repository.ts",
@@ -119,6 +120,9 @@ if (!workerApp.includes("authenticateRequest") || !workerApp.includes('headers.s
 if (!workerApp.includes('headers.set(FIXED_AIRCRAFT_HEADER, user.fixedAircraftId ?? "")')) {
   throw new Error("C4D production Worker must inject fixed-aircraft state from the authenticated account");
 }
+if (!workerApp.includes('from "./ranked-match-integrity"')) {
+  throw new Error("C4D production Worker must export the active-match integrity wrapped RankedMatch");
+}
 
 const matchmaker = await readFile(join(root, "src/worker/index.ts"), "utf8");
 if (!matchmaker.includes("accountUserId: first.attachment.userId") || !matchmaker.includes("randomAssignment:")) {
@@ -130,6 +134,9 @@ if (matchmaker.includes("fixedAircraftId: parsed.fixedAircraftId")) {
 if (!matchmaker.includes("entry.attachment.userId !== first.attachment.userId")) {
   throw new Error("C4D production matchmaking must reject same-account pairing");
 }
+if (!matchmaker.includes("ACTIVE_MATCHES_KEY") || !matchmaker.includes("account_in_active_match") || !matchmaker.includes("MATCH_COMPLETE_PATH")) {
+  throw new Error("C4D production matchmaking must enforce and release one active rated match per account");
+}
 
 const rankedAuthority = await readFile(join(root, "src/worker/ranked-match.ts"), "utf8");
 if (!rankedAuthority.includes("D1RatingRepository") || !rankedAuthority.includes("RATING_FINALIZED_KEY") || !rankedAuthority.includes("RATING_RETRY_MS")) {
@@ -139,6 +146,14 @@ if (!rankedAuthority.includes("updateFixableAircraft") || !rankedAuthority.inclu
   throw new Error("C4D RankedMatch must enforce participant identity and post-match fixable-aircraft persistence");
 }
 
+const rankedIntegrity = await readFile(join(root, "src/worker/ranked-match-integrity.ts"), "utf8");
+if (!rankedIntegrity.includes("ACCOUNT_FINALIZED_KEY") || !rankedIntegrity.includes("ACTIVE_MATCH_LOCK_RELEASED_KEY")) {
+  throw new Error("C4D RankedMatch integrity wrapper must wait for account finalization and persist lock-release completion");
+}
+if (!rankedIntegrity.includes("MATCH_COMPLETE_URL") || !rankedIntegrity.includes("setAlarm(Date.now() + LOCK_RETRY_MS)")) {
+  throw new Error("C4D active-match lock release must retry through Durable Object alarms");
+}
+
 const competitionRuntime = await readFile(join(root, "src/worker/competition-runtime.ts"), "utf8");
 const snapshotSource = competitionRuntime.split("export function competitionSnapshot")[1]?.split("export function nextCompetitionDeadline")[0] ?? "";
 if (!competitionRuntime.includes("accountUserId: string | null") || !competitionRuntime.includes("randomAssignment: boolean")) {
@@ -146,6 +161,14 @@ if (!competitionRuntime.includes("accountUserId: string | null") || !competition
 }
 if (snapshotSource.includes("accountUserId") || snapshotSource.includes("randomAssignment")) {
   throw new Error("C4D server-only account/provenance metadata must not appear in client competition snapshots");
+}
+if (!competitionRuntime.includes("disconnectDeadlineMs: init.activeAtMs + disconnectGraceMs")) {
+  throw new Error("C4D production runtime must bound the initial participant connection window");
+}
+
+const schoolRuntime = await readFile(join(root, "scripts/school-ranked-runtime.mjs"), "utf8");
+if (!schoolRuntime.includes("disconnectDeadlineMs: init.activeAtMs + DISCONNECT_GRACE_MS")) {
+  throw new Error("C4D school runtime must mirror the production initial connection grace");
 }
 
 const deployWorkflow = await readFile(join(root, ".github/workflows/deploy.yml"), "utf8");

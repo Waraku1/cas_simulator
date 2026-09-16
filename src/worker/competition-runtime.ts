@@ -92,7 +92,7 @@ export function createCompetitionRuntime(init: CompetitionRoomInit): StoredCompe
       heartPoints: MATCH_RULES.startingHeartPoints,
       connected: false,
       nextActionAtMs: init.activeAtMs,
-      disconnectDeadlineMs: null,
+      disconnectDeadlineMs: init.activeAtMs + disconnectGraceMs,
     })) as [StoredCompetitionParticipant, StoredCompetitionParticipant],
     result: null,
   };

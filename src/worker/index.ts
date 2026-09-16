@@ -31,12 +31,18 @@ interface DurableObjectNamespace {
   get(id: DurableObjectId): DurableObjectStub;
 }
 
+interface DurableObjectStorage {
+  get<T>(key: string): Promise<T | undefined>;
+  put(key: string, value: unknown): Promise<void>;
+}
+
 type HibernatableWebSocket = WebSocket & {
   serializeAttachment(value: unknown): void;
   deserializeAttachment(): unknown;
 };
 
 interface DurableObjectState {
+  storage: DurableObjectStorage;
   acceptWebSocket(socket: HibernatableWebSocket): void;
   getWebSockets(): HibernatableWebSocket[];
 }
@@ -68,9 +74,13 @@ type MatchmakingAttachment = Readonly<{
   fixedAircraftId: string | null;
 }>;
 
+type ActiveRatedMatches = Record<string, string>;
+
 const ROOM_SOCKET_ROUTE = /^\/api\/rooms\/([ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6})\/ws$/;
 const RANKED_MATCH_SOCKET_ROUTE = /^\/api\/matches\/([0-9a-f-]{36})\/ws$/i;
 const MATCH_INIT_URL = "https://ranked-match.internal/__internal/competition-init";
+const MATCH_COMPLETE_PATH = "/__internal/match-complete";
+const ACTIVE_MATCHES_KEY = "active-rated-matches-v1";
 const AUTHENTICATED_USER_HEADER = "x-cas-user-id";
 const FIXED_AIRCRAFT_HEADER = "x-cas-fixed-aircraft-id";
 
@@ -135,6 +145,13 @@ function assignedAircraftId(fixedAircraftId: string | null) {
   return AIRCRAFT_CATALOG[randomIndex(AIRCRAFT_CATALOG.length)].aircraftId;
 }
 
+function validActiveMatches(value: unknown): value is ActiveRatedMatches {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  return Object.entries(value).every(
+    ([userId, matchId]) => userId.length >= 8 && typeof matchId === "string" && matchId.length >= 8,
+  );
+}
+
 export class RankedMatchmaker {
   constructor(private readonly ctx: DurableObjectState, private readonly env: Env) {}
 
@@ -147,6 +164,48 @@ export class RankedMatchmaker {
     }
   }
 
+  private async loadActiveMatches(): Promise<ActiveRatedMatches> {
+    const stored = await this.ctx.storage.get<unknown>(ACTIVE_MATCHES_KEY);
+    return validActiveMatches(stored) ? { ...stored } : {};
+  }
+
+  private async saveActiveMatches(activeMatches: ActiveRatedMatches) {
+    await this.ctx.storage.put(ACTIVE_MATCHES_KEY, activeMatches);
+  }
+
+  private async releaseCompletedMatch(request: Request) {
+    let value: unknown;
+    try {
+      value = await request.json();
+    } catch {
+      return json({ error: "invalid_match_release" }, { status: 400 });
+    }
+    if (
+      typeof value !== "object"
+      || value === null
+      || !("matchId" in value)
+      || !("userIds" in value)
+      || typeof value.matchId !== "string"
+      || value.matchId.length < 8
+      || !Array.isArray(value.userIds)
+      || value.userIds.length !== 2
+      || !value.userIds.every((userId) => typeof userId === "string" && userId.length >= 8)
+    ) {
+      return json({ error: "invalid_match_release" }, { status: 400 });
+    }
+
+    const activeMatches = await this.loadActiveMatches();
+    let changed = false;
+    for (const userId of value.userIds as string[]) {
+      if (activeMatches[userId] === value.matchId) {
+        delete activeMatches[userId];
+        changed = true;
+      }
+    }
+    if (changed) await this.saveActiveMatches(activeMatches);
+    return json({ ok: true, released: changed });
+  }
+
   private async initializeMatch(init: CompetitionRoomInit) {
     const id = this.env.MATCHES.idFromName(init.matchId);
     return this.env.MATCHES.get(id).fetch(new Request(MATCH_INIT_URL, {
@@ -156,7 +215,23 @@ export class RankedMatchmaker {
     }));
   }
 
+  private rejectWaitingSocketsForLockedUsers(activeMatches: ActiveRatedMatches) {
+    for (const socket of this.ctx.getWebSockets()) {
+      if (socket.readyState !== WebSocket.OPEN) continue;
+      const attachment = matchmakingAttachmentOf(socket);
+      if (!attachment || attachment.state !== "waiting" || !activeMatches[attachment.userId]) continue;
+      this.send(socket, {
+        type: "error",
+        code: "account_in_active_match",
+        message: "This account already has an active ranked match.",
+      });
+      socket.serializeAttachment({ ...attachment, state: "cancelled" });
+      socket.close(1000, "account already in active match");
+    }
+  }
+
   private async tryMatch() {
+    const activeMatches = await this.loadActiveMatches();
     const waiting = this.ctx.getWebSockets()
       .filter((socket) => socket.readyState === WebSocket.OPEN)
       .map((socket) => ({ socket, attachment: matchmakingAttachmentOf(socket) }))
@@ -165,12 +240,18 @@ export class RankedMatchmaker {
       .sort((a, b) => (a.attachment.queuedAtMs ?? 0) - (b.attachment.queuedAtMs ?? 0));
 
     while (waiting.length >= 2) {
-      const first = waiting.shift();
-      if (!first) return;
-      const secondIndex = waiting.findIndex((entry) => entry.attachment.userId !== first.attachment.userId);
-      if (secondIndex < 0) return;
+      const firstIndex = waiting.findIndex((entry) => !activeMatches[entry.attachment.userId]);
+      if (firstIndex < 0) break;
+      const [first] = waiting.splice(firstIndex, 1);
+      if (!first) break;
+
+      const secondIndex = waiting.findIndex(
+        (entry) => !activeMatches[entry.attachment.userId]
+          && entry.attachment.userId !== first.attachment.userId,
+      );
+      if (secondIndex < 0) break;
       const [second] = waiting.splice(secondIndex, 1);
-      if (!second) return;
+      if (!second) break;
 
       const matchedAtMs = Date.now();
       const assignmentEndsAtMs = matchedAtMs + MATCHMAKING_ASSIGNMENT_REVEAL_MS;
@@ -183,6 +264,25 @@ export class RankedMatchmaker {
       const secondAircraftId = assignedAircraftId(second.attachment.fixedAircraftId);
       const firstSide: SpawnSide = randomIndex(2) === 0 ? "left" : "right";
       const secondSide: SpawnSide = firstSide === "left" ? "right" : "left";
+
+      activeMatches[first.attachment.userId] = matchId;
+      activeMatches[second.attachment.userId] = matchId;
+      try {
+        await this.saveActiveMatches(activeMatches);
+      } catch {
+        delete activeMatches[first.attachment.userId];
+        delete activeMatches[second.attachment.userId];
+        const failure: ServerMatchmakingMessage = {
+          type: "error",
+          code: "match_lock_failed",
+          message: "The ranked match lock could not be persisted.",
+        };
+        this.send(first.socket, failure);
+        this.send(second.socket, failure);
+        first.socket.close(1011, "match lock failed");
+        second.socket.close(1011, "match lock failed");
+        continue;
+      }
 
       first.socket.serializeAttachment({ ...first.attachment, state: "matched" });
       second.socket.serializeAttachment({ ...second.attachment, state: "matched" });
@@ -212,6 +312,15 @@ export class RankedMatchmaker {
       };
       const initialized = await this.initializeMatch(init);
       if (!initialized.ok) {
+        if (activeMatches[first.attachment.userId] === matchId) delete activeMatches[first.attachment.userId];
+        if (activeMatches[second.attachment.userId] === matchId) delete activeMatches[second.attachment.userId];
+        try {
+          await this.saveActiveMatches(activeMatches);
+        } catch (error) {
+          console.error(
+            `[matchmaker] failed to roll back active-match lock ${matchId}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
         const failure: ServerMatchmakingMessage = {
           type: "error",
           code: "match_init_failed",
@@ -250,10 +359,16 @@ export class RankedMatchmaker {
           activeAtMs,
         },
       });
+      this.rejectWaitingSocketsForLockedUsers(activeMatches);
     }
   }
 
   async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname === MATCH_COMPLETE_PATH && request.method === "POST") {
+      return this.releaseCompletedMatch(request);
+    }
+
     if (!this.env.ACCOUNTS) {
       return json({ error: "account_storage_unavailable" }, { status: 503 });
     }
@@ -311,6 +426,18 @@ export class RankedMatchmaker {
 
     if (attachment.state === "matched") {
       this.send(socket, { type: "error", code: "already_matched", message: "This queue connection already has a match." });
+      return;
+    }
+
+    const activeMatches = await this.loadActiveMatches();
+    if (activeMatches[attachment.userId]) {
+      this.send(socket, {
+        type: "error",
+        code: "account_in_active_match",
+        message: "This account already has an active ranked match.",
+      });
+      socket.serializeAttachment({ ...attachment, state: "cancelled" });
+      socket.close(1000, "account already in active match");
       return;
     }
 
