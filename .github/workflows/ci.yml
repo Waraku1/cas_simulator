@@ -39,6 +39,9 @@ jobs:
       - name: Type-check
         run: pnpm check
 
+      - name: Verify C4C lifecycle contract
+        run: pnpm verify:c4c:runtime
+
       - name: Production build
         run: pnpm build
 
@@ -73,3 +76,4 @@ jobs:
           cat /tmp/school-health.json
           pnpm verify:school
           pnpm verify:school:c4b
+          pnpm verify:school:c4c
