@@ -1,6 +1,6 @@
 # C2 — World / Theater Resource Gate
 
-Status: **IMPLEMENTED / 30-MIN LOCAL QA PENDING**
+Status: **PERFORMANCE REMEDIATION / 3-MIN PREFLIGHT PENDING**
 
 ## Objective
 
@@ -33,21 +33,49 @@ The same module generates the four boundary corner coordinates used by the rende
 Engineering targets, not provider guarantees:
 - target FPS: >=45;
 - minimum acceptable FPS: >=30;
-- standardized session: 30 minutes;
+- runtime render/simulation cap: 60 FPS;
+- staged preflight: 3 active foreground minutes;
+- standardized soak session: 30 active foreground minutes;
 - observed-transfer budget: <=150 MiB per player session.
 
-Runtime diagnostics now record:
-- current FPS;
-- average FPS since the page session began;
-- minimum one-second FPS sample;
-- elapsed benchmark time;
+The Cesium default render loop is capped at 60 FPS and the C1 simulation update loop is capped at the same cadence. This prevents high-refresh-rate displays from driving the simulator at 100+ FPS without user-visible benefit.
+
+Runtime diagnostics record:
+- actual Cesium post-render FPS;
+- average FPS over valid active-foreground samples;
+- minimum valid one-second FPS sample;
+- active foreground benchmark time;
 - browser-observed `PerformanceResourceTiming.transferSize` total;
 - resource count;
 - zero-transfer resource count;
 - cross-origin zero-transfer/opaque entry count;
 - optional Chromium JS heap usage when available.
 
+Background-tab throttling and long scheduling suspensions are excluded from FPS evidence instead of being counted as sustained renderer collapse. Benchmark time advances only during valid active-foreground sampling.
+
 The Resource Timing buffer is increased to 6000 entries before the benchmark begins so a 30-minute run is not silently restricted to the browser's typical initial buffer size.
+
+## Interrupted diagnostic run — 2026-09-16
+
+The first long-session attempt was intentionally stopped at 188.2 wall-clock seconds because the device appeared to be under unnecessary load.
+
+Reported values from the pre-remediation instrumentation:
+- current FPS: 101.3;
+- reported average FPS: 11.6;
+- reported minimum FPS: 0.1;
+- observed transfer: 0.05 MiB;
+- resources: 703;
+- zero-transfer resources: 527;
+- opaque cross-origin resources: 521;
+- JS heap: 123.9 MiB.
+
+The simultaneous 101.3 current FPS and 11.6 average FPS exposed a measurement-design problem: the old average divided requestAnimationFrame totals by wall-clock session time, so tab throttling/suspension could corrupt average/minimum evidence. The 100+ current FPS also showed that a high-refresh-rate display could drive unnecessary rendering load.
+
+This run is retained as diagnostic evidence, not as the C2 performance acceptance run.
+
+Manual observations from the same run are accepted:
+- [x] theater boundary and boundary states operated correctly;
+- [x] accepted C1 control feel remained unchanged.
 
 ## Transfer-measurement limitation
 
@@ -55,14 +83,15 @@ The Resource Timing buffer is increased to 6000 entries before the benchmark beg
 
 Reference: MDN `PerformanceResourceTiming.transferSize` and Resource Timing documentation.
 
-## Evidence workflow
+## Revised evidence workflow
 
-1. Start from a fresh localhost page load.
-2. Keep the simulator tab active and operate normally within the theater.
-3. Continue for at least 30 minutes.
-4. Confirm current/average/minimum FPS and observed transfer in the C2 panel.
-5. Use `COPY C2 REPORT` and retain the JSON with the CAS/testing evidence.
-6. Record any visible terrain loading defects or boundary-rendering problems separately.
+1. Start from a fresh localhost page load with the remediated build.
+2. Keep the simulator tab active and operate normally.
+3. Run only the first 3 active foreground minutes as a preflight.
+4. At `PREFLIGHT READY`, review hardware load, current/average/minimum FPS, JS heap (if available), and observed transfer.
+5. Stop at 3 minutes if load remains uncomfortable or evidence is abnormal; do not force the 30-minute soak.
+6. Only after preflight passes, continue or rerun for the full 30 active foreground minutes.
+7. Use `COPY C2 REPORT` to retain the JSON evidence.
 
 ## C2 exit criteria
 
@@ -73,15 +102,22 @@ Automated implementation gate:
 - [x] C1 flight model remains authoritative and unchanged by boundary status;
 - [x] Resource Timing buffer is enlarged;
 - [x] diagnostics distinguish observed transfer from opaque cross-origin entries;
-- [x] copyable C2 evidence report exists.
+- [x] copyable C2 evidence report exists;
+- [x] 60 FPS runtime governor is implemented;
+- [x] FPS evidence uses Cesium post-render frames and active foreground time.
+
+Verified:
+- [x] `pnpm validate:scaffold` passed on the initial C2 PR and merged main;
+- [x] `pnpm check` passed on the initial C2 PR and merged main;
+- [x] `pnpm build` passed on the initial C2 PR and merged main;
+- [x] localhost boundary visual QA passed;
+- [x] C1 controls/camera remained subjectively unchanged during C2 QA.
 
 Pending closure evidence:
-- [ ] `pnpm validate:scaffold` passes on C2 PR and merged main;
-- [ ] `pnpm check` passes on C2 PR and merged main;
-- [ ] `pnpm build` passes on C2 PR and merged main;
-- [ ] localhost boundary visual QA passes;
-- [ ] standardized 30-minute session completes;
-- [ ] average FPS >=45 target where feasible and minimum FPS remains >=30;
+- [ ] performance-remediation PR and merged-main CI pass;
+- [ ] 3-minute capped-runtime preflight passes without unacceptable hardware load;
+- [ ] average FPS >=45 and minimum valid sample >=30 during preflight;
+- [ ] standardized 30-minute active-foreground soak completes after preflight acceptance;
 - [ ] observed transfer is reviewed against the <=150 MiB engineering budget with opacity caveat;
 - [ ] optional heap evidence is recorded when supported.
 
