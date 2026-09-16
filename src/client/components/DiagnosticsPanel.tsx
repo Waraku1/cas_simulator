@@ -7,14 +7,14 @@ export function DiagnosticsPanel() {
 
   return (
     <aside className="diagnostics" aria-label="Runtime diagnostics">
-      <div className="diagnostics__title">C0 DIAGNOSTICS</div>
+      <div className="diagnostics__title">RUNTIME</div>
       <dl>
         <div>
           <dt>FPS</dt>
           <dd className={fpsClass}>{diagnostics.fps.toFixed(0)}</dd>
         </div>
         <div>
-          <dt>VISIBLE TRANSFER</dt>
+          <dt>TRANSFER</dt>
           <dd>{diagnostics.transferredMiB.toFixed(1)} MiB</dd>
         </div>
         <div>

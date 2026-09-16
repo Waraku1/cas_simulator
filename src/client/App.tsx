@@ -1,25 +1,17 @@
-import { APP_NAME, THEATER } from "../shared/config";
+import { useState } from "react";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { EarthScene } from "./components/EarthScene";
+import { FlightHud } from "./components/FlightHud";
+import { INITIAL_FLIGHT_TELEMETRY } from "./flight/model";
 
 export default function App() {
+  const [telemetry, setTelemetry] = useState(INITIAL_FLIGHT_TELEMETRY);
+
   return (
     <main className="app-shell">
-      <EarthScene />
-      <header className="hud-header">
-        <div>
-          <strong>{APP_NAME}</strong>
-          <span>C0 FOUNDATION</span>
-        </div>
-        <div className="hud-header__theater">
-          THEATER {THEATER.widthKm} × {THEATER.heightKm} KM
-        </div>
-      </header>
+      <EarthScene onTelemetry={setTelemetry} />
+      <FlightHud telemetry={telemetry} />
       <DiagnosticsPanel />
-      <footer className="hud-footer">
-        <span>CESIUM EARTH</span>
-        <span>FLIGHT / MULTIPLAYER MODULES: NOT YET ENABLED</span>
-      </footer>
     </main>
   );
 }
