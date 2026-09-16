@@ -61,6 +61,11 @@ function readUsedHeapMiB() {
     : null;
 }
 
+/**
+ * C2 measures active foreground cadence only. Background-tab throttling or
+ * long browser suspension is excluded from the benchmark rather than being
+ * misclassified as sustained low FPS.
+ */
 export function useRuntimeDiagnostics(): RuntimeDiagnostics {
   const [diagnostics, setDiagnostics] = useState<RuntimeDiagnostics>({
     fps: 0,
@@ -78,42 +83,67 @@ export function useRuntimeDiagnostics(): RuntimeDiagnostics {
   useEffect(() => {
     let animationFrame = 0;
     let frameCount = 0;
-    let totalFrameCount = 0;
+    let sampleStartedAt = performance.now();
+    let activeSeconds = 0;
+    let weightedFpsTotal = 0;
+    let validSampleSeconds = 0;
     let minimumFps = Number.POSITIVE_INFINITY;
-    const sessionStartedAt = performance.now();
-    let sampleStartedAt = sessionStartedAt;
+
+    const resetSampleWindow = (now: number) => {
+      frameCount = 0;
+      sampleStartedAt = now;
+    };
+
+    const handleVisibilityChange = () => {
+      resetSampleWindow(performance.now());
+    };
 
     const sample = (now: number) => {
+      if (document.visibilityState !== "visible") {
+        resetSampleWindow(now);
+        animationFrame = requestAnimationFrame(sample);
+        return;
+      }
+
       frameCount += 1;
-      totalFrameCount += 1;
       const sampleElapsedMs = now - sampleStartedAt;
 
       if (sampleElapsedMs >= 1_000) {
-        const sessionElapsedMs = Math.max(1, now - sessionStartedAt);
-        const fps = (frameCount * 1_000) / sampleElapsedMs;
-        minimumFps = Math.min(minimumFps, fps);
-        const sessionSeconds = sessionElapsedMs / 1_000;
-        const network = readNetworkUsage();
+        const sampleSeconds = sampleElapsedMs / 1_000;
+        const fps = frameCount / sampleSeconds;
 
-        setDiagnostics({
-          fps,
-          averageFps: (totalFrameCount * 1_000) / sessionElapsedMs,
-          minimumFps: Number.isFinite(minimumFps) ? minimumFps : fps,
-          ...network,
-          sessionSeconds,
-          benchmarkComplete: sessionSeconds >= C2_RESOURCE_BUDGET.benchmarkMinutes * 60,
-          usedHeapMiB: readUsedHeapMiB(),
-        });
+        // Windows above 1.5 s usually indicate tab suspension or a scheduling
+        // interruption; exclude them from performance evidence.
+        if (sampleElapsedMs <= 1_500) {
+          activeSeconds += sampleSeconds;
+          weightedFpsTotal += fps * sampleSeconds;
+          validSampleSeconds += sampleSeconds;
+          minimumFps = Math.min(minimumFps, fps);
 
-        frameCount = 0;
-        sampleStartedAt = now;
+          const network = readNetworkUsage();
+          setDiagnostics({
+            fps,
+            averageFps: validSampleSeconds > 0 ? weightedFpsTotal / validSampleSeconds : fps,
+            minimumFps: Number.isFinite(minimumFps) ? minimumFps : fps,
+            ...network,
+            sessionSeconds: activeSeconds,
+            benchmarkComplete: activeSeconds >= C2_RESOURCE_BUDGET.benchmarkMinutes * 60,
+            usedHeapMiB: readUsedHeapMiB(),
+          });
+        }
+
+        resetSampleWindow(now);
       }
 
       animationFrame = requestAnimationFrame(sample);
     };
 
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     animationFrame = requestAnimationFrame(sample);
-    return () => cancelAnimationFrame(animationFrame);
+    return () => {
+      cancelAnimationFrame(animationFrame);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, []);
 
   return diagnostics;
