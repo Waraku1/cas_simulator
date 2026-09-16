@@ -6,6 +6,7 @@ import {
   type PoseSnapshot,
   type ServerRoomMessage,
 } from "../shared/multiplayer";
+import type { D1DatabaseLike } from "./auth/repository";
 import {
   advanceCompetitionRuntime,
   competitionSnapshot,
@@ -18,6 +19,7 @@ import {
   type ServerPoseSample,
   type StoredCompetitionRuntime,
 } from "./competition-runtime";
+import { D1RatingRepository } from "./rating/repository";
 
 interface DurableObjectStorage {
   get<T>(key: string): Promise<T | undefined>;
@@ -49,7 +51,13 @@ type RankedSocketAttachment = Readonly<{
   latestPoseReceivedAtMs: number | null;
 }>;
 
+type RankedMatchEnv = Readonly<{
+  ACCOUNTS?: D1DatabaseLike;
+}>;
+
 const STORAGE_KEY = "competition-runtime-v1";
+const RATING_FINALIZED_KEY = "rating-finalized-v1";
+const RATING_RETRY_MS = 5_000;
 const INIT_PATH = "/__internal/competition-init";
 
 const json = (body: unknown, init: ResponseInit = {}) => {
@@ -77,6 +85,10 @@ function attachmentOf(socket: HibernatableWebSocket): RankedSocketAttachment | n
   return value as RankedSocketAttachment;
 }
 
+function validAccountUserId(value: unknown) {
+  return typeof value === "string" && value.length >= 8 && value.length <= 128;
+}
+
 function validInit(value: unknown): value is CompetitionRoomInit {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Partial<CompetitionRoomInit>;
@@ -94,6 +106,11 @@ function validInit(value: unknown): value is CompetitionRoomInit {
   }
 
   const [first, second] = candidate.participants;
+  const legacyIdentity = first.accountUserId === undefined && second.accountUserId === undefined;
+  const ratedIdentity = validAccountUserId(first.accountUserId)
+    && validAccountUserId(second.accountUserId)
+    && first.accountUserId !== second.accountUserId;
+
   return first.slot === 1
     && second.slot === 2
     && typeof first.joinToken === "string"
@@ -104,11 +121,15 @@ function validInit(value: unknown): value is CompetitionRoomInit {
     && isAircraftId(second.aircraftId)
     && (first.spawnSide === "left" || first.spawnSide === "right")
     && (second.spawnSide === "left" || second.spawnSide === "right")
-    && first.spawnSide !== second.spawnSide;
+    && first.spawnSide !== second.spawnSide
+    && (legacyIdentity || ratedIdentity);
 }
 
 export class RankedMatch {
-  constructor(private readonly ctx: DurableObjectState) {}
+  constructor(
+    private readonly ctx: DurableObjectState,
+    private readonly env: RankedMatchEnv,
+  ) {}
 
   private openSockets(exclude?: HibernatableWebSocket) {
     return this.ctx.getWebSockets().filter(
@@ -133,7 +154,65 @@ export class RankedMatch {
     await this.ctx.storage.put(STORAGE_KEY, state);
   }
 
+  private async finalizeResult(state: StoredCompetitionRuntime, nowMs: number) {
+    if (!state.result) return true;
+    if (await this.ctx.storage.get<boolean>(RATING_FINALIZED_KEY)) return true;
+
+    if (state.result.reason === "infrastructure-failure") {
+      await this.ctx.storage.put(RATING_FINALIZED_KEY, true);
+      return true;
+    }
+
+    const [first, second] = state.participants;
+    const firstUserId = first.accountUserId;
+    const secondUserId = second.accountUserId;
+
+    if (firstUserId === null && secondUserId === null) {
+      // Legacy C4C matches remain valid but intentionally unrated.
+      await this.ctx.storage.put(RATING_FINALIZED_KEY, true);
+      return true;
+    }
+
+    if (!firstUserId || !secondUserId || firstUserId === secondUserId || !this.env.ACCOUNTS) {
+      return false;
+    }
+
+    const firstOutcome = state.result.winnerSlot === null
+      ? "draw"
+      : state.result.winnerSlot === 1
+        ? "win"
+        : "loss";
+
+    try {
+      await new D1RatingRepository(this.env.ACCOUNTS).applyMatch({
+        matchId: state.matchId,
+        firstUserId,
+        secondUserId,
+        firstOutcome,
+        reason: state.result.reason,
+        completedAtMs: nowMs,
+      });
+      await this.ctx.storage.put(RATING_FINALIZED_KEY, true);
+      return true;
+    } catch (error) {
+      console.error(
+        `[ranked-match] rating finalization failed for ${state.matchId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }
+
   private async schedule(state: StoredCompetitionRuntime, nowMs: number) {
+    if (state.result) {
+      const finalized = await this.finalizeResult(state, nowMs);
+      if (finalized) {
+        await this.ctx.storage.deleteAlarm();
+      } else {
+        await this.ctx.storage.setAlarm(nowMs + RATING_RETRY_MS);
+      }
+      return;
+    }
+
     const deadline = nextCompetitionDeadline(state, nowMs);
     if (deadline === null) {
       await this.ctx.storage.deleteAlarm();
@@ -219,6 +298,13 @@ export class RankedMatch {
     const joinToken = url.searchParams.get("token") ?? "";
     const participant = state.participants.find((entry) => entry.joinToken === joinToken);
     if (!participant) return json({ error: "invalid_join_token" }, { status: 403 });
+
+    if (participant.accountUserId !== null) {
+      const authenticatedUserId = request.headers.get("x-cas-user-id") ?? "";
+      if (authenticatedUserId !== participant.accountUserId) {
+        return json({ error: "invalid_participant_identity" }, { status: 403 });
+      }
+    }
 
     for (const existingSocket of this.openSockets()) {
       if (attachmentOf(existingSocket)?.slot === participant.slot) {
