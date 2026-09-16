@@ -111,12 +111,13 @@ export function isAircraftPose(value: unknown): value is AircraftPose {
 }
 
 export function isPoseSnapshot(value: unknown): value is PoseSnapshot {
-  return record(value)
-    && isAircraftPose(value)
-    && Number.isSafeInteger(value.sequence)
-    && (value.sequence as number) >= 0
-    && finite(value.clientTimeMs)
-    && value.clientTimeMs >= 0;
+  if (!record(value) || !isAircraftPose(value)) return false;
+  const snapshotRecord = value as unknown as Record<string, unknown>;
+  return Number.isSafeInteger(snapshotRecord.sequence)
+    && finite(snapshotRecord.sequence)
+    && snapshotRecord.sequence >= 0
+    && finite(snapshotRecord.clientTimeMs)
+    && snapshotRecord.clientTimeMs >= 0;
 }
 
 export function parseClientRoomMessage(text: string): ClientRoomMessage | null {
