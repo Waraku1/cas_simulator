@@ -1,0 +1,26 @@
+[
+  {
+    "actionModuleId": "vector-link",
+    "displayName": "VECTOR LINK",
+    "heartPointEffect": 12,
+    "cooldownMs": 4500,
+    "activationRadiusM": 240,
+    "activationProfile": "balanced"
+  },
+  {
+    "actionModuleId": "tempo-link",
+    "displayName": "TEMPO LINK",
+    "heartPointEffect": 7,
+    "cooldownMs": 2500,
+    "activationRadiusM": 180,
+    "activationProfile": "close"
+  },
+  {
+    "actionModuleId": "focus-link",
+    "displayName": "FOCUS LINK",
+    "heartPointEffect": 18,
+    "cooldownMs": 7000,
+    "activationRadiusM": 125,
+    "activationProfile": "precision"
+  }
+]
