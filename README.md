@@ -62,11 +62,13 @@ C3 introduces a bounded private two-player room layer:
 - the room validates and relays snapshots without running a server simulation tick;
 - the receiving client interpolates the peer aircraft locally.
 
+C3 is implemented and deployed. Production health, Durable Object binding, two-client presence, and pose relay have passed automated production verification. Final C3 closure now requires only human-visible two-browser UI/interpolation QA on an allowed network.
+
 C3 contains networking/presence only. Later competition/scoring behavior remains outside this gate.
 
 ## Production mode
 
-Production build/deployment is executed through GitHub Actions using repository secrets for Cloudflare and Cesium credentials. Production runtime health is verified automatically after deployment.
+Production build/deployment is executed through GitHub Actions using repository secrets for Cloudflare and Cesium credentials. The deployment workflow verifies the production root, C3 health feature, and a real two-client WebSocket pose relay.
 
 Current production health endpoint:
 
@@ -74,7 +76,7 @@ Current production health endpoint:
 https://cas-flight-simulator.heleshiheiheleshihei.workers.dev/api/health
 ```
 
-Production browser verification is performed on an allowed network before release closure.
+Production browser verification is performed on an allowed network before C3/release closure.
 
 ## Validate
 
@@ -89,7 +91,7 @@ pnpm build
 - C0 Foundation — CLOSED
 - C1 Flight — CLOSED / ACCEPTED
 - C2 World / Theater resource gate — CLOSED / ACCEPTED
-- C3 Multiplayer — IMPLEMENTATION IN PROGRESS / NETWORK QA PENDING
+- C3 Multiplayer — IMPLEMENTED + DEPLOYED / MANUAL TWO-BROWSER UI QA PENDING
 - C4 Competition loop — pending
 - C5 Release — pending
 
