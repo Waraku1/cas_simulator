@@ -72,3 +72,4 @@ jobs:
 
           cat /tmp/school-health.json
           pnpm verify:school
+          pnpm verify:school:c4b
