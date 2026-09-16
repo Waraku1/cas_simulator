@@ -1,0 +1,358 @@
+import { isAircraftId } from "../shared/aircraft";
+import type { CompetitionRoomInit, CompetitionSlot } from "../shared/competition";
+import {
+  isValidRoomCode,
+  parseClientRoomMessage,
+  type PoseSnapshot,
+  type ServerRoomMessage,
+} from "../shared/multiplayer";
+import {
+  advanceCompetitionRuntime,
+  competitionSnapshot,
+  createCompetitionRuntime,
+  forfeitCompetition,
+  markCompetitionConnected,
+  markCompetitionDisconnected,
+  nextCompetitionDeadline,
+  resolveCompetitionAction,
+  type ServerPoseSample,
+  type StoredCompetitionRuntime,
+} from "./competition-runtime";
+
+interface DurableObjectStorage {
+  get<T>(key: string): Promise<T | undefined>;
+  put(key: string, value: unknown): Promise<void>;
+  setAlarm(scheduledTime: number): Promise<void>;
+  deleteAlarm(): Promise<void>;
+}
+
+interface DurableObjectState {
+  storage: DurableObjectStorage;
+  acceptWebSocket(socket: HibernatableWebSocket): void;
+  getWebSockets(): HibernatableWebSocket[];
+}
+
+type HibernatableWebSocket = WebSocket & {
+  serializeAttachment(value: unknown): void;
+  deserializeAttachment(): unknown;
+};
+
+declare const WebSocketPair: {
+  new (): { 0: HibernatableWebSocket; 1: HibernatableWebSocket };
+};
+
+type RankedSocketAttachment = Readonly<{
+  playerId: string;
+  slot: CompetitionSlot;
+  joinToken: string;
+  latestPose: PoseSnapshot | null;
+  latestPoseReceivedAtMs: number | null;
+}>;
+
+const STORAGE_KEY = "competition-runtime-v1";
+const INIT_PATH = "/__internal/competition-init";
+
+const json = (body: unknown, init: ResponseInit = {}) => {
+  const headers = new Headers(init.headers);
+  headers.set("cache-control", "no-store");
+  return Response.json(body, { ...init, headers });
+};
+
+function attachmentOf(socket: HibernatableWebSocket): RankedSocketAttachment | null {
+  const value = socket.deserializeAttachment();
+  if (
+    typeof value !== "object"
+    || value === null
+    || !("playerId" in value)
+    || !("slot" in value)
+    || !("joinToken" in value)
+    || !("latestPose" in value)
+    || !("latestPoseReceivedAtMs" in value)
+    || typeof value.playerId !== "string"
+    || (value.slot !== 1 && value.slot !== 2)
+    || typeof value.joinToken !== "string"
+  ) {
+    return null;
+  }
+  return value as RankedSocketAttachment;
+}
+
+function validInit(value: unknown): value is CompetitionRoomInit {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<CompetitionRoomInit>;
+  if (
+    typeof candidate.matchId !== "string"
+    || candidate.matchId.length < 8
+    || typeof candidate.roomCode !== "string"
+    || !isValidRoomCode(candidate.roomCode)
+    || typeof candidate.activeAtMs !== "number"
+    || !Number.isFinite(candidate.activeAtMs)
+    || !Array.isArray(candidate.participants)
+    || candidate.participants.length !== 2
+  ) {
+    return false;
+  }
+
+  const [first, second] = candidate.participants;
+  return first.slot === 1
+    && second.slot === 2
+    && typeof first.joinToken === "string"
+    && first.joinToken.length >= 16
+    && typeof second.joinToken === "string"
+    && second.joinToken.length >= 16
+    && isAircraftId(first.aircraftId)
+    && isAircraftId(second.aircraftId)
+    && (first.spawnSide === "left" || first.spawnSide === "right")
+    && (second.spawnSide === "left" || second.spawnSide === "right")
+    && first.spawnSide !== second.spawnSide;
+}
+
+export class RankedMatch {
+  constructor(private readonly ctx: DurableObjectState) {}
+
+  private openSockets(exclude?: HibernatableWebSocket) {
+    return this.ctx.getWebSockets().filter(
+      (socket) => socket !== exclude && socket.readyState === WebSocket.OPEN,
+    );
+  }
+
+  private send(socket: HibernatableWebSocket, message: ServerRoomMessage) {
+    if (socket.readyState !== WebSocket.OPEN) return;
+    try {
+      socket.send(JSON.stringify(message));
+    } catch {
+      // A browser may disappear between readyState inspection and send.
+    }
+  }
+
+  private async loadState() {
+    return (await this.ctx.storage.get<StoredCompetitionRuntime>(STORAGE_KEY)) ?? null;
+  }
+
+  private async saveState(state: StoredCompetitionRuntime) {
+    await this.ctx.storage.put(STORAGE_KEY, state);
+  }
+
+  private async schedule(state: StoredCompetitionRuntime, nowMs: number) {
+    const deadline = nextCompetitionDeadline(state, nowMs);
+    if (deadline === null) {
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+    await this.ctx.storage.setAlarm(deadline);
+  }
+
+  private broadcastPresence(exclude?: HibernatableWebSocket) {
+    const sockets = this.openSockets(exclude);
+    const message: ServerRoomMessage = {
+      type: "presence",
+      playerCount: sockets.length,
+      peerConnected: sockets.length >= 2,
+    };
+    for (const socket of sockets) this.send(socket, message);
+  }
+
+  private broadcastMatchState(state: StoredCompetitionRuntime, nowMs: number) {
+    const message: ServerRoomMessage = {
+      type: "match_state",
+      state: competitionSnapshot(state, nowMs),
+    };
+    for (const socket of this.openSockets()) this.send(socket, message);
+  }
+
+  private socketForSlot(slot: CompetitionSlot, exclude?: HibernatableWebSocket) {
+    return this.openSockets(exclude).find((socket) => attachmentOf(socket)?.slot === slot) ?? null;
+  }
+
+  private poseForSlot(slot: CompetitionSlot): ServerPoseSample | null {
+    const socket = this.socketForSlot(slot);
+    if (!socket) return null;
+    const attachment = attachmentOf(socket);
+    if (!attachment?.latestPose || attachment.latestPoseReceivedAtMs === null) return null;
+    return {
+      pose: attachment.latestPose,
+      receivedAtMs: attachment.latestPoseReceivedAtMs,
+    };
+  }
+
+  private async persist(state: StoredCompetitionRuntime, nowMs: number, broadcast = true) {
+    const advanced = advanceCompetitionRuntime(state, nowMs);
+    await this.saveState(advanced);
+    await this.schedule(advanced, nowMs);
+    if (broadcast) this.broadcastMatchState(advanced, nowMs);
+    return advanced;
+  }
+
+  private async initialize(request: Request) {
+    let value: unknown;
+    try {
+      value = await request.json();
+    } catch {
+      return json({ error: "invalid_match_init" }, { status: 400 });
+    }
+    if (!validInit(value)) return json({ error: "invalid_match_init" }, { status: 400 });
+
+    const existing = await this.loadState();
+    if (existing) {
+      if (existing.matchId === value.matchId) return json({ ok: true, idempotent: true });
+      return json({ error: "match_already_initialized" }, { status: 409 });
+    }
+
+    const nowMs = Date.now();
+    const state = createCompetitionRuntime(value);
+    await this.saveState(state);
+    await this.schedule(state, nowMs);
+    return json({ ok: true, matchId: state.matchId });
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname === INIT_PATH && request.method === "POST") return this.initialize(request);
+
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      return json({ error: "websocket_required" }, { status: 426 });
+    }
+
+    let state = await this.loadState();
+    if (!state) return json({ error: "match_not_initialized" }, { status: 404 });
+
+    const joinToken = url.searchParams.get("token") ?? "";
+    const participant = state.participants.find((entry) => entry.joinToken === joinToken);
+    if (!participant) return json({ error: "invalid_join_token" }, { status: 403 });
+
+    for (const existingSocket of this.openSockets()) {
+      if (attachmentOf(existingSocket)?.slot === participant.slot) {
+        try {
+          existingSocket.close(4001, "participant reconnected");
+        } catch {
+          // Old socket may already be closing.
+        }
+      }
+    }
+
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+    const attachment: RankedSocketAttachment = {
+      playerId: crypto.randomUUID(),
+      slot: participant.slot,
+      joinToken,
+      latestPose: null,
+      latestPoseReceivedAtMs: null,
+    };
+    server.serializeAttachment(attachment);
+    this.ctx.acceptWebSocket(server);
+
+    const nowMs = Date.now();
+    state = markCompetitionConnected(state, participant.slot, nowMs);
+    state = await this.persist(state, nowMs, false);
+
+    this.send(server, {
+      type: "welcome",
+      roomCode: state.roomCode,
+      playerId: attachment.playerId,
+      slot: participant.slot,
+      peerConnected: this.openSockets(server).length >= 1,
+    });
+    this.broadcastPresence();
+    this.broadcastMatchState(state, nowMs);
+
+    const responseInit: ResponseInit & { webSocket: WebSocket } = {
+      status: 101,
+      webSocket: client,
+    };
+    return new Response(null, responseInit);
+  }
+
+  async webSocketMessage(socket: HibernatableWebSocket, message: string | ArrayBuffer) {
+    if (typeof message !== "string") {
+      this.send(socket, {
+        type: "error",
+        code: "binary_unsupported",
+        message: "Only bounded JSON text messages are accepted.",
+      });
+      return;
+    }
+
+    const parsed = parseClientRoomMessage(message);
+    const sender = attachmentOf(socket);
+    if (!parsed || !sender) {
+      this.send(socket, {
+        type: "error",
+        code: "invalid_message",
+        message: "Ranked match payload failed protocol validation.",
+      });
+      return;
+    }
+
+    let state = await this.loadState();
+    if (!state) {
+      this.send(socket, { type: "error", code: "missing_match", message: "Match state is unavailable." });
+      socket.close(1011, "missing match");
+      return;
+    }
+
+    const nowMs = Date.now();
+    const advanced = advanceCompetitionRuntime(state, nowMs);
+    if (advanced !== state) state = await this.persist(advanced, nowMs);
+
+    if (parsed.type === "pose") {
+      socket.serializeAttachment({
+        ...sender,
+        latestPose: parsed.pose,
+        latestPoseReceivedAtMs: nowMs,
+      } satisfies RankedSocketAttachment);
+      const relay: ServerRoomMessage = {
+        type: "peer_pose",
+        playerId: sender.playerId,
+        serverTimeMs: nowMs,
+        pose: parsed.pose,
+      };
+      for (const peer of this.openSockets(socket)) this.send(peer, relay);
+      return;
+    }
+
+    if (parsed.type === "leave_match") {
+      state = forfeitCompetition(state, sender.slot, nowMs);
+      await this.persist(state, nowMs);
+      socket.close(1000, "match forfeited");
+      return;
+    }
+
+    const resolution = resolveCompetitionAction(
+      state,
+      sender.slot,
+      nowMs,
+      this.poseForSlot(sender.slot),
+      this.poseForSlot(sender.slot === 1 ? 2 : 1),
+    );
+    state = await this.persist(resolution.state, nowMs);
+    this.send(socket, {
+      type: "action_feedback",
+      accepted: resolution.accepted,
+      code: resolution.code,
+      nextActionAtMs: resolution.nextActionAtMs,
+    });
+  }
+
+  async webSocketClose(socket: HibernatableWebSocket) {
+    this.broadcastPresence(socket);
+    const attachment = attachmentOf(socket);
+    if (!attachment) return;
+    const state = await this.loadState();
+    if (!state || state.result) return;
+    const nowMs = Date.now();
+    await this.persist(markCompetitionDisconnected(state, attachment.slot, nowMs), nowMs);
+  }
+
+  async webSocketError(socket: HibernatableWebSocket) {
+    await this.webSocketClose(socket);
+  }
+
+  async alarm() {
+    const state = await this.loadState();
+    if (!state) return;
+    const nowMs = Date.now();
+    await this.persist(advanceCompetitionRuntime(state, nowMs), nowMs);
+  }
+}
