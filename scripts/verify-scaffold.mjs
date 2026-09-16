@@ -49,10 +49,12 @@ const required = [
   "scripts/school-account-backend.mjs",
   "scripts/school-account-store.mjs",
   "scripts/school-ranked-runtime.mjs",
+  "scripts/school-ranked-product-backend.mjs",
   "scripts/verify-production-multiplayer.mjs",
   "scripts/verify-school-matchmaking.mjs",
   "scripts/verify-school-competition.mjs",
   "scripts/verify-school-accounts.mjs",
+  "scripts/verify-school-rated-product.mjs",
   "scripts/verify-c4c-runtime.mjs",
   "docs/architecture/C0_FOUNDATION.md",
   "docs/architecture/C1_FLIGHT.md",
@@ -76,14 +78,24 @@ if (!pkg.scripts?.["verify:school:c4b"]) throw new Error("Missing C4B school mat
 if (!pkg.scripts?.["verify:school:c4c"] || !pkg.scripts?.["verify:c4c:runtime"]) {
   throw new Error("Missing C4C competition verification scripts");
 }
-if (!pkg.scripts?.["verify:school:c4d"]) throw new Error("Missing C4D school account verification script");
+if (!pkg.scripts?.["verify:school:c4d"] || !pkg.scripts?.["verify:school:c4d:ranked"]) {
+  throw new Error("Missing C4D school account/rated-product verification scripts");
+}
 
 const schoolConfig = await readFile(join(root, "vite.school.config.ts"), "utf8");
 if (!schoolConfig.includes('target: "http://127.0.0.1:8787"') || !schoolConfig.includes("ws: true")) {
-  throw new Error("School Vite config must proxy multiplayer HTTP/WebSocket API traffic to the local relay");
+  throw new Error("School Vite config must retain the C3/C4C legacy relay path");
 }
 if (!schoolConfig.includes('target: "http://127.0.0.1:8788"')) {
   throw new Error("School Vite config must proxy account API traffic to the local account adapter");
+}
+if (!schoolConfig.includes('target: "http://127.0.0.1:8789"') || !schoolConfig.includes('"/api/matchmaking"')) {
+  throw new Error("School Vite config must route product matchmaking/matches through authenticated ranked backend");
+}
+
+const launcher = await readFile(join(root, "scripts/dev-school.mjs"), "utf8");
+if (!launcher.includes("school-ranked-product-backend.mjs") || !launcher.includes("SCHOOL_INTERNAL_TOKEN")) {
+  throw new Error("School launcher must start the authenticated ranked backend with an internal-only token");
 }
 
 const wrangler = await readFile(join(root, "wrangler.jsonc"), "utf8");
