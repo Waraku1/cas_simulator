@@ -6,10 +6,11 @@ Browser-based CAS flight-simulator project built on Cesium Earth.
 
 - React 19 + TypeScript + Vite
 - CesiumJS 1.145
-- Cloudflare Workers + Static Assets
+- Cloudflare Workers + Static Assets in production
 - Fictional game-oriented flight model (C1, CLOSED)
 - Regional theater contract: 50 km × 50 km (C2, CLOSED)
-- Cloudflare Durable Object + Hibernation WebSocket multiplayer (C3)
+- Cloudflare Durable Object + Hibernation WebSocket multiplayer in production (C3)
+- dependency-free Node localhost multiplayer relay for the managed school Mac
 
 ## One-time setup
 
@@ -24,9 +25,9 @@ Create a Cesium ion browser token with only the minimum read permissions needed 
 
 ## School development mode
 
-The managed school network blocks the current public Cloudflare `workers.dev` production hostname before application content loads. School use therefore does not depend on that hostname.
+The managed school network blocks the public Cloudflare `workers.dev` production hostname before application content loads. In addition, the development Mac runs macOS 12.3, while the current Cloudflare `workerd` local runtime requires a newer macOS release. School use therefore does not depend on either the public Worker hostname or local `workerd`.
 
-The canonical school mode is the full-stack localhost runtime:
+The canonical school mode is:
 
 ```bash
 pnpm dev:school
@@ -38,15 +39,21 @@ Open:
 http://127.0.0.1:5173
 ```
 
-This uses the Cloudflare Vite plugin locally, so the application, Worker API, WebSocket room endpoint, and Durable Object execute on the development Mac. The browser still uses the existing Cesium ion connection for Earth data, which has already been verified on the school network.
+This starts:
 
-For a quick backend/multiplayer self-test, leave `pnpm dev:school` running and use a second terminal:
+- the normal Vite/Cesium client on `127.0.0.1:5173`;
+- a dependency-free Node C3 relay on `127.0.0.1:8787`;
+- a Vite proxy that keeps `/api/health` and `/api/rooms/{ROOM}/ws` on the same browser origin.
+
+The Node relay implements the same bounded C3 room/presence/pose-relay contract needed by the browser, while production remains Cloudflare Worker + Durable Object.
+
+For a quick school-local backend/multiplayer self-test, leave `pnpm dev:school` running and use a second terminal:
 
 ```bash
 pnpm verify:school
 ```
 
-That check creates two local WebSocket clients, joins them to one generated room, verifies two-player presence, and verifies one pose relay.
+That check verifies the local health endpoint, creates two WebSocket clients, joins them to one generated room, verifies two-player presence, and verifies one pose relay.
 
 The previous client-only mode remains available:
 
@@ -54,7 +61,7 @@ The previous client-only mode remains available:
 pnpm dev
 ```
 
-Use client-only mode only when the Worker/Durable Object backend is intentionally unnecessary.
+Use client-only mode only when multiplayer/backend behavior is intentionally unnecessary.
 
 Two independent browser contexts on the same Mac can use the local room backend. Separate school-managed devices are not assumed to reach a laptop-hosted service across the managed Wi-Fi. Do not bypass TLS warnings or school filtering controls, and do not expose the development server on the managed LAN without explicit authorization.
 
@@ -78,15 +85,15 @@ C2 is CLOSED / ACCEPTED. After correcting the benchmark measurement and introduc
 C3 introduces a bounded private two-player room layer:
 
 - 6-character room codes;
-- one SQLite-backed Durable Object per room;
 - maximum 2 connected clients;
-- Hibernation WebSocket API;
 - local flight simulation remains authoritative for the local aircraft;
 - local pose snapshots publish at approximately 5 Hz;
 - the room validates and relays snapshots without running a server simulation tick;
 - the receiving client interpolates the peer aircraft locally.
 
-C3 is implemented and deployed. Production health, Durable Object binding, two-client presence, and pose relay have passed automated production verification. The same Worker/Durable Object contract is also exercised locally by the school full-stack mode.
+Production uses one SQLite-backed Cloudflare Durable Object per room and the Hibernation WebSocket API. School localhost uses a Node relay with the same browser-facing protocol because current `workerd` cannot run on the managed macOS 12.3 device.
+
+C3 is implemented and deployed. Production health, Durable Object binding, two-client presence, and pose relay have passed automated production verification. School-local transport is verified separately through `pnpm verify:school`.
 
 C3 contains networking/presence only. Later competition/scoring behavior remains outside this gate.
 
@@ -123,7 +130,7 @@ pnpm verify:school
 - C0 Foundation — CLOSED
 - C1 Flight — CLOSED / ACCEPTED
 - C2 World / Theater resource gate — CLOSED / ACCEPTED
-- C3 Multiplayer — IMPLEMENTED + DEPLOYED / SCHOOL LOCAL-FULL-STACK QA PENDING
+- C3 Multiplayer — IMPLEMENTED + DEPLOYED / SCHOOL LOCAL QA PENDING
 - C4 Competition loop — pending
 - C5 Release — pending
 
