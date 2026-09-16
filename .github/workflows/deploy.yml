@@ -2,6 +2,9 @@ name: Deploy production
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - ops/c3-production-deploy
 
 permissions:
   contents: read
