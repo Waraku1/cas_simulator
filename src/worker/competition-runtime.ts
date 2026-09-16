@@ -16,6 +16,8 @@ export type StoredCompetitionParticipant = {
   joinToken: string;
   aircraftId: string;
   spawnSide: "left" | "right";
+  accountUserId: string | null;
+  randomAssignment: boolean;
   heartPoints: number;
   connected: boolean;
   nextActionAtMs: number;
@@ -81,7 +83,12 @@ export function createCompetitionRuntime(init: CompetitionRoomInit): StoredCompe
     regulationEndsAtMs: init.activeAtMs + regulationDurationMs,
     overtimeEndsAtMs: init.activeAtMs + regulationDurationMs + overtimeDurationMs,
     participants: init.participants.map((participant) => ({
-      ...participant,
+      slot: participant.slot,
+      joinToken: participant.joinToken,
+      aircraftId: participant.aircraftId,
+      spawnSide: participant.spawnSide,
+      accountUserId: participant.accountUserId ?? null,
+      randomAssignment: participant.randomAssignment ?? false,
       heartPoints: MATCH_RULES.startingHeartPoints,
       connected: false,
       nextActionAtMs: init.activeAtMs,

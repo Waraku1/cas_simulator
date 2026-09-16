@@ -12,6 +12,8 @@ export type CompetitionParticipantInit = Readonly<{
   joinToken: string;
   aircraftId: string;
   spawnSide: "left" | "right";
+  accountUserId?: string;
+  randomAssignment?: boolean;
 }>;
 
 export type CompetitionRoomInit = Readonly<{
