@@ -196,10 +196,14 @@ export function useMultiplayer(autoRoomCode: string | null = null): MultiplayerC
     const normalized = normalizeRoomCode(autoRoomCode);
     if (!isValidRoomCode(normalized)) return;
 
-    // This effect intentionally reconnects when React StrictMode re-runs effects
-    // in development. A persistent "already joined" ref would suppress the second,
-    // real connection after StrictMode closes the first probe connection.
-    connect(normalized);
+    // React StrictMode runs effect setup -> cleanup -> setup in development.
+    // Defer the actual socket creation until the next task so the probe setup's
+    // timer is cancelled by cleanup before it can occupy a two-player room slot.
+    const timer = window.setTimeout(() => {
+      connect(normalized);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [autoRoomCode, connect]);
 
   useEffect(() => () => {
