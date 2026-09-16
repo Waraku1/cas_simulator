@@ -103,20 +103,22 @@ Because Euler-style heading/pitch/bank displays are derived from a full quaterni
 
 ## Verification evidence
 
-Previous C1/C1.1/C1.2/C1.3 revisions passed GitHub Actions with:
+Previous C1/C1.1/C1.2/C1.3 revisions passed GitHub Actions. C1.4 PR #9 and merged-main verification also pass:
 - `pnpm install --frozen-lockfile`: PASS;
 - `pnpm validate:scaffold`: PASS;
 - `pnpm check`: PASS;
 - `pnpm build`: PASS.
 
-Local QA on 2026-09-16 confirmed Cesium Earth/HUD rendering, corrected travel direction, relaxed pitch/bank behavior, readable diagnostics, and approximately 97 FPS before C1.4.
+C1.4 merged to main as `5a13d67a448592f3914d4b9e5082b1e8cc3712bf`; main verification run `35055910191` completed successfully.
+
+Local QA on 2026-09-16 previously confirmed Cesium Earth/HUD rendering, corrected travel direction, readable diagnostics, and approximately 97 FPS before C1.4.
 
 ## C1.4 acceptance
 
 Automated:
-- [ ] `pnpm validate:scaffold` exits 0.
-- [ ] `pnpm check` exits 0.
-- [ ] `pnpm build` exits 0.
+- [x] `pnpm validate:scaffold` exits 0.
+- [x] `pnpm check` exits 0.
+- [x] `pnpm build` exits 0.
 - [x] Orientation is normalized and finite by construction.
 - [x] No pitch or bank angle clamp exists in the canonical attitude state.
 - [x] No bank auto-recenter exists.
