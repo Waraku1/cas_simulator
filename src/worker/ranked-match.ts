@@ -6,7 +6,7 @@ import {
   type PoseSnapshot,
   type ServerRoomMessage,
 } from "../shared/multiplayer";
-import type { D1DatabaseLike } from "./auth/repository";
+import { D1AuthRepository, type D1DatabaseLike } from "./auth/repository";
 import {
   advanceCompetitionRuntime,
   competitionSnapshot,
@@ -106,10 +106,15 @@ function validInit(value: unknown): value is CompetitionRoomInit {
   }
 
   const [first, second] = candidate.participants;
-  const legacyIdentity = first.accountUserId === undefined && second.accountUserId === undefined;
+  const legacyIdentity = first.accountUserId === undefined
+    && second.accountUserId === undefined
+    && first.randomAssignment === undefined
+    && second.randomAssignment === undefined;
   const ratedIdentity = validAccountUserId(first.accountUserId)
     && validAccountUserId(second.accountUserId)
-    && first.accountUserId !== second.accountUserId;
+    && first.accountUserId !== second.accountUserId
+    && typeof first.randomAssignment === "boolean"
+    && typeof second.randomAssignment === "boolean";
 
   return first.slot === 1
     && second.slot === 2
@@ -158,11 +163,6 @@ export class RankedMatch {
     if (!state.result) return true;
     if (await this.ctx.storage.get<boolean>(RATING_FINALIZED_KEY)) return true;
 
-    if (state.result.reason === "infrastructure-failure") {
-      await this.ctx.storage.put(RATING_FINALIZED_KEY, true);
-      return true;
-    }
-
     const [first, second] = state.participants;
     const firstUserId = first.accountUserId;
     const secondUserId = second.accountUserId;
@@ -175,6 +175,12 @@ export class RankedMatch {
 
     if (!firstUserId || !secondUserId || firstUserId === secondUserId || !this.env.ACCOUNTS) {
       return false;
+    }
+
+    if (state.result.reason === "infrastructure-failure") {
+      // NO CONTEST is deliberately account-neutral.
+      await this.ctx.storage.put(RATING_FINALIZED_KEY, true);
+      return true;
     }
 
     const firstOutcome = state.result.winnerSlot === null
@@ -192,11 +198,22 @@ export class RankedMatch {
         reason: state.result.reason,
         completedAtMs: nowMs,
       });
+
+      const accounts = new D1AuthRepository(this.env.ACCOUNTS);
+      const fixableUpdates: Promise<void>[] = [];
+      if (first.randomAssignment) {
+        fixableUpdates.push(accounts.updateFixableAircraft(firstUserId, first.aircraftId, nowMs));
+      }
+      if (second.randomAssignment) {
+        fixableUpdates.push(accounts.updateFixableAircraft(secondUserId, second.aircraftId, nowMs));
+      }
+      await Promise.all(fixableUpdates);
+
       await this.ctx.storage.put(RATING_FINALIZED_KEY, true);
       return true;
     } catch (error) {
       console.error(
-        `[ranked-match] rating finalization failed for ${state.matchId}: ${error instanceof Error ? error.message : String(error)}`,
+        `[ranked-match] account finalization failed for ${state.matchId}: ${error instanceof Error ? error.message : String(error)}`,
       );
       return false;
     }
