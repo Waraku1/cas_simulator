@@ -339,6 +339,9 @@ export class RankedMatch {
     this.broadcastPresence(socket);
     const attachment = attachmentOf(socket);
     if (!attachment) return;
+    // A reconnect replaces the old socket for the same participant. The old
+    // close callback must not start a disconnect grace period for the new link.
+    if (this.socketForSlot(attachment.slot, socket)) return;
     const state = await this.loadState();
     if (!state || state.result) return;
     const nowMs = Date.now();
