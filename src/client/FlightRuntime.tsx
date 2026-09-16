@@ -78,6 +78,7 @@ export function FlightRuntime({
             display: "grid",
             gap: 3,
             minWidth: 142,
+            maxWidth: 260,
             padding: "8px 11px",
             border: "1px solid rgba(150, 228, 244, 0.22)",
             borderRadius: 8,
@@ -94,6 +95,11 @@ export function FlightRuntime({
           <strong style={{ fontSize: 10, letterSpacing: "0.12em", color: "#eaffff" }}>
             {productLinkLabel(multiplayer.status, multiplayer.peerConnected)}
           </strong>
+          {multiplayer.status === "error" && multiplayer.errorMessage && (
+            <small style={{ fontSize: 8, lineHeight: 1.35, color: "rgba(255, 196, 174, 0.82)" }}>
+              {multiplayer.errorMessage}
+            </small>
+          )}
         </div>
       )}
     </main>
