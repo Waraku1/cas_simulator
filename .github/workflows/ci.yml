@@ -78,3 +78,4 @@ jobs:
           pnpm verify:school:c4b
           pnpm verify:school:c4c
           pnpm verify:school:c4d
+          pnpm verify:school:c4d:ranked
