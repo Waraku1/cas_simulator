@@ -8,8 +8,8 @@ Browser-based CAS flight-simulator project built on Cesium Earth.
 - CesiumJS 1.145
 - Cloudflare Workers + Static Assets
 - Fictional game-oriented flight model (C1, CLOSED)
-- Regional theater contract: 50 km × 50 km (C2)
-- Durable Objects/WebSocket multiplayer reserved for C3
+- Regional theater contract: 50 km × 50 km (C2, CLOSED)
+- Cloudflare Durable Object + Hibernation WebSocket multiplayer (C3)
 
 ## One-time setup
 
@@ -32,6 +32,8 @@ pnpm dev
 
 Open `http://127.0.0.1:5173`. Do not bypass TLS warnings or school filtering controls.
 
+The client-only localhost server does not host the Cloudflare Worker/Durable Object backend. C3 room connection attempts therefore fail gracefully in this mode while flight, theater, HUD, and diagnostics remain usable. Real two-browser multiplayer verification is performed against the deployed Worker on an allowed network.
+
 ## Flight controls
 
 - `W / S`: pitch
@@ -45,15 +47,22 @@ The aircraft is fictional and uses game-oriented kinematics rather than real-air
 
 C2 adds a visible 50 km × 50 km theater boundary, a 5 km edge-warning band, and browser-side performance/resource evidence.
 
-Runtime load is governed at 60 FPS for both Cesium rendering and the flight simulation loop. The diagnostics panel measures actual Cesium post-render cadence during active foreground time so background-tab throttling does not corrupt average/minimum FPS evidence.
+C2 is CLOSED / ACCEPTED. After correcting the benchmark measurement and introducing a 60 FPS runtime governor, the accepted active-foreground preflight measured 59.9 average FPS and a 52 FPS minimum valid sample. The previously planned 30-minute soak was explicitly waived because the remediated preflight, functional boundary QA, and control-regression QA satisfied the gate at substantially lower device/time cost. The waiver is recorded in Issue #12 and `docs/architecture/C2_WORLD_THEATER.md`.
 
-Verification is staged:
+## C3 multiplayer foundation
 
-1. complete a 3-minute active-foreground preflight;
-2. review device load, current/average/minimum FPS, optional heap data, and observed transfer;
-3. only after preflight acceptance, continue or rerun for the full 30-minute soak.
+C3 introduces a bounded private two-player room layer:
 
-`COPY C2 REPORT` copies structured evidence for the project log. Browser-observed transfer is intentionally labeled as such because cross-origin resources and cache hits can report zero bytes in Resource Timing.
+- 6-character room codes;
+- one SQLite-backed Durable Object per room;
+- maximum 2 connected clients;
+- Hibernation WebSocket API;
+- local flight simulation remains authoritative for the local aircraft;
+- local pose snapshots publish at approximately 5 Hz;
+- the room validates and relays snapshots without running a server simulation tick;
+- the receiving client interpolates the peer aircraft locally.
+
+C3 contains networking/presence only. Later competition/scoring behavior remains outside this gate.
 
 ## Production mode
 
@@ -65,7 +74,7 @@ Current production health endpoint:
 https://cas-flight-simulator.heleshiheiheleshihei.workers.dev/api/health
 ```
 
-Production browser verification is performed on an allowed network before C5 release closure.
+Production browser verification is performed on an allowed network before release closure.
 
 ## Validate
 
@@ -79,9 +88,9 @@ pnpm build
 
 - C0 Foundation — CLOSED
 - C1 Flight — CLOSED / ACCEPTED
-- C2 World / Theater resource gate — PERFORMANCE REMEDIATION MERGED / 3-MIN PREFLIGHT PENDING
-- C3 Multiplayer — pending C2 closure
-- C4 Game loop — pending
+- C2 World / Theater resource gate — CLOSED / ACCEPTED
+- C3 Multiplayer — IMPLEMENTATION IN PROGRESS / NETWORK QA PENDING
+- C4 Competition loop — pending
 - C5 Release — pending
 
-See `docs/architecture/C0_FOUNDATION.md`, `docs/architecture/C0_STATUS.md`, `docs/architecture/C1_FLIGHT.md`, `docs/architecture/C2_WORLD_THEATER.md`, and `docs/operations/SCHOOL_NETWORK_COMPATIBILITY.md`.
+See `docs/architecture/C0_FOUNDATION.md`, `docs/architecture/C0_STATUS.md`, `docs/architecture/C1_FLIGHT.md`, `docs/architecture/C2_WORLD_THEATER.md`, `docs/architecture/C3_MULTIPLAYER.md`, and `docs/operations/SCHOOL_NETWORK_COMPATIBILITY.md`.
