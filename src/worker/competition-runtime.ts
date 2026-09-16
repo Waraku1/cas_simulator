@@ -126,26 +126,30 @@ export function advanceCompetitionRuntime(
   }
 
   const [first, second] = state.participants;
-  if (first.heartPoints !== second.heartPoints) {
-    return completed(
-      state,
-      first.heartPoints > second.heartPoints ? 1 : 2,
-      "regulation-heart-points",
-    );
+  let advanced = state;
+
+  if (state.phase !== "overtime") {
+    if (first.heartPoints !== second.heartPoints) {
+      return completed(
+        state,
+        first.heartPoints > second.heartPoints ? 1 : 2,
+        "regulation-heart-points",
+      );
+    }
+    advanced = { ...state, phase: "overtime" };
   }
 
-  if (nowMs < state.overtimeEndsAtMs) {
-    return state.phase === "overtime" ? state : { ...state, phase: "overtime" };
-  }
+  if (nowMs < advanced.overtimeEndsAtMs) return advanced;
 
-  if (first.heartPoints !== second.heartPoints) {
+  const [overtimeFirst, overtimeSecond] = advanced.participants;
+  if (overtimeFirst.heartPoints !== overtimeSecond.heartPoints) {
     return completed(
-      state,
-      first.heartPoints > second.heartPoints ? 1 : 2,
+      advanced,
+      overtimeFirst.heartPoints > overtimeSecond.heartPoints ? 1 : 2,
       "overtime-heart-points",
     );
   }
-  return completed(state, null, "overtime-draw");
+  return completed(advanced, null, "overtime-draw");
 }
 
 export function markCompetitionConnected(
