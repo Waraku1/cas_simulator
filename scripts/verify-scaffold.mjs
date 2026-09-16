@@ -18,6 +18,7 @@ const required = [
   "src/worker/index.ts",
   "src/shared/config.ts",
   "src/shared/multiplayer.ts",
+  "scripts/verify-production-multiplayer.mjs",
   "docs/architecture/C0_FOUNDATION.md",
   "docs/architecture/C1_FLIGHT.md",
   "docs/architecture/C2_WORLD_THEATER.md",
@@ -36,6 +37,11 @@ const wrangler = await readFile(join(root, "wrangler.jsonc"), "utf8");
 if (!wrangler.includes('"name": "ROOMS"')) throw new Error("Missing C3 Durable Object binding");
 if (!wrangler.includes('"new_sqlite_classes": ["MultiplayerRoom"]')) {
   throw new Error("Missing C3 SQLite Durable Object migration");
+}
+
+const deployWorkflow = await readFile(join(root, ".github/workflows/deploy.yml"), "utf8");
+if (!deployWorkflow.includes("verify-production-multiplayer.mjs")) {
+  throw new Error("Missing C3 production multiplayer deploy verification");
 }
 
 console.log(`Scaffold integrity OK (${required.length} required files).`);

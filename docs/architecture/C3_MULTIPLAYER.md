@@ -1,6 +1,6 @@
 # C3 — Multiplayer Foundation
 
-Status: **IMPLEMENTED ON BRANCH / AUTOMATED + NETWORK QA PENDING**
+Status: **IMPLEMENTED + DEPLOYED / MANUAL TWO-BROWSER UI QA PENDING**
 
 ## Objective
 
@@ -19,17 +19,13 @@ C3 is transport/presence only. It does not add C4 competition or scoring semanti
 
 ## Worker / Durable Object architecture
 
-Route:
-
-`/api/rooms/{ROOM}/ws`
+Route: `/api/rooms/{ROOM}/ws`.
 
 The Worker maps the normalized room code to `ROOMS.idFromName(roomCode)` and forwards the upgrade request to that Durable Object.
 
-`MultiplayerRoom` uses Cloudflare's Hibernation WebSocket API. Each accepted socket stores a compact attachment containing the generated player ID and slot number. The attachment survives Durable Object hibernation while the WebSocket remains healthy.
+`MultiplayerRoom` uses Cloudflare's Hibernation WebSocket API. Each accepted socket stores a compact attachment containing the generated player ID and slot number. The room uses no periodic server timer: valid incoming pose snapshots are relayed directly to the peer.
 
-The room does not use `setInterval` or other periodic server timers. Incoming client pose messages are validated and immediately relayed to the other connected client. This preserves the hibernation-friendly execution model.
-
-The namespace is SQLite-backed through the `c3-v1` `new_sqlite_classes` migration, even though C3 does not yet need persistent game state.
+The namespace is SQLite-backed through the `c3-v1` `new_sqlite_classes` migration.
 
 ## Protocol
 
@@ -44,51 +40,21 @@ Room -> client:
 - `peer_pose`;
 - bounded `error` messages.
 
-Pose snapshots contain only:
-- latitude;
-- longitude;
-- altitude;
-- normalized local-body quaternion;
-- monotonic client sequence;
-- client-local timestamp.
+Pose snapshots contain latitude, longitude, altitude, normalized local-body quaternion, monotonic client sequence, and client-local timestamp. The server generates player identity and does not simulate the aircraft.
 
-The server does not accept client-supplied identity and does not simulate the aircraft.
-
-Protocol guards:
-- maximum text message size: 2048 bytes;
-- finite/range checks for coordinates/altitude;
-- quaternion norm sanity check;
-- safe-integer sequence check;
-- binary messages rejected.
+Protocol guards include a 2048-byte text-message limit, finite/range checks, quaternion-norm sanity check, safe-integer sequence validation, and rejection of binary messages.
 
 ## Client architecture
 
-Local aircraft simulation remains at the C2-governed 60 FPS cap.
+Local aircraft simulation remains at the C2-governed 60 FPS cap. When connected, `EarthScene` publishes local pose at approximately 5 Hz (200 ms). The receiving client interpolates peer latitude/longitude/altitude linearly and orientation with quaternion spherical interpolation. Peer aircraft use a distinct visual material.
 
-When a WebSocket is connected, `EarthScene` publishes the current local pose at approximately 5 Hz (200 ms). The server relays that snapshot to the peer.
-
-The receiving client keeps the previous and current peer snapshots and interpolates between them during the local render loop:
-- latitude/longitude/altitude: linear interpolation;
-- orientation: quaternion spherical interpolation;
-- remote entity rendering: separate visual material from the local aircraft.
-
-The room UI exposes:
-- create room;
-- join room;
-- leave room;
-- normalized room code;
-- waiting/connected/error state;
-- peer presence.
-
-Form controls are guarded so typing into the room-code field does not trigger flight controls.
+The compact room UI exposes create, join, leave, room code, connection state, and peer presence. Form controls are guarded so room-code input does not trigger flight controls.
 
 ## School-network split
 
-The normal school development path remains client-only `pnpm dev` at `127.0.0.1:5173`.
+The normal school development path remains client-only `pnpm dev` at `127.0.0.1:5173`. Because that path does not host the Worker API, multiplayer connection attempts may show a bounded backend-unavailable state without breaking flight/theater/diagnostics.
 
-Because that path does not host the Worker API, multiplayer connection attempts may show a bounded backend-unavailable state. This must not break local flight, theater, or diagnostics.
-
-Actual two-browser WebSocket verification is performed against the deployed Worker on an allowed network. This is consistent with the accepted school-network architecture from C0/C2.
+Human-visible two-browser verification is performed against the deployed Worker on an allowed network. School filtering is not bypassed.
 
 ## Performance contract
 
@@ -97,31 +63,45 @@ Actual two-browser WebSocket verification is performed against the deployed Work
 - no server simulation tick;
 - no server broadcast timer;
 - server relays only validated snapshots;
-- C2 diagnostics remain active so C3 network load can be compared against the accepted C2 baseline.
+- C2 diagnostics remain active for regression comparison.
 
-If C3 materially increases device/network load, a new bounded soak test may be introduced without reopening C2.
+## Automated implementation evidence
 
-## C3 exit criteria
+C3 implementation merged through PR #27 as main commit `d57a6f60ae248d87bfe1bdcf8564daa3ba675d4d`.
 
-Automated/implementation gate:
-- [ ] protocol types and validators pass TypeScript/build;
-- [ ] Durable Object binding and SQLite migration validate;
-- [ ] Worker upgrade route compiles;
-- [ ] Hibernation WebSocket room compiles;
-- [ ] 2-player capacity guard exists;
-- [ ] client create/join/leave UI compiles;
-- [ ] local ~5 Hz pose publish path compiles;
-- [ ] remote interpolation/render path compiles;
-- [ ] localhost backend-unavailable state is non-fatal;
-- [ ] `pnpm validate:scaffold`, `pnpm check`, and `pnpm build` pass.
+- [x] Shared protocol types and validators compile.
+- [x] Durable Object binding and SQLite migration validate.
+- [x] Worker WebSocket route compiles.
+- [x] Hibernation room implementation compiles.
+- [x] 2-player capacity guard exists.
+- [x] client create/join/leave UI compiles.
+- [x] local ~5 Hz pose publication compiles.
+- [x] remote interpolation/rendering compiles.
+- [x] localhost backend-unavailable state is non-fatal.
+- [x] PR CI run `35061807978`: PASS.
+- [x] merged-main CI run `35061871273`: PASS.
 
-Manual/deployment gate:
-- [ ] C3 Worker deploy succeeds with `ROOMS` Durable Object namespace;
-- [ ] two browsers join the same private room;
-- [ ] both clients report peer connected;
-- [ ] each client sees the other aircraft move with usable interpolation;
-- [ ] third-client/full-room behavior is bounded;
-- [ ] disconnect/reconnect does not break the remaining client;
-- [ ] C1 controls/camera and C2 theater/performance behavior show no regression.
+## Production evidence — 2026-09-16
 
-C3 remains open until allowed-network two-browser verification passes.
+Production deployment succeeded through GitHub Actions. Wrangler confirmed:
+
+- `env.ROOMS (MultiplayerRoom)` Durable Object binding;
+- production root available;
+- `/api/health` reports `features.multiplayer = C3_FOUNDATION`;
+- deployed Cloudflare version `ff2ad6f3-1e0f-47a5-980e-f9ea44626928`.
+
+An automated production WebSocket smoke test then connected two independent clients to the same generated room, verified 2-player presence, sent pose sequence `1` from client 1, and verified that client 2 received the relayed peer pose with matching server identity. Actions run `35062194182` passed.
+
+The smoke test is retained as `scripts/verify-production-multiplayer.mjs` and is part of the production deployment verification workflow.
+
+## Remaining C3 closure evidence
+
+- [ ] Open the production UI in two browser contexts/devices on an allowed network.
+- [ ] Browser A creates a room and Browser B joins the same code.
+- [ ] Both panels show connected/peer online.
+- [ ] Each browser visibly renders the peer aircraft.
+- [ ] Peer movement and orientation interpolation are subjectively usable/stable.
+- [ ] Leave/rejoin behavior does not break the remaining client.
+- [ ] No obvious C1/C2 UI or performance regression.
+
+C3 remains OPEN only for this final human-visible two-browser interpolation/UI QA.
