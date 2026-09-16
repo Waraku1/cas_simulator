@@ -10,12 +10,16 @@ import { INITIAL_THEATER_STATUS } from "./theater/model";
 
 type FlightRuntimeProps = Readonly<{
   showDevelopmentPanels?: boolean;
+  autoRoomCode?: string | null;
 }>;
 
-export function FlightRuntime({ showDevelopmentPanels = true }: FlightRuntimeProps) {
+export function FlightRuntime({
+  showDevelopmentPanels = true,
+  autoRoomCode = null,
+}: FlightRuntimeProps) {
   const [telemetry, setTelemetry] = useState(INITIAL_FLIGHT_TELEMETRY);
   const [theaterStatus, setTheaterStatus] = useState(INITIAL_THEATER_STATUS);
-  const multiplayer = useMultiplayer();
+  const multiplayer = useMultiplayer(autoRoomCode);
 
   return (
     <main className="app-shell">

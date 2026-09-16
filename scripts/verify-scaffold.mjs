@@ -15,18 +15,26 @@ const required = [
   "src/client/components/MultiplayerPanel.tsx",
   "src/client/diagnostics/useRuntimeDiagnostics.ts",
   "src/client/multiplayer/useMultiplayer.ts",
+  "src/client/product/ProductPreview.tsx",
+  "src/client/product/useMatchmaking.ts",
   "src/client/theater/model.ts",
   "src/client/c3.css",
   "src/worker/index.ts",
   "src/shared/config.ts",
   "src/shared/multiplayer.ts",
+  "src/shared/product.ts",
+  "src/shared/aircraft.ts",
+  "src/shared/aircraft-catalog.json",
+  "src/shared/matchmaking.ts",
   "scripts/dev-school.mjs",
   "scripts/school-local-backend.mjs",
   "scripts/verify-production-multiplayer.mjs",
+  "scripts/verify-school-matchmaking.mjs",
   "docs/architecture/C0_FOUNDATION.md",
   "docs/architecture/C1_FLIGHT.md",
   "docs/architecture/C2_WORLD_THEATER.md",
   "docs/architecture/C3_MULTIPLAYER.md",
+  "docs/architecture/C4_PRODUCT_CONTRACT.md",
 ];
 
 for (const relative of required) {
@@ -40,6 +48,7 @@ if (!pkg.scripts?.["dev:school"]?.includes("scripts/dev-school.mjs")) {
   throw new Error("School mode must use the OS-compatible Node local relay launcher");
 }
 if (!pkg.scripts?.["verify:school"]) throw new Error("Missing school multiplayer verification script");
+if (!pkg.scripts?.["verify:school:c4b"]) throw new Error("Missing C4B school matchmaking verification script");
 
 const schoolConfig = await readFile(join(root, "vite.school.config.ts"), "utf8");
 if (!schoolConfig.includes('target: "http://127.0.0.1:8787"') || !schoolConfig.includes("ws: true")) {
@@ -50,6 +59,9 @@ const wrangler = await readFile(join(root, "wrangler.jsonc"), "utf8");
 if (!wrangler.includes('"name": "ROOMS"')) throw new Error("Missing C3 Durable Object binding");
 if (!wrangler.includes('"new_sqlite_classes": ["MultiplayerRoom"]')) {
   throw new Error("Missing C3 SQLite Durable Object migration");
+}
+if (!wrangler.includes('"name": "MATCHMAKER"') || !wrangler.includes('"new_sqlite_classes": ["RankedMatchmaker"]')) {
+  throw new Error("Missing C4B ranked matchmaker Durable Object contract");
 }
 
 const deployWorkflow = await readFile(join(root, ".github/workflows/deploy.yml"), "utf8");
