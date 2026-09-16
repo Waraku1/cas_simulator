@@ -58,4 +58,7 @@ jobs:
         run: |
           HEALTH_JSON="$(curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$PRODUCTION_URL/api/health")"
           echo "$HEALTH_JSON"
-          HEALTH_JSON="$HEALTH_JSON" node -e 'const j = JSON.parse(process.env.HEALTH_JSON); if (j.ok !== true || j.stage !== "C0_FOUNDATION") process.exit(1)'
+          HEALTH_JSON="$HEALTH_JSON" node -e 'const j = JSON.parse(process.env.HEALTH_JSON); if (j.ok !== true || j.stage !== "C0_FOUNDATION" || j.features?.multiplayer !== "C3_FOUNDATION") process.exit(1)'
+
+      - name: Verify multiplayer WebSocket relay
+        run: node scripts/verify-production-multiplayer.mjs
