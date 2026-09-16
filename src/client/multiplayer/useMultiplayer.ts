@@ -138,8 +138,12 @@ export function useMultiplayer(autoRoomCode: string | null = null): MultiplayerC
         return;
       }
 
-      setErrorMessage(message.message);
-      setStatus("error");
+      if (message.type === "error") {
+        setErrorMessage(message.message);
+        setStatus("error");
+      }
+      // C4C competition state/feedback is consumed by the ranked product client in
+      // C4C-2. Manual C3 room clients intentionally ignore those message variants.
     });
 
     socket.addEventListener("close", (event) => {
