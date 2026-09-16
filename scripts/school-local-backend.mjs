@@ -1,16 +1,24 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomInt, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
+import aircraftCatalog from "../src/shared/aircraft-catalog.json" with { type: "json" };
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.SCHOOL_BACKEND_PORT ?? 8787);
+const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ROOM_CODE_PATTERN = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/;
 const ROOM_SOCKET_ROUTE = /^\/api\/rooms\/([ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6})\/ws$/;
+const MATCHMAKING_SOCKET_ROUTE = "/api/matchmaking/ws";
 const MAX_ROOM_PLAYERS = 2;
 const MAX_ROOM_MESSAGE_BYTES = 2_048;
+const ASSIGNMENT_REVEAL_MS = 2_500;
+const COUNTDOWN_MS = 5_000;
 const WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const AIRCRAFT_IDS = new Set(aircraftCatalog.map((aircraft) => aircraft.aircraftId));
 
 /** @type {Map<string, Set<any>>} */
 const rooms = new Map();
+/** @type {Set<any>} */
+const matchmakingClients = new Set();
 
 function writeJson(response, status, body) {
   const payload = JSON.stringify(body);
@@ -46,6 +54,19 @@ function sendJson(client, message) {
   client.socket.write(encodeFrame(0x1, Buffer.from(JSON.stringify(message))));
 }
 
+function generateRoomCode() {
+  let code = "";
+  for (let index = 0; index < 6; index += 1) {
+    code += ROOM_CODE_ALPHABET[randomInt(ROOM_CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
+function assignedAircraftId(fixedAircraftId) {
+  if (typeof fixedAircraftId === "string" && AIRCRAFT_IDS.has(fixedAircraftId)) return fixedAircraftId;
+  return aircraftCatalog[randomInt(aircraftCatalog.length)].aircraftId;
+}
+
 function broadcastPresence(roomCode) {
   const room = rooms.get(roomCode);
   if (!room) return;
@@ -61,12 +82,18 @@ function broadcastPresence(roomCode) {
 function cleanupClient(client) {
   if (client.closed) return;
   client.closed = true;
-  const room = rooms.get(client.roomCode);
-  if (room) {
-    room.delete(client);
-    if (room.size === 0) rooms.delete(client.roomCode);
+
+  if (client.kind === "room") {
+    const room = rooms.get(client.roomCode);
+    if (room) {
+      room.delete(client);
+      if (room.size === 0) rooms.delete(client.roomCode);
+    }
+    broadcastPresence(client.roomCode);
+    return;
   }
-  broadcastPresence(client.roomCode);
+
+  matchmakingClients.delete(client);
 }
 
 function closeClient(client, code = 1000, reason = "") {
@@ -108,16 +135,7 @@ function validPoseSnapshot(value) {
   return norm >= 0.8 && norm <= 1.2;
 }
 
-function handleTextMessage(client, payload) {
-  if (payload.length > MAX_ROOM_MESSAGE_BYTES) {
-    sendJson(client, {
-      type: "error",
-      code: "invalid_message",
-      message: "Snapshot payload failed protocol validation.",
-    });
-    return;
-  }
-
+function handleRoomTextMessage(client, payload) {
   let value;
   try {
     value = JSON.parse(payload.toString("utf8"));
@@ -149,6 +167,94 @@ function handleTextMessage(client, payload) {
   for (const peer of room) {
     if (peer !== client) sendJson(peer, relay);
   }
+}
+
+function tryMatchmaking() {
+  const waiting = [...matchmakingClients]
+    .filter((client) => !client.closed && !client.socket.destroyed && client.queueState === "waiting")
+    .sort((a, b) => (a.queuedAtMs ?? 0) - (b.queuedAtMs ?? 0));
+
+  while (waiting.length >= 2) {
+    const first = waiting.shift();
+    const second = waiting.shift();
+    if (!first || !second) return;
+
+    first.queueState = "matched";
+    second.queueState = "matched";
+    const matchedAtMs = Date.now();
+    const assignmentEndsAtMs = matchedAtMs + ASSIGNMENT_REVEAL_MS;
+    const activeAtMs = assignmentEndsAtMs + COUNTDOWN_MS;
+    const matchId = randomUUID();
+    const roomCode = generateRoomCode();
+    const firstAircraftId = assignedAircraftId(first.fixedAircraftId);
+    const secondAircraftId = assignedAircraftId(second.fixedAircraftId);
+    const firstSide = randomInt(2) === 0 ? "left" : "right";
+    const secondSide = firstSide === "left" ? "right" : "left";
+
+    sendJson(first, {
+      type: "match_found",
+      assignment: {
+        matchId,
+        roomCode,
+        aircraftId: firstAircraftId,
+        peerAircraftId: secondAircraftId,
+        spawnSide: firstSide,
+        assignmentEndsAtMs,
+        activeAtMs,
+      },
+    });
+    sendJson(second, {
+      type: "match_found",
+      assignment: {
+        matchId,
+        roomCode,
+        aircraftId: secondAircraftId,
+        peerAircraftId: firstAircraftId,
+        spawnSide: secondSide,
+        assignmentEndsAtMs,
+        activeAtMs,
+      },
+    });
+  }
+}
+
+function handleMatchmakingTextMessage(client, payload) {
+  let value;
+  try {
+    value = JSON.parse(payload.toString("utf8"));
+  } catch {
+    value = null;
+  }
+
+  if (typeof value !== "object" || value === null || typeof value.type !== "string") {
+    sendJson(client, { type: "error", code: "invalid_message", message: "Matchmaking request failed validation." });
+    return;
+  }
+
+  if (value.type === "cancel") {
+    client.queueState = "cancelled";
+    closeClient(client, 1000, "queue cancelled");
+    return;
+  }
+
+  if (
+    value.type !== "enqueue"
+    || (value.fixedAircraftId !== null && (typeof value.fixedAircraftId !== "string" || !AIRCRAFT_IDS.has(value.fixedAircraftId)))
+  ) {
+    sendJson(client, { type: "error", code: "invalid_message", message: "Matchmaking request failed validation." });
+    return;
+  }
+
+  if (client.queueState === "matched") {
+    sendJson(client, { type: "error", code: "already_matched", message: "This queue connection already has a match." });
+    return;
+  }
+
+  client.fixedAircraftId = value.fixedAircraftId;
+  client.queuedAtMs = Date.now();
+  client.queueState = "waiting";
+  sendJson(client, { type: "queued", queuedAtMs: client.queuedAtMs });
+  tryMatchmaking();
 }
 
 function consumeFrames(client, chunk) {
@@ -215,7 +321,13 @@ function consumeFrames(client, chunk) {
       return;
     }
 
-    handleTextMessage(client, payload);
+    if (payload.length > MAX_ROOM_MESSAGE_BYTES) {
+      sendJson(client, { type: "error", code: "invalid_message", message: "Message exceeded the bounded protocol size." });
+      continue;
+    }
+
+    if (client.kind === "matchmaking") handleMatchmakingTextMessage(client, payload);
+    else handleRoomTextMessage(client, payload);
   }
 }
 
@@ -226,7 +338,10 @@ const server = createServer((request, response) => {
       ok: true,
       stage: "C0_FOUNDATION",
       service: "cas-flight-simulator",
-      features: { multiplayer: "C3_FOUNDATION" },
+      features: {
+        multiplayer: "C3_FOUNDATION",
+        matchmaking: "C4B_FOUNDATION",
+      },
       runtime: "SCHOOL_NODE_LOCAL_RELAY",
       timestamp: new Date().toISOString(),
     });
@@ -239,18 +354,50 @@ const server = createServer((request, response) => {
   writeJson(response, 404, { error: "not_found" });
 });
 
+function acceptUpgrade(request, socket, key) {
+  const accept = createHash("sha1").update(key + WEBSOCKET_GUID).digest("base64");
+  socket.write([
+    "HTTP/1.1 101 Switching Protocols",
+    "Upgrade: websocket",
+    "Connection: Upgrade",
+    `Sec-WebSocket-Accept: ${accept}`,
+    "\r\n",
+  ].join("\r\n"));
+}
+
 server.on("upgrade", (request, socket, head) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${HOST}:${PORT}`}`);
-  const roomCode = url.pathname.match(ROOM_SOCKET_ROUTE)?.[1] ?? "";
   const key = request.headers["sec-websocket-key"];
+  const isMatchmaking = url.pathname === MATCHMAKING_SOCKET_ROUTE;
+  const roomCode = url.pathname.match(ROOM_SOCKET_ROUTE)?.[1] ?? "";
 
   if (
     request.headers.upgrade?.toLowerCase() !== "websocket"
     || typeof key !== "string"
-    || !ROOM_CODE_PATTERN.test(roomCode)
+    || (!isMatchmaking && !ROOM_CODE_PATTERN.test(roomCode))
   ) {
     socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
     socket.destroy();
+    return;
+  }
+
+  if (isMatchmaking) {
+    acceptUpgrade(request, socket, key);
+    const client = {
+      kind: "matchmaking",
+      socket,
+      clientId: randomUUID(),
+      queueState: "connected",
+      queuedAtMs: null,
+      fixedAircraftId: null,
+      buffer: Buffer.alloc(0),
+      closed: false,
+    };
+    matchmakingClients.add(client);
+    socket.on("data", (chunk) => consumeFrames(client, chunk));
+    socket.on("close", () => cleanupClient(client));
+    socket.on("error", () => cleanupClient(client));
+    if (head.length > 0) consumeFrames(client, head);
     return;
   }
 
@@ -264,16 +411,9 @@ server.on("upgrade", (request, socket, head) => {
     return;
   }
 
-  const accept = createHash("sha1").update(key + WEBSOCKET_GUID).digest("base64");
-  socket.write([
-    "HTTP/1.1 101 Switching Protocols",
-    "Upgrade: websocket",
-    "Connection: Upgrade",
-    `Sec-WebSocket-Accept: ${accept}`,
-    "\r\n",
-  ].join("\r\n"));
-
+  acceptUpgrade(request, socket, key);
   const client = {
+    kind: "room",
     socket,
     roomCode,
     playerId: randomUUID(),
@@ -312,6 +452,7 @@ function shutdown() {
   for (const room of rooms.values()) {
     for (const client of room) closeClient(client, 1001, "server shutdown");
   }
+  for (const client of [...matchmakingClients]) closeClient(client, 1001, "server shutdown");
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1_000).unref();
 }
