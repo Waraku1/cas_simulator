@@ -43,9 +43,17 @@ The aircraft is fictional and uses game-oriented kinematics rather than real-air
 
 ## C2 theater and resource gate
 
-C2 adds a visible 50 km × 50 km theater boundary, a 5 km edge-warning band, and a 30-minute browser benchmark panel. The panel tracks current/average/minimum FPS, elapsed time, browser-observed transfer, resource counts, and optional heap data. `COPY C2 REPORT` copies structured evidence for the project log.
+C2 adds a visible 50 km × 50 km theater boundary, a 5 km edge-warning band, and browser-side performance/resource evidence.
 
-Browser-observed transfer is intentionally labeled as such because cross-origin resources and cache hits can report zero bytes in Resource Timing.
+Runtime load is governed at 60 FPS for both Cesium rendering and the flight simulation loop. The diagnostics panel measures actual Cesium post-render cadence during active foreground time so background-tab throttling does not corrupt average/minimum FPS evidence.
+
+Verification is staged:
+
+1. complete a 3-minute active-foreground preflight;
+2. review device load, current/average/minimum FPS, optional heap data, and observed transfer;
+3. only after preflight acceptance, continue or rerun for the full 30-minute soak.
+
+`COPY C2 REPORT` copies structured evidence for the project log. Browser-observed transfer is intentionally labeled as such because cross-origin resources and cache hits can report zero bytes in Resource Timing.
 
 ## Production mode
 
@@ -71,7 +79,7 @@ pnpm build
 
 - C0 Foundation — CLOSED
 - C1 Flight — CLOSED / ACCEPTED
-- C2 World / Theater resource gate — IMPLEMENTED / 30-MIN QA PENDING
+- C2 World / Theater resource gate — PERFORMANCE REMEDIATION MERGED / 3-MIN PREFLIGHT PENDING
 - C3 Multiplayer — pending C2 closure
 - C4 Game loop — pending
 - C5 Release — pending
