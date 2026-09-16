@@ -49,6 +49,7 @@ export type ActionModuleSpec = Readonly<{
   displayName: string;
   heartPointEffect: number;
   cooldownMs: number;
+  activationRadiusM: number;
   activationProfile: "close" | "balanced" | "precision";
 }>;
 
