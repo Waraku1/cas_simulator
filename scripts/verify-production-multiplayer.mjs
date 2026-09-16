@@ -1,15 +1,19 @@
 import { randomBytes } from "node:crypto";
 
-const productionUrl = process.env.PRODUCTION_URL;
-if (!productionUrl) throw new Error("PRODUCTION_URL is required");
+const targetUrl = process.env.PRODUCTION_URL ?? process.env.SCHOOL_URL;
+if (!targetUrl) throw new Error("PRODUCTION_URL or SCHOOL_URL is required");
 if (typeof WebSocket !== "function") throw new Error("Global WebSocket is unavailable in this Node runtime");
+
+const gate = process.env.PRODUCTION_URL
+  ? "C3_MULTIPLAYER_SMOKE"
+  : "SCHOOL_LOCAL_MULTIPLAYER_SMOKE";
 
 const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const random = randomBytes(6);
 let roomCode = "";
 for (const byte of random) roomCode += alphabet[byte % alphabet.length];
 
-const wsBase = productionUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
+const wsBase = targetUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
 const roomUrl = `${wsBase}/api/rooms/${roomCode}/ws`;
 const timeoutMs = 8_000;
 
@@ -116,7 +120,7 @@ client2.socket.close(1000, "smoke complete");
 
 console.log(JSON.stringify({
   ok: true,
-  gate: "C3_MULTIPLAYER_SMOKE",
+  gate,
   roomCode,
   players: 2,
   relaySequence: relayed.pose.sequence,
