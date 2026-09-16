@@ -6,6 +6,12 @@ const accountProxy = {
   changeOrigin: false,
 };
 
+const rankedProductProxy = {
+  target: "http://127.0.0.1:8789",
+  changeOrigin: false,
+  ws: true,
+};
+
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -16,6 +22,9 @@ export default defineConfig({
       "/api/auth": accountProxy,
       "/api/account": accountProxy,
       "/api/leaderboard": accountProxy,
+      "/api/matchmaking": rankedProductProxy,
+      "/api/matches": rankedProductProxy,
+      "/api/product-health": rankedProductProxy,
       "/api": {
         target: "http://127.0.0.1:8787",
         changeOrigin: false,
