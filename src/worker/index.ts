@@ -15,6 +15,7 @@ import {
   parseClientRoomMessage,
   type ServerRoomMessage,
 } from "../shared/multiplayer";
+import type { D1DatabaseLike } from "./auth/repository";
 import { RankedMatch } from "./ranked-match";
 
 export { RankedMatch };
@@ -51,6 +52,7 @@ interface Env {
   ROOMS: DurableObjectNamespace;
   MATCHMAKER: DurableObjectNamespace;
   MATCHES: DurableObjectNamespace;
+  ACCOUNTS?: D1DatabaseLike;
 }
 
 type SocketAttachment = Readonly<{
@@ -60,6 +62,7 @@ type SocketAttachment = Readonly<{
 
 type MatchmakingAttachment = Readonly<{
   clientId: string;
+  userId: string;
   state: "connected" | "waiting" | "matched" | "cancelled";
   queuedAtMs: number | null;
   fixedAircraftId: string | null;
@@ -68,6 +71,8 @@ type MatchmakingAttachment = Readonly<{
 const ROOM_SOCKET_ROUTE = /^\/api\/rooms\/([ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6})\/ws$/;
 const RANKED_MATCH_SOCKET_ROUTE = /^\/api\/matches\/([0-9a-f-]{36})\/ws$/i;
 const MATCH_INIT_URL = "https://ranked-match.internal/__internal/competition-init";
+const AUTHENTICATED_USER_HEADER = "x-cas-user-id";
+const FIXED_AIRCRAFT_HEADER = "x-cas-fixed-aircraft-id";
 
 const json = (body: unknown, init: ResponseInit = {}) => {
   const headers = new Headers(init.headers);
@@ -103,10 +108,13 @@ function matchmakingAttachmentOf(socket: HibernatableWebSocket): MatchmakingAtta
     typeof value !== "object"
     || value === null
     || !("clientId" in value)
+    || !("userId" in value)
     || !("state" in value)
     || !("queuedAtMs" in value)
     || !("fixedAircraftId" in value)
     || typeof value.clientId !== "string"
+    || typeof value.userId !== "string"
+    || value.userId.length < 8
     || !["connected", "waiting", "matched", "cancelled"].includes(String(value.state))
     || (value.queuedAtMs !== null && typeof value.queuedAtMs !== "number")
     || (value.fixedAircraftId !== null && !isAircraftId(value.fixedAircraftId))
@@ -158,8 +166,11 @@ export class RankedMatchmaker {
 
     while (waiting.length >= 2) {
       const first = waiting.shift();
-      const second = waiting.shift();
-      if (!first || !second) return;
+      if (!first) return;
+      const secondIndex = waiting.findIndex((entry) => entry.attachment.userId !== first.attachment.userId);
+      if (secondIndex < 0) return;
+      const [second] = waiting.splice(secondIndex, 1);
+      if (!second) return;
 
       const matchedAtMs = Date.now();
       const assignmentEndsAtMs = matchedAtMs + MATCHMAKING_ASSIGNMENT_REVEAL_MS;
@@ -181,8 +192,22 @@ export class RankedMatchmaker {
         roomCode,
         activeAtMs,
         participants: [
-          { slot: 1, joinToken: firstJoinToken, aircraftId: firstAircraftId, spawnSide: firstSide },
-          { slot: 2, joinToken: secondJoinToken, aircraftId: secondAircraftId, spawnSide: secondSide },
+          {
+            slot: 1,
+            joinToken: firstJoinToken,
+            aircraftId: firstAircraftId,
+            spawnSide: firstSide,
+            accountUserId: first.attachment.userId,
+            randomAssignment: first.attachment.fixedAircraftId === null,
+          },
+          {
+            slot: 2,
+            joinToken: secondJoinToken,
+            aircraftId: secondAircraftId,
+            spawnSide: secondSide,
+            accountUserId: second.attachment.userId,
+            randomAssignment: second.attachment.fixedAircraftId === null,
+          },
         ],
       };
       const initialized = await this.initializeMatch(init);
@@ -229,8 +254,20 @@ export class RankedMatchmaker {
   }
 
   async fetch(request: Request): Promise<Response> {
+    if (!this.env.ACCOUNTS) {
+      return json({ error: "account_storage_unavailable" }, { status: 503 });
+    }
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
       return json({ error: "websocket_required" }, { status: 426 });
+    }
+
+    const userId = request.headers.get(AUTHENTICATED_USER_HEADER) ?? "";
+    const fixedAircraftHeader = request.headers.get(FIXED_AIRCRAFT_HEADER) ?? "";
+    if (userId.length < 8) {
+      return json({ error: "authenticated_identity_required" }, { status: 401 });
+    }
+    if (fixedAircraftHeader !== "" && !isAircraftId(fixedAircraftHeader)) {
+      return json({ error: "invalid_fixed_aircraft" }, { status: 400 });
     }
 
     const pair = new WebSocketPair();
@@ -238,9 +275,10 @@ export class RankedMatchmaker {
     const server = pair[1];
     const attachment: MatchmakingAttachment = {
       clientId: crypto.randomUUID(),
+      userId,
       state: "connected",
       queuedAtMs: null,
-      fixedAircraftId: null,
+      fixedAircraftId: fixedAircraftHeader === "" ? null : fixedAircraftHeader,
     };
     server.serializeAttachment(attachment);
     this.ctx.acceptWebSocket(server);
@@ -281,7 +319,6 @@ export class RankedMatchmaker {
       ...attachment,
       state: "waiting",
       queuedAtMs,
-      fixedAircraftId: parsed.fixedAircraftId,
     };
     socket.serializeAttachment(nextAttachment);
     this.send(socket, { type: "queued", queuedAtMs });
