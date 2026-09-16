@@ -3,10 +3,11 @@ import {
   Color,
   ConstantPositionProperty,
   ConstantProperty,
-  HeadingPitchRange,
-  HeadingPitchRoll,
   Ion,
   Math as CesiumMath,
+  Matrix3,
+  Matrix4,
+  Quaternion,
   Terrain,
   Transforms,
   Viewer,
@@ -18,6 +19,7 @@ import {
   integrateFlightState,
   toFlightTelemetry,
   type FlightInput,
+  type FlightState,
   type FlightTelemetry,
 } from "../flight/model";
 
@@ -34,11 +36,98 @@ const CONTROLLED_KEYS = new Set([
 const keyAxis = (keys: Set<string>, positive: string, negative: string) =>
   (keys.has(positive) ? 1 : 0) - (keys.has(negative) ? 1 : 0);
 
-// FlightState uses navigation headings: 0° = north, 90° = east.
-// In Cesium's local ENU frame, +X points east. HPR heading rotates about -Z,
-// so north is -90° and east is 0°. Therefore: Cesium HPR = nav heading - 90°.
-const navigationHeadingToCesiumHprRadians = (headingDeg: number) =>
-  CesiumMath.toRadians(headingDeg - 90);
+const CAMERA_BACK_M = 108;
+const CAMERA_UP_M = 16;
+const CAMERA_LOOK_AHEAD_M = 72;
+const NOSE_OFFSET_M = 11;
+
+type FlightFrame = Readonly<{
+  forward: Cartesian3;
+  left: Cartesian3;
+  up: Cartesian3;
+}>;
+
+/**
+ * Builds the aircraft body frame directly from the same navigation heading and
+ * pitch conventions used by the flight integrator. This deliberately avoids
+ * Cesium HPR heading conventions so visual forward and simulated motion cannot
+ * diverge because of reference-frame sign/offset interpretation.
+ *
+ * Body axes are +X forward, +Y left, +Z up (right-handed).
+ */
+function computeFlightFrame(position: Cartesian3, state: FlightState): FlightFrame {
+  const enu = Transforms.eastNorthUpToFixedFrame(position);
+  const east = Matrix4.multiplyByPointAsVector(enu, Cartesian3.UNIT_X, new Cartesian3());
+  const north = Matrix4.multiplyByPointAsVector(enu, Cartesian3.UNIT_Y, new Cartesian3());
+  const localUp = Matrix4.multiplyByPointAsVector(enu, Cartesian3.UNIT_Z, new Cartesian3());
+  Cartesian3.normalize(east, east);
+  Cartesian3.normalize(north, north);
+  Cartesian3.normalize(localUp, localUp);
+
+  const heading = CesiumMath.toRadians(state.headingDeg);
+  const pitch = CesiumMath.toRadians(state.pitchDeg);
+  const bank = CesiumMath.toRadians(state.bankDeg);
+  const sinHeading = Math.sin(heading);
+  const cosHeading = Math.cos(heading);
+  const sinPitch = Math.sin(pitch);
+  const cosPitch = Math.cos(pitch);
+  const sinBank = Math.sin(bank);
+  const cosBank = Math.cos(bank);
+
+  // Same horizontal convention as integrateFlightState:
+  // 0° = north, 90° = east.
+  const horizontalForward = new Cartesian3(
+    north.x * cosHeading + east.x * sinHeading,
+    north.y * cosHeading + east.y * sinHeading,
+    north.z * cosHeading + east.z * sinHeading,
+  );
+  const horizontalLeft = new Cartesian3(
+    north.x * sinHeading - east.x * cosHeading,
+    north.y * sinHeading - east.y * cosHeading,
+    north.z * sinHeading - east.z * cosHeading,
+  );
+
+  const forward = new Cartesian3(
+    horizontalForward.x * cosPitch + localUp.x * sinPitch,
+    horizontalForward.y * cosPitch + localUp.y * sinPitch,
+    horizontalForward.z * cosPitch + localUp.z * sinPitch,
+  );
+  const pitchedUp = new Cartesian3(
+    localUp.x * cosPitch - horizontalForward.x * sinPitch,
+    localUp.y * cosPitch - horizontalForward.y * sinPitch,
+    localUp.z * cosPitch - horizontalForward.z * sinPitch,
+  );
+
+  // Positive bank is right-wing-down: left wing rises.
+  const left = new Cartesian3(
+    horizontalLeft.x * cosBank + pitchedUp.x * sinBank,
+    horizontalLeft.y * cosBank + pitchedUp.y * sinBank,
+    horizontalLeft.z * cosBank + pitchedUp.z * sinBank,
+  );
+  const up = new Cartesian3(
+    pitchedUp.x * cosBank - horizontalLeft.x * sinBank,
+    pitchedUp.y * cosBank - horizontalLeft.y * sinBank,
+    pitchedUp.z * cosBank - horizontalLeft.z * sinBank,
+  );
+
+  Cartesian3.normalize(forward, forward);
+  Cartesian3.normalize(left, left);
+  Cartesian3.normalize(up, up);
+  return { forward, left, up };
+}
+
+function orientationFromFrame(frame: FlightFrame) {
+  const rotation = Matrix3.clone(Matrix3.IDENTITY, new Matrix3());
+  Matrix3.setColumn(rotation, 0, frame.forward, rotation);
+  Matrix3.setColumn(rotation, 1, frame.left, rotation);
+  Matrix3.setColumn(rotation, 2, frame.up, rotation);
+  return Quaternion.fromRotationMatrix(rotation);
+}
+
+function offsetFrom(position: Cartesian3, direction: Cartesian3, distanceM: number) {
+  const offset = Cartesian3.multiplyByScalar(direction, distanceM, new Cartesian3());
+  return Cartesian3.add(position, offset, offset);
+}
 
 export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTelemetry) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -100,15 +189,12 @@ export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTel
         flightState.latitudeDeg,
         flightState.altitudeM,
       );
-      const initialOrientation = Transforms.headingPitchRollQuaternion(
-        initialPosition,
-        new HeadingPitchRoll(
-          navigationHeadingToCesiumHprRadians(flightState.headingDeg),
-          CesiumMath.toRadians(flightState.pitchDeg),
-          CesiumMath.toRadians(flightState.bankDeg),
-        ),
-      );
+      const initialFrame = computeFlightFrame(initialPosition, flightState);
+      const initialOrientation = orientationFromFrame(initialFrame);
       const positionProperty = new ConstantPositionProperty(initialPosition);
+      const nosePositionProperty = new ConstantPositionProperty(
+        offsetFrom(initialPosition, initialFrame.forward, NOSE_OFFSET_M),
+      );
       const orientationProperty = new ConstantProperty(initialOrientation);
       const aircraftMaterial = Color.fromCssColorString("#d9fbff").withAlpha(0.92);
       const aircraftAccent = Color.fromCssColorString("#64e8ff").withAlpha(0.88);
@@ -131,17 +217,36 @@ export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTel
           material: aircraftAccent.withAlpha(0.72),
         },
       });
+      // Asymmetric nose marker makes the actual +X/forward end visually explicit.
+      viewer.entities.add({
+        position: nosePositionProperty,
+        orientation: orientationProperty,
+        box: {
+          dimensions: new Cartesian3(5.2, 2.4, 1.4),
+          material: aircraftAccent,
+          outline: true,
+          outlineColor: Color.WHITE.withAlpha(0.72),
+        },
+      });
 
-      const updateCamera = (position: Cartesian3) => {
+      const updateCamera = (position: Cartesian3, frame: FlightFrame) => {
         if (!viewer) return;
-        viewer.camera.lookAt(
-          position,
-          new HeadingPitchRange(
-            CesiumMath.toRadians(flightState.headingDeg + 180),
-            CesiumMath.toRadians(-10 + flightState.pitchDeg * 0.06),
-            115,
-          ),
-        );
+        const cameraPosition = offsetFrom(position, frame.forward, -CAMERA_BACK_M);
+        const cameraLift = Cartesian3.multiplyByScalar(frame.up, CAMERA_UP_M, new Cartesian3());
+        Cartesian3.add(cameraPosition, cameraLift, cameraPosition);
+
+        const lookTarget = offsetFrom(position, frame.forward, CAMERA_LOOK_AHEAD_M);
+        const direction = Cartesian3.subtract(lookTarget, cameraPosition, new Cartesian3());
+        Cartesian3.normalize(direction, direction);
+        const right = Cartesian3.cross(direction, frame.up, new Cartesian3());
+        Cartesian3.normalize(right, right);
+        const cameraUp = Cartesian3.cross(right, direction, new Cartesian3());
+        Cartesian3.normalize(cameraUp, cameraUp);
+
+        viewer.camera.setView({
+          destination: cameraPosition,
+          orientation: { direction, up: cameraUp },
+        });
       };
 
       const animate = (now: number) => {
@@ -162,18 +267,11 @@ export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTel
           flightState.latitudeDeg,
           flightState.altitudeM,
         );
+        const flightFrame = computeFlightFrame(position, flightState);
         positionProperty.setValue(position);
-        orientationProperty.setValue(
-          Transforms.headingPitchRollQuaternion(
-            position,
-            new HeadingPitchRoll(
-              navigationHeadingToCesiumHprRadians(flightState.headingDeg),
-              CesiumMath.toRadians(flightState.pitchDeg),
-              CesiumMath.toRadians(flightState.bankDeg),
-            ),
-          ),
-        );
-        updateCamera(position);
+        nosePositionProperty.setValue(offsetFrom(position, flightFrame.forward, NOSE_OFFSET_M));
+        orientationProperty.setValue(orientationFromFrame(flightFrame));
+        updateCamera(position, flightFrame);
 
         if (now - lastTelemetryTime >= 90) {
           lastTelemetryTime = now;
@@ -185,7 +283,7 @@ export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTel
       window.addEventListener("keydown", handleKeyDown, { passive: false });
       window.addEventListener("keyup", handleKeyUp, { passive: false });
       window.addEventListener("blur", handleBlur);
-      updateCamera(initialPosition);
+      updateCamera(initialPosition, initialFrame);
       onTelemetry(toFlightTelemetry(flightState));
       frameId = requestAnimationFrame(animate);
       if (!cancelled) setStatus("ready");
