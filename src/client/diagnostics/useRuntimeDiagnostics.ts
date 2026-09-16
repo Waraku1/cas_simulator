@@ -15,9 +15,23 @@ export interface RuntimeDiagnostics {
 }
 
 const MEBIBYTE = 1024 * 1024;
+let renderedFrameCount = 0;
 
 if (typeof performance !== "undefined" && typeof performance.setResourceTimingBufferSize === "function") {
   performance.setResourceTimingBufferSize(C2_RESOURCE_BUDGET.resourceTimingBufferSize);
+}
+
+/** Called from Cesium's post-render event so C2 reports actual rendered frames. */
+export function recordRenderedFrame() {
+  if (typeof document === "undefined" || document.visibilityState === "visible") {
+    renderedFrameCount += 1;
+  }
+}
+
+function consumeRenderedFrames() {
+  const count = renderedFrameCount;
+  renderedFrameCount = 0;
+  return count;
 }
 
 function readNetworkUsage(): Pick<
@@ -62,9 +76,9 @@ function readUsedHeapMiB() {
 }
 
 /**
- * C2 measures active foreground cadence only. Background-tab throttling or
- * long browser suspension is excluded from the benchmark rather than being
- * misclassified as sustained low FPS.
+ * C2 measures Cesium render cadence during active foreground time only.
+ * Background-tab throttling and long browser suspension are excluded from the
+ * benchmark instead of being misclassified as sustained low FPS.
  */
 export function useRuntimeDiagnostics(): RuntimeDiagnostics {
   const [diagnostics, setDiagnostics] = useState<RuntimeDiagnostics>({
@@ -81,16 +95,16 @@ export function useRuntimeDiagnostics(): RuntimeDiagnostics {
   });
 
   useEffect(() => {
-    let animationFrame = 0;
-    let frameCount = 0;
+    let timerId = 0;
     let sampleStartedAt = performance.now();
     let activeSeconds = 0;
     let weightedFpsTotal = 0;
     let validSampleSeconds = 0;
     let minimumFps = Number.POSITIVE_INFINITY;
+    let started = false;
 
     const resetSampleWindow = (now: number) => {
-      frameCount = 0;
+      consumeRenderedFrames();
       sampleStartedAt = now;
     };
 
@@ -98,23 +112,18 @@ export function useRuntimeDiagnostics(): RuntimeDiagnostics {
       resetSampleWindow(performance.now());
     };
 
-    const sample = (now: number) => {
-      if (document.visibilityState !== "visible") {
-        resetSampleWindow(now);
-        animationFrame = requestAnimationFrame(sample);
-        return;
-      }
-
-      frameCount += 1;
+    const sample = () => {
+      const now = performance.now();
       const sampleElapsedMs = now - sampleStartedAt;
+      const frames = consumeRenderedFrames();
 
-      if (sampleElapsedMs >= 1_000) {
+      if (document.visibilityState === "visible" && sampleElapsedMs >= 750 && sampleElapsedMs <= 1_500) {
         const sampleSeconds = sampleElapsedMs / 1_000;
-        const fps = frameCount / sampleSeconds;
+        const fps = frames / sampleSeconds;
 
-        // Windows above 1.5 s usually indicate tab suspension or a scheduling
-        // interruption; exclude them from performance evidence.
-        if (sampleElapsedMs <= 1_500) {
+        // Ignore initialization before Cesium has rendered its first useful frame.
+        if (started || frames > 0) {
+          started = true;
           activeSeconds += sampleSeconds;
           weightedFpsTotal += fps * sampleSeconds;
           validSampleSeconds += sampleSeconds;
@@ -131,18 +140,19 @@ export function useRuntimeDiagnostics(): RuntimeDiagnostics {
             usedHeapMiB: readUsedHeapMiB(),
           });
         }
-
-        resetSampleWindow(now);
       }
 
-      animationFrame = requestAnimationFrame(sample);
+      sampleStartedAt = now;
+      timerId = window.setTimeout(sample, 1_000);
     };
 
+    renderedFrameCount = 0;
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    animationFrame = requestAnimationFrame(sample);
+    timerId = window.setTimeout(sample, 1_000);
     return () => {
-      cancelAnimationFrame(animationFrame);
+      window.clearTimeout(timerId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      renderedFrameCount = 0;
     };
   }, []);
 
