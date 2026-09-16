@@ -24,6 +24,12 @@ export function FlightHud({ telemetry }: { telemetry: FlightTelemetry }) {
         </div>
       </header>
 
+      <div className="cockpit-reference" aria-hidden="true">
+        <span className="cockpit-reference__rail cockpit-reference__rail--left" />
+        <span className="cockpit-reference__rail cockpit-reference__rail--right" />
+        <span className="cockpit-reference__nose" />
+      </div>
+
       <div className="flight-hud__speed tape-card" aria-label="Speed">
         <span className="tape-card__label">SPEED</span>
         <strong>{Math.round(telemetry.speedKph)}</strong>
@@ -85,7 +91,7 @@ export function FlightHud({ telemetry }: { telemetry: FlightTelemetry }) {
         <span className="control-chip"><kbd>W</kbd><kbd>S</kbd> PITCH</span>
         <span className="control-chip"><kbd>A</kbd><kbd>D</kbd> BANK</span>
         <span className="control-chip"><kbd>Q</kbd><kbd>E</kbd> YAW</span>
-        <span className="control-chip"><kbd>R</kbd><kbd>F</kbd> THROTTLE</span>
+        <span className="control-chip"><kbd>↑</kbd><kbd>↓</kbd> THROTTLE</span>
       </section>
 
       <div className={`vertical-state vertical-state--${climbLabel.toLowerCase()}`}>

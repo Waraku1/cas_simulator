@@ -65,9 +65,11 @@ export function createInitialFlightState(): FlightState {
   return {
     latitudeDeg: THEATER.centerLatitudeDeg,
     longitudeDeg: THEATER.centerLongitudeDeg,
-    altitudeM: 3_200,
+    // The theater center is close to high terrain. Use a deliberately high C1
+    // absolute spawn so the first frame cannot intersect the terrain surface.
+    altitudeM: 5_400,
     headingDeg: 35,
-    pitchDeg: -1.5,
+    pitchDeg: 0,
     bankDeg: 0,
     speedMps: 155,
     throttle: 0.56,

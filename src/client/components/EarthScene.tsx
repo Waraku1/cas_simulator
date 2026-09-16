@@ -21,9 +21,23 @@ import {
   type FlightTelemetry,
 } from "../flight/model";
 
-const CONTROLLED_KEYS = new Set(["KeyW", "KeyS", "KeyA", "KeyD", "KeyQ", "KeyE", "KeyR", "KeyF"]);
+const CONTROLLED_KEYS = new Set([
+  "KeyW",
+  "KeyS",
+  "KeyA",
+  "KeyD",
+  "KeyQ",
+  "KeyE",
+  "ArrowUp",
+  "ArrowDown",
+]);
 const keyAxis = (keys: Set<string>, positive: string, negative: string) =>
   (keys.has(positive) ? 1 : 0) - (keys.has(negative) ? 1 : 0);
+
+// FlightState uses conventional navigation headings (0° = north, 90° = east).
+// Cesium HPR is east-referenced, so convert before orienting the entity.
+const navigationHeadingToCesiumHprRadians = (headingDeg: number) =>
+  CesiumMath.toRadians(90 - headingDeg);
 
 export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTelemetry) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -88,7 +102,7 @@ export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTel
       const initialOrientation = Transforms.headingPitchRollQuaternion(
         initialPosition,
         new HeadingPitchRoll(
-          CesiumMath.toRadians(flightState.headingDeg),
+          navigationHeadingToCesiumHprRadians(flightState.headingDeg),
           CesiumMath.toRadians(flightState.pitchDeg),
           CesiumMath.toRadians(flightState.bankDeg),
         ),
@@ -123,8 +137,8 @@ export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTel
           position,
           new HeadingPitchRange(
             CesiumMath.toRadians(flightState.headingDeg + 180),
-            CesiumMath.toRadians(-17 + flightState.pitchDeg * 0.08),
-            520,
+            CesiumMath.toRadians(-10 + flightState.pitchDeg * 0.06),
+            115,
           ),
         );
       };
@@ -138,7 +152,7 @@ export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTel
           pitch: keyAxis(pressedKeys, "KeyW", "KeyS"),
           roll: keyAxis(pressedKeys, "KeyD", "KeyA"),
           yaw: keyAxis(pressedKeys, "KeyE", "KeyQ"),
-          throttle: keyAxis(pressedKeys, "KeyR", "KeyF"),
+          throttle: keyAxis(pressedKeys, "ArrowUp", "ArrowDown"),
         };
         flightState = integrateFlightState(flightState, input, deltaSeconds);
 
@@ -152,7 +166,7 @@ export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTel
           Transforms.headingPitchRollQuaternion(
             position,
             new HeadingPitchRoll(
-              CesiumMath.toRadians(flightState.headingDeg),
+              navigationHeadingToCesiumHprRadians(flightState.headingDeg),
               CesiumMath.toRadians(flightState.pitchDeg),
               CesiumMath.toRadians(flightState.bankDeg),
             ),
