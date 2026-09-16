@@ -39,12 +39,26 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify Cloudflare API identity
+        run: pnpm exec wrangler whoami
+
+      - name: Verify D1 read authorization
+        id: d1auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! pnpm exec wrangler d1 list --json > /tmp/d1-list.json; then
+            echo "::error::Cloudflare API identity was accepted by Wrangler, but D1 database listing was rejected. Update CLOUDFLARE_API_TOKEN with authorization for D1 on the configured account, then rerun this workflow."
+            exit 1
+          fi
+          echo "C4D_D1_READ_AUTHORIZATION=PASS"
+
       - name: Find or create D1 database
         id: d1
         shell: bash
         run: |
           set -euo pipefail
-          LIST_JSON="$(pnpm exec wrangler d1 list --json)"
+          LIST_JSON="$(cat /tmp/d1-list.json)"
           DB_ID="$(LIST_JSON="$LIST_JSON" DB_NAME="$DB_NAME" node <<'NODE'
           const rows = JSON.parse(process.env.LIST_JSON || "[]");
           const row = Array.isArray(rows) ? rows.find((entry) => entry?.name === process.env.DB_NAME) : null;
