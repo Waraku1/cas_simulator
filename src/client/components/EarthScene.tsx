@@ -4,7 +4,6 @@ import {
   ConstantPositionProperty,
   ConstantProperty,
   Ion,
-  Math as CesiumMath,
   Matrix3,
   Matrix4,
   Quaternion,
@@ -16,6 +15,7 @@ import "cesium/Build/Cesium/Widgets/widgets.css";
 import { useEffect, useRef, useState } from "react";
 import {
   createInitialFlightState,
+  getLocalBodyFrame,
   integrateFlightState,
   toFlightTelemetry,
   type FlightInput,
@@ -48,72 +48,28 @@ type FlightFrame = Readonly<{
 }>;
 
 /**
- * Builds the aircraft body frame directly from the same navigation heading and
- * pitch conventions used by the flight integrator. This deliberately avoids
- * Cesium HPR heading conventions so visual forward and simulated motion cannot
- * diverge because of reference-frame sign/offset interpretation.
- *
- * Body axes are +X forward, +Y left, +Z up (right-handed).
+ * Converts the canonical local-ENU body frame from the flight model into ECEF.
+ * The flight model is now the single authority for attitude: rendering and
+ * camera logic do not independently reconstruct heading/pitch/bank.
  */
 function computeFlightFrame(position: Cartesian3, state: FlightState): FlightFrame {
   const enu = Transforms.eastNorthUpToFixedFrame(position);
-  const east = Matrix4.multiplyByPointAsVector(enu, Cartesian3.UNIT_X, new Cartesian3());
-  const north = Matrix4.multiplyByPointAsVector(enu, Cartesian3.UNIT_Y, new Cartesian3());
-  const localUp = Matrix4.multiplyByPointAsVector(enu, Cartesian3.UNIT_Z, new Cartesian3());
-  Cartesian3.normalize(east, east);
-  Cartesian3.normalize(north, north);
-  Cartesian3.normalize(localUp, localUp);
+  const localFrame = getLocalBodyFrame(state);
 
-  const heading = CesiumMath.toRadians(state.headingDeg);
-  const pitch = CesiumMath.toRadians(state.pitchDeg);
-  const bank = CesiumMath.toRadians(state.bankDeg);
-  const sinHeading = Math.sin(heading);
-  const cosHeading = Math.cos(heading);
-  const sinPitch = Math.sin(pitch);
-  const cosPitch = Math.cos(pitch);
-  const sinBank = Math.sin(bank);
-  const cosBank = Math.cos(bank);
+  const toFixed = (value: readonly [number, number, number]) => {
+    const fixed = Matrix4.multiplyByPointAsVector(
+      enu,
+      new Cartesian3(value[0], value[1], value[2]),
+      new Cartesian3(),
+    );
+    return Cartesian3.normalize(fixed, fixed);
+  };
 
-  // Same horizontal convention as integrateFlightState:
-  // 0° = north, 90° = east.
-  const horizontalForward = new Cartesian3(
-    north.x * cosHeading + east.x * sinHeading,
-    north.y * cosHeading + east.y * sinHeading,
-    north.z * cosHeading + east.z * sinHeading,
-  );
-  const horizontalLeft = new Cartesian3(
-    north.x * sinHeading - east.x * cosHeading,
-    north.y * sinHeading - east.y * cosHeading,
-    north.z * sinHeading - east.z * cosHeading,
-  );
-
-  const forward = new Cartesian3(
-    horizontalForward.x * cosPitch + localUp.x * sinPitch,
-    horizontalForward.y * cosPitch + localUp.y * sinPitch,
-    horizontalForward.z * cosPitch + localUp.z * sinPitch,
-  );
-  const pitchedUp = new Cartesian3(
-    localUp.x * cosPitch - horizontalForward.x * sinPitch,
-    localUp.y * cosPitch - horizontalForward.y * sinPitch,
-    localUp.z * cosPitch - horizontalForward.z * sinPitch,
-  );
-
-  // Positive bank is right-wing-down: left wing rises.
-  const left = new Cartesian3(
-    horizontalLeft.x * cosBank + pitchedUp.x * sinBank,
-    horizontalLeft.y * cosBank + pitchedUp.y * sinBank,
-    horizontalLeft.z * cosBank + pitchedUp.z * sinBank,
-  );
-  const up = new Cartesian3(
-    pitchedUp.x * cosBank - horizontalLeft.x * sinBank,
-    pitchedUp.y * cosBank - horizontalLeft.y * sinBank,
-    pitchedUp.z * cosBank - horizontalLeft.z * sinBank,
-  );
-
-  Cartesian3.normalize(forward, forward);
-  Cartesian3.normalize(left, left);
-  Cartesian3.normalize(up, up);
-  return { forward, left, up };
+  return {
+    forward: toFixed(localFrame.forward),
+    left: toFixed(localFrame.left),
+    up: toFixed(localFrame.up),
+  };
 }
 
 function orientationFromFrame(frame: FlightFrame) {
@@ -217,7 +173,6 @@ export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTel
           material: aircraftAccent.withAlpha(0.72),
         },
       });
-      // Asymmetric nose marker makes the actual +X/forward end visually explicit.
       viewer.entities.add({
         position: nosePositionProperty,
         orientation: orientationProperty,
