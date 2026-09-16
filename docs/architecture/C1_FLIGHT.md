@@ -1,6 +1,6 @@
 # C1 — Flight Vertical Slice
 
-Status: C1.5 CONTROL RESPONSE DYNAMICS IMPLEMENTED / LOCAL RE-VERIFY PENDING
+Status: C1.6 LEVEL-CAPTURE TUNING IMPLEMENTED / LOCAL RE-VERIFY PENDING
 
 ## Objective
 
@@ -79,18 +79,18 @@ Operationally:
 
 This creates progressive control onset and short control overrun without introducing a real-aircraft aerodynamic model.
 
-### Near-level capture
+### Near-level capture — C1.6 tuning
 
-Small residual attitude is automatically returned to level only under a narrow capture condition.
+Small residual attitude is automatically returned to level only under a bounded capture condition.
 
 For pitch and bank independently:
-- the displayed angle must be within ±3°;
+- the displayed angle must be within ±5°;
 - the relevant input must be released;
 - the relevant angular velocity must already be at or below 1.5 deg/s.
 
-When those conditions hold, the remaining angle is driven toward exactly 0° at up to 24 deg/s.
+When those conditions hold, the remaining angle is driven toward exactly 0° at up to 18 deg/s. This is intentionally softer than the previous C1.5 capture rate of 24 deg/s while allowing a slightly wider ±5° capture region.
 
-Outside the ±3° capture region, C1.5 applies no auto-level authority. Full loops and continuous rolls therefore remain available exactly as in C1.4.
+Outside the ±5° capture region, C1.6 applies no auto-level authority. Full loops and continuous rolls therefore remain available exactly as in C1.4/C1.5.
 
 ## Position integration
 
@@ -100,7 +100,7 @@ Each update:
 1. update pitch and roll angular velocities from the current input;
 2. apply body-axis pitch/roll/yaw-test rotations to the orientation quaternion;
 3. normalize the quaternion;
-4. apply near-level pitch/bank capture only when its narrow conditions are met;
+4. apply near-level pitch/bank capture only when its bounded conditions are met;
 5. derive the body forward vector in local ENU coordinates;
 6. advance east/north position and altitude from that forward vector;
 7. apply the C1 altitude bounds.
@@ -123,15 +123,15 @@ Because Euler-style heading/pitch/bank displays are derived from a full quaterni
 
 ## Verification evidence
 
-Previous C1 revisions through C1.4 passed GitHub Actions with:
+Previous C1 revisions through C1.5 passed GitHub Actions with:
 - `pnpm install --frozen-lockfile`: PASS;
 - `pnpm validate:scaffold`: PASS;
 - `pnpm check`: PASS;
 - `pnpm build`: PASS.
 
-Local QA on 2026-09-16 confirmed that the C1.4 body-axis attitude model met the required baseline: corrected travel direction, unrestricted pitch and roll, bank-dependent pitch behavior, readable HUD, and acceptable control sensitivity.
+Local QA on 2026-09-16 confirmed that the C1.5 body-axis and angular-response model met the required baseline: corrected travel direction, unrestricted pitch and roll, bank-dependent pitch behavior, progressive control response, readable HUD, and acceptable control sensitivity.
 
-## C1.5 acceptance
+## C1.6 acceptance
 
 Automated:
 - [ ] `pnpm validate:scaffold` exits 0.
@@ -139,17 +139,16 @@ Automated:
 - [ ] `pnpm build` exits 0.
 - [x] Orientation remains normalized and finite by construction.
 - [x] Pitch/roll angle authority remains unrestricted.
-- [x] Pitch/roll angular velocity now accelerates under sustained input.
-- [x] Pitch/roll angular velocity decelerates continuously after key release.
-- [x] Near-level capture is limited to ±3° and inactive during meaningful angular motion.
+- [x] Pitch/roll angular-velocity acceleration/deceleration is unchanged from C1.5.
+- [x] Near-level capture is limited to ±5° and inactive during meaningful angular motion.
+- [x] Near-level capture rate is reduced from 24 deg/s to 18 deg/s.
 
 Manual localhost re-verification:
-- [ ] W/S begins gently and builds toward the previous useful pitch sensitivity while held.
-- [ ] A/D begins gently and builds toward the previous useful roll sensitivity while held.
-- [ ] Releasing W/S or A/D produces a short, smooth deceleration rather than an instantaneous stop.
-- [ ] Residual pitch within ±3° returns to 0° after pitch motion settles.
-- [ ] Residual bank within ±3° returns to 0° after roll motion settles.
-- [ ] Attitudes outside ±3° are not pulled toward level.
+- [ ] Residual pitch within ±5° returns smoothly to 0° after pitch motion settles.
+- [ ] Residual bank within ±5° returns smoothly to 0° after roll motion settles.
+- [ ] The new 18 deg/s capture feels less abrupt than C1.5.
+- [ ] Attitudes outside ±5° are not pulled toward level.
+- [ ] W/S and A/D accelerated response remains unchanged.
 - [ ] Full loops and continuous rolls remain available.
 - [ ] Runtime FPS remains acceptable.
 
