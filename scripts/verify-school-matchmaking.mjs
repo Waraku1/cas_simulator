@@ -35,6 +35,9 @@ if (!client1.messages.some((message) => message.type === "queued")) throw new Er
 if (!client2.messages.some((message) => message.type === "queued")) throw new Error("client2 never entered queue");
 if (a.matchId !== b.matchId) throw new Error("match ids differ");
 if (a.roomCode !== b.roomCode) throw new Error("room codes differ");
+if (typeof a.joinToken !== "string" || a.joinToken.length < 16) throw new Error("client1 missing join token");
+if (typeof b.joinToken !== "string" || b.joinToken.length < 16) throw new Error("client2 missing join token");
+if (a.joinToken === b.joinToken) throw new Error("join tokens must be participant-specific");
 if (a.spawnSide === b.spawnSide) throw new Error("spawn sides are not opposite");
 if (!AIRCRAFT_IDS.has(a.aircraftId) || !AIRCRAFT_IDS.has(b.aircraftId)) throw new Error("invalid assigned aircraft");
 if (a.peerAircraftId !== b.aircraftId || b.peerAircraftId !== a.aircraftId) throw new Error("peer aircraft assignment mismatch");
@@ -51,4 +54,5 @@ console.log(JSON.stringify({
   roomCode: a.roomCode,
   aircraft: [a.aircraftId, b.aircraftId],
   spawnSides: [a.spawnSide, b.spawnSide],
+  participantTokens: 2,
 }, null, 2));
