@@ -20,6 +20,7 @@ export default function App() {
         onTelemetry={setTelemetry}
         onTheaterStatus={setTheaterStatus}
         remotePose={multiplayer.remotePose}
+        localSlot={multiplayer.slot}
       />
       <FlightHud telemetry={telemetry} />
       <TheaterStatusPanel status={theaterStatus} />

@@ -1,4 +1,5 @@
 import {
+  Cartesian2,
   Cartesian3,
   Color,
   ConstantPositionProperty,
@@ -53,6 +54,7 @@ const CAMERA_BACK_M = 108;
 const CAMERA_UP_M = 16;
 const CAMERA_LOOK_AHEAD_M = 72;
 const NOSE_OFFSET_M = 11;
+const MULTIPLAYER_STAGING_LONGITUDE_OFFSET_DEG = 0.00055;
 const SIMULATION_FRAME_INTERVAL_MS = 1_000 / C2_RESOURCE_BUDGET.runtimeFrameCapFps;
 
 type LocalAxes = Readonly<{
@@ -72,6 +74,7 @@ type EarthSceneProps = Readonly<{
   onTheaterStatus: (status: TheaterStatus) => void;
   onLocalPose: (pose: AircraftPose) => void;
   remotePose: RemotePoseBuffer | null;
+  localSlot: 1 | 2 | null;
 }>;
 
 function computeFixedFrame(position: Cartesian3, localFrame: LocalAxes): FlightFrame {
@@ -158,6 +161,15 @@ function offsetFrom(position: Cartesian3, direction: Cartesian3, distanceM: numb
   return Cartesian3.add(position, offset, offset);
 }
 
+function stagedFlightState(slot: 1 | 2): FlightState {
+  const initial = createInitialFlightState();
+  return {
+    ...initial,
+    longitudeDeg: initial.longitudeDeg
+      + (slot === 1 ? -MULTIPLAYER_STAGING_LONGITUDE_OFFSET_DEG : MULTIPLAYER_STAGING_LONGITUDE_OFFSET_DEG),
+  };
+}
+
 function isFormTarget(target: EventTarget | null) {
   return target instanceof HTMLInputElement
     || target instanceof HTMLButtonElement
@@ -170,15 +182,21 @@ export function EarthScene({
   onTheaterStatus,
   onLocalPose,
   remotePose,
+  localSlot,
 }: EarthSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const remotePoseRef = useRef(remotePose);
+  const localSlotRef = useRef(localSlot);
   const [status, setStatus] = useState<"booting" | "ready" | "missing-token" | "error">("booting");
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
     remotePoseRef.current = remotePose;
   }, [remotePose]);
+
+  useEffect(() => {
+    localSlotRef.current = localSlot;
+  }, [localSlot]);
 
   useEffect(() => {
     const token = import.meta.env.VITE_CESIUM_ION_TOKEN?.trim();
@@ -197,6 +215,7 @@ export function EarthScene({
     let lastFrameTime = performance.now();
     let lastTelemetryTime = 0;
     let lastNetworkSnapshotTime = 0;
+    let appliedMultiplayerSlot: 1 | 2 | null = null;
     let flightState = createInitialFlightState();
     const pressedKeys = new Set<string>();
 
@@ -332,6 +351,27 @@ export function EarthScene({
             outlineColor: Color.WHITE.withAlpha(0.68),
           },
         }),
+        viewer.entities.add({
+          name: "C3 peer marker",
+          show: false,
+          position: remotePositionProperty,
+          point: {
+            pixelSize: 13,
+            color: remoteAccent,
+            outlineColor: Color.WHITE,
+            outlineWidth: 2,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+          label: {
+            text: "PEER",
+            font: "600 14px monospace",
+            fillColor: Color.WHITE,
+            showBackground: true,
+            backgroundColor: Color.BLACK.withAlpha(0.62),
+            pixelOffset: new Cartesian2(0, -28),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        }),
       ];
 
       const updateCamera = (position: Cartesian3, frame: FlightFrame) => {
@@ -397,6 +437,19 @@ export function EarthScene({
         });
       };
 
+      const applyMultiplayerStagingIfNeeded = () => {
+        const slot = localSlotRef.current;
+        if (slot === null) {
+          appliedMultiplayerSlot = null;
+          return;
+        }
+        if (appliedMultiplayerSlot === slot) return;
+
+        flightState = stagedFlightState(slot);
+        appliedMultiplayerSlot = slot;
+        lastNetworkSnapshotTime = 0;
+      };
+
       const animate = (now: number) => {
         if (cancelled || !viewer) return;
         const elapsedMs = now - lastFrameTime;
@@ -407,6 +460,7 @@ export function EarthScene({
 
         const deltaSeconds = Math.min(elapsedMs / 1_000, 0.05);
         lastFrameTime = now;
+        applyMultiplayerStagingIfNeeded();
 
         const input: FlightInput = {
           pitch: keyAxis(pressedKeys, "KeyW", "KeyS"),
