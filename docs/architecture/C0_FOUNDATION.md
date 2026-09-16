@@ -51,12 +51,12 @@ The school-managed network blocks the current `workers.dev` production hostname 
 
 Accordingly:
 
-- school-day development and demonstrations may use `http://127.0.0.1:5173` with `pnpm dev`;
+- school-day development and demonstrations use `http://127.0.0.1:5173` with `pnpm dev`;
 - production deployment remains Cloudflare Workers through GitHub Actions;
-- final production browser rendering is verified on an allowed network before C5 release closure;
-- no certificate bypass, filtering evasion, unapproved CA installation, VPN/proxy workaround, or security-control modification is part of the project plan.
+- production browser rendering is verified later on an allowed non-school network before C5 release closure;
+- no certificate bypass, filtering evasion, unapproved CA installation, VPN/proxy workaround, alternate-host filtering workaround, or security-control modification is part of the project plan.
 
-School-network production reachability is tracked separately in Issue #2 and is non-blocking for C1–C4 development.
+School-network production reachability is not a requirement for C1–C4 engineering work.
 
 ## Resource gate carried into C2
 
