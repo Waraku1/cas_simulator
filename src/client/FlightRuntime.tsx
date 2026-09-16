@@ -5,7 +5,11 @@ import { FlightHud } from "./components/FlightHud";
 import { MultiplayerPanel } from "./components/MultiplayerPanel";
 import { TheaterStatusPanel } from "./components/TheaterStatusPanel";
 import { INITIAL_FLIGHT_TELEMETRY } from "./flight/model";
-import { useMultiplayer, type MultiplayerStatus } from "./multiplayer/useMultiplayer";
+import {
+  useMultiplayer,
+  type MultiplayerController,
+  type MultiplayerStatus,
+} from "./multiplayer/useMultiplayer";
 import { INITIAL_THEATER_STATUS } from "./theater/model";
 
 export type FlightRuntimeMultiplayerState = Readonly<{
@@ -15,9 +19,23 @@ export type FlightRuntimeMultiplayerState = Readonly<{
   errorMessage: string;
 }>;
 
+export type FlightNetworkController = Pick<
+  MultiplayerController,
+  | "status"
+  | "roomCode"
+  | "playerId"
+  | "slot"
+  | "peerConnected"
+  | "remotePose"
+  | "errorMessage"
+  | "publishLocalPose"
+>;
+
 type FlightRuntimeProps = Readonly<{
   showDevelopmentPanels?: boolean;
   autoRoomCode?: string | null;
+  externalNetworkController?: FlightNetworkController | null;
+  stagingSlot?: 1 | 2 | null;
   onMultiplayerState?: (state: FlightRuntimeMultiplayerState) => void;
 }>;
 
@@ -32,11 +50,14 @@ function productLinkLabel(status: MultiplayerStatus, peerConnected: boolean) {
 export function FlightRuntime({
   showDevelopmentPanels = true,
   autoRoomCode = null,
+  externalNetworkController = null,
+  stagingSlot = null,
   onMultiplayerState,
 }: FlightRuntimeProps) {
   const [telemetry, setTelemetry] = useState(INITIAL_FLIGHT_TELEMETRY);
   const [theaterStatus, setTheaterStatus] = useState(INITIAL_THEATER_STATUS);
-  const multiplayer = useMultiplayer(autoRoomCode);
+  const manualMultiplayer = useMultiplayer(externalNetworkController ? null : autoRoomCode);
+  const multiplayer = externalNetworkController ?? manualMultiplayer;
 
   useEffect(() => {
     onMultiplayerState?.({
@@ -53,6 +74,9 @@ export function FlightRuntime({
     onMultiplayerState,
   ]);
 
+  const showProductLinkState = !showDevelopmentPanels
+    && (Boolean(autoRoomCode) || externalNetworkController !== null);
+
   return (
     <main className="app-shell">
       <EarthScene
@@ -60,13 +84,13 @@ export function FlightRuntime({
         onTelemetry={setTelemetry}
         onTheaterStatus={setTheaterStatus}
         remotePose={multiplayer.remotePose}
-        localSlot={multiplayer.slot}
+        localSlot={stagingSlot ?? multiplayer.slot}
       />
       <FlightHud telemetry={telemetry} />
       <TheaterStatusPanel status={theaterStatus} />
-      {showDevelopmentPanels && <MultiplayerPanel controller={multiplayer} />}
+      {showDevelopmentPanels && <MultiplayerPanel controller={manualMultiplayer} />}
       {showDevelopmentPanels && <DiagnosticsPanel />}
-      {!showDevelopmentPanels && autoRoomCode && (
+      {showProductLinkState && (
         <div
           aria-live="polite"
           title={multiplayer.errorMessage || undefined}
@@ -90,7 +114,7 @@ export function FlightRuntime({
           }}
         >
           <span style={{ fontSize: 8, letterSpacing: "0.16em", color: "rgba(225, 248, 255, 0.55)" }}>
-            ROOM {multiplayer.roomCode || autoRoomCode}
+            ROOM {multiplayer.roomCode || autoRoomCode || "—"}
           </span>
           <strong style={{ fontSize: 10, letterSpacing: "0.12em", color: "#eaffff" }}>
             {productLinkLabel(multiplayer.status, multiplayer.peerConnected)}

@@ -1,14 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { actionModuleById } from "../../shared/action-modules";
 import { aircraftById } from "../../shared/aircraft";
 import type { MatchFoundAssignment } from "../../shared/matchmaking";
 import {
   MATCH_RULES,
   type LeaderboardEntry,
+  type MatchResult,
+  type MatchResultReason,
   type PlayerProfile,
   type ProductScreen,
 } from "../../shared/product";
 import { FlightRuntime } from "../FlightRuntime";
 import { useMatchmaking } from "./useMatchmaking";
+import { useRankedMatch } from "./useRankedMatch";
 
 const PREVIEW_PROFILE: PlayerProfile = {
   userId: "preview-pilot",
@@ -25,6 +29,13 @@ const PREVIEW_LEADERBOARD: readonly LeaderboardEntry[] = [
   { rank: 2, userId: "vector", displayName: "VECTOR", rating: 1288, wins: 11, losses: 6, draws: 1 },
   { rank: 3, userId: PREVIEW_PROFILE.userId, displayName: PREVIEW_PROFILE.displayName, rating: 1200, wins: 0, losses: 0, draws: 0 },
 ];
+
+type ProductMatchOutcome = Readonly<{
+  result: MatchResult;
+  reason: MatchResultReason;
+  localHeartPoints: number;
+  peerHeartPoints: number;
+}>;
 
 function Brand() {
   return (
@@ -129,7 +140,7 @@ function HomePreview({
           </button>
         </section>
       </main>
-      <footer className="product-footer">C4B LIVE MATCHMAKING PREVIEW // ACCOUNT PERSISTENCE PENDING</footer>
+      <footer className="product-footer">C4C LIVE MATCH RUNTIME // RATING TRANSACTION FOLLOWS C4D</footer>
     </div>
   );
 }
@@ -268,24 +279,197 @@ function CountdownPreview({
   );
 }
 
-function MatchPreview({ assignment, onExit }: Readonly<{ assignment: MatchFoundAssignment; onExit: () => void }>) {
+function formatClock(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1_000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function resultFromWinner(localSlot: 1 | 2, winnerSlot: 1 | 2 | null, reason: MatchResultReason): MatchResult {
+  if (reason === "infrastructure-failure") return "no-contest";
+  if (winnerSlot === null) return "draw";
+  return winnerSlot === localSlot ? "win" : "loss";
+}
+
+function actionFeedbackLabel(code: string | undefined) {
+  if (!code) return "SPACE TO ACTIVATE";
+  if (code === "accepted") return "ACTION ACCEPTED";
+  if (code === "cooldown") return "COOLDOWN ACTIVE";
+  if (code === "outside_interaction") return "OUTSIDE INTERACTION RANGE";
+  if (code === "pose_stale") return "POSITION SYNCING";
+  if (code === "peer_unavailable") return "PEER UNAVAILABLE";
+  if (code === "not_active") return "MATCH NOT ACTIVE";
+  return code.toUpperCase();
+}
+
+function MatchPreview({
+  assignment,
+  onResolved,
+}: Readonly<{
+  assignment: MatchFoundAssignment;
+  onResolved: (outcome: ProductMatchOutcome) => void;
+}>) {
+  const ranked = useRankedMatch(assignment);
   const aircraft = aircraftById(assignment.aircraftId);
+  const actionModule = aircraft ? actionModuleById(aircraft.actionModuleId) : null;
+  const [clockNowMs, setClockNowMs] = useState(Date.now());
+  const resolvedRef = useRef(false);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNowMs(Date.now()), 100);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const handleActionKey = (event: KeyboardEvent) => {
+      if (event.code !== "Space" || event.repeat) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement
+        || target instanceof HTMLButtonElement
+        || target instanceof HTMLTextAreaElement
+        || (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      ranked.activateAction();
+    };
+    window.addEventListener("keydown", handleActionKey, { passive: false });
+    return () => window.removeEventListener("keydown", handleActionKey);
+  }, [ranked.activateAction]);
+
+  const state = ranked.matchState;
+  const localParticipant = ranked.slot && state ? state.participants[ranked.slot - 1] : null;
+  const peerParticipant = ranked.slot && state ? state.participants[ranked.slot === 1 ? 1 : 0] : null;
+  const localHeartPoints = localParticipant?.heartPoints ?? MATCH_RULES.startingHeartPoints;
+  const peerHeartPoints = peerParticipant?.heartPoints ?? MATCH_RULES.startingHeartPoints;
+  const serverNowMs = clockNowMs + ranked.serverTimeOffsetMs;
+
+  useEffect(() => {
+    if (!state?.result || !ranked.slot || resolvedRef.current) return;
+    resolvedRef.current = true;
+    onResolved({
+      result: resultFromWinner(ranked.slot, state.result.winnerSlot, state.result.reason),
+      reason: state.result.reason,
+      localHeartPoints,
+      peerHeartPoints,
+    });
+  }, [state?.result, ranked.slot, localHeartPoints, peerHeartPoints, onResolved]);
+
+  const phase = state?.phase ?? "countdown";
+  const phaseLabel = phase === "overtime"
+    ? "OVERTIME"
+    : phase === "active"
+      ? "REGULATION"
+      : phase === "completed" || phase === "no-contest"
+        ? "COMPLETE"
+        : "SYNCING";
+  const remainingMs = state
+    ? phase === "overtime"
+      ? state.overtimeEndsAtMs - serverNowMs
+      : phase === "active"
+        ? state.regulationEndsAtMs - serverNowMs
+        : phase === "countdown"
+          ? state.activeAtMs - serverNowMs
+          : 0
+    : MATCH_RULES.regulationSeconds * 1_000;
+  const cooldownRemainingMs = localParticipant
+    ? Math.max(0, localParticipant.nextActionAtMs - serverNowMs)
+    : 0;
+  const actionReady = (phase === "active" || phase === "overtime")
+    && cooldownRemainingMs === 0
+    && ranked.peerConnected;
+  const actionStatus = actionReady
+    ? "READY"
+    : cooldownRemainingMs > 0
+      ? `${(cooldownRemainingMs / 1_000).toFixed(1)}S`
+      : ranked.status === "connecting"
+        ? "SYNCING"
+        : "STANDBY";
+  const stagingSlot = assignment.spawnSide === "left" ? 1 : 2;
+
   return (
     <div className="product-match-shell">
-      <FlightRuntime showDevelopmentPanels={false} autoRoomCode={assignment.roomCode} />
-      <div className="c4-match-hud" aria-label="C4 match HUD preview">
+      <FlightRuntime
+        showDevelopmentPanels={false}
+        externalNetworkController={ranked}
+        stagingSlot={stagingSlot}
+      />
+      <div className="c4-match-hud" aria-label="C4 authoritative match HUD">
         <div className="match-hud__top">
           <div className="hp-block hp-block--local">
-            <span>YOU // {aircraft?.displayName ?? assignment.aircraftId}</span><strong>{MATCH_RULES.startingHeartPoints}</strong><div><i style={{ width: "100%" }} /></div>
+            <span>YOU // {aircraft?.displayName ?? assignment.aircraftId}</span>
+            <strong>{localHeartPoints}</strong>
+            <div><i style={{ width: `${localHeartPoints}%` }} /></div>
           </div>
-          <div className="match-clock"><span>REGULATION</span><strong>04:00</strong><small>{assignment.roomCode}</small></div>
+          <div className="match-clock">
+            <span>{phaseLabel}</span>
+            <strong>{formatClock(remainingMs)}</strong>
+            <small>{assignment.roomCode}</small>
+          </div>
           <div className="hp-block hp-block--peer">
-            <span>PEER</span><strong>{MATCH_RULES.startingHeartPoints}</strong><div><i style={{ width: "100%" }} /></div>
+            <span>PEER</span>
+            <strong>{peerHeartPoints}</strong>
+            <div><i style={{ width: `${peerHeartPoints}%` }} /></div>
           </div>
         </div>
-        <div className="match-action-state"><span>ACTION</span><strong>READY</strong><small>ABSTRACT MODULE</small></div>
-        <button className="match-exit-preview" onClick={onExit}>EXIT PREVIEW</button>
+        <div className="match-action-state" aria-live="polite">
+          <span>ACTION // {actionModule?.displayName ?? "ABSTRACT MODULE"}</span>
+          <strong>{actionStatus}</strong>
+          <small>{actionFeedbackLabel(ranked.lastActionFeedback?.code)}</small>
+        </div>
+        <button
+          className="match-exit-preview"
+          onClick={ranked.leaveMatch}
+          disabled={Boolean(state?.result)}
+        >
+          FORFEIT MATCH
+        </button>
       </div>
+    </div>
+  );
+}
+
+function resultTitle(result: MatchResult) {
+  if (result === "win") return "WIN";
+  if (result === "loss") return "LOSS";
+  if (result === "draw") return "DRAW";
+  return "NO CONTEST";
+}
+
+function resultReasonLabel(reason: MatchResultReason) {
+  if (reason === "heart-points-depleted") return "HEART POINTS REACHED ZERO";
+  if (reason === "regulation-heart-points") return "REGULATION HP RESULT";
+  if (reason === "overtime-heart-points") return "OVERTIME HP RESULT";
+  if (reason === "overtime-draw") return "OVERTIME ENDED LEVEL";
+  if (reason === "forfeit") return "FORFEIT";
+  return "INFRASTRUCTURE FAILURE";
+}
+
+function ResultPreview({
+  outcome,
+  onHome,
+}: Readonly<{
+  outcome: ProductMatchOutcome;
+  onHome: () => void;
+}>) {
+  return (
+    <div className="product-screen product-screen--matchmaking">
+      <div className="product-grid" aria-hidden="true" />
+      <Brand />
+      <section className="queue-card" aria-live="polite">
+        <p className="product-eyebrow">AUTHORITATIVE MATCH RESULT</p>
+        <h1>{resultTitle(outcome.result)}</h1>
+        <p className="product-copy">{resultReasonLabel(outcome.reason)}</p>
+        <div className="queue-meta">
+          <span>YOU {outcome.localHeartPoints} HP</span>
+          <span>PEER {outcome.peerHeartPoints} HP</span>
+          <span>{outcome.result === "no-contest" ? "NO RATING CHANGE" : "RATING UPDATE IN C4D"}</span>
+        </div>
+        <button className="product-primary product-primary--compact" onClick={onHome}>RETURN HOME</button>
+      </section>
     </div>
   );
 }
@@ -312,6 +496,7 @@ function LeaderboardPreview({ onBack }: Readonly<{ onBack: () => void }>) {
 export function ProductPreview() {
   const [screen, setScreen] = useState<ProductScreen>("auth");
   const [assignment, setAssignment] = useState<MatchFoundAssignment | null>(null);
+  const [outcome, setOutcome] = useState<ProductMatchOutcome | null>(null);
 
   if (screen === "auth") return <AuthPreview onEnter={() => setScreen("home")} />;
   if (screen === "home") {
@@ -320,6 +505,7 @@ export function ProductPreview() {
         profile={PREVIEW_PROFILE}
         onStart={() => {
           setAssignment(null);
+          setOutcome(null);
           setScreen("matchmaking");
         }}
         onLeaderboard={() => setScreen("leaderboard")}
@@ -346,7 +532,29 @@ export function ProductPreview() {
     return <CountdownPreview assignment={assignment} onActive={() => setScreen("match")} />;
   }
   if (screen === "leaderboard") return <LeaderboardPreview onBack={() => setScreen("home")} />;
-  if (screen === "match" && assignment) return <MatchPreview assignment={assignment} onExit={() => setScreen("home")} />;
+  if (screen === "match" && assignment) {
+    return (
+      <MatchPreview
+        assignment={assignment}
+        onResolved={(nextOutcome) => {
+          setOutcome(nextOutcome);
+          setScreen("result");
+        }}
+      />
+    );
+  }
+  if (screen === "result" && outcome) {
+    return (
+      <ResultPreview
+        outcome={outcome}
+        onHome={() => {
+          setAssignment(null);
+          setOutcome(null);
+          setScreen("home");
+        }}
+      />
+    );
+  }
 
   return <HomePreview profile={PREVIEW_PROFILE} onStart={() => setScreen("matchmaking")} onLeaderboard={() => setScreen("leaderboard")} onSignOut={() => setScreen("auth")} />;
 }

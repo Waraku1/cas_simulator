@@ -17,6 +17,7 @@ const required = [
   "src/client/multiplayer/useMultiplayer.ts",
   "src/client/product/ProductPreview.tsx",
   "src/client/product/useMatchmaking.ts",
+  "src/client/product/useRankedMatch.ts",
   "src/client/theater/model.ts",
   "src/client/c3.css",
   "src/worker/index.ts",
@@ -76,6 +77,11 @@ if (!wrangler.includes('"name": "MATCHMAKER"') || !wrangler.includes('"new_sqlit
 }
 if (!wrangler.includes('"name": "MATCHES"') || !wrangler.includes('"new_sqlite_classes": ["RankedMatch"]')) {
   throw new Error("Missing C4C ranked match Durable Object contract");
+}
+
+const rankedClient = await readFile(join(root, "src/client/product/useRankedMatch.ts"), "utf8");
+if (!rankedClient.includes("/api/matches/") || !rankedClient.includes("joinToken")) {
+  throw new Error("C4C product client must use tokenized RankedMatch transport");
 }
 
 const deployWorkflow = await readFile(join(root, ".github/workflows/deploy.yml"), "utf8");
