@@ -58,8 +58,8 @@ const PITCH_ACCEL_DEG_S2 = 70;
 const ROLL_ACCEL_DEG_S2 = 160;
 const PITCH_RELEASE_DECEL_DEG_S2 = 180;
 const ROLL_RELEASE_DECEL_DEG_S2 = 360;
-const LEVEL_CAPTURE_DEG = 3;
-const LEVEL_CAPTURE_RATE_DEG_S = 24;
+const LEVEL_CAPTURE_DEG = 5;
+const LEVEL_CAPTURE_RATE_DEG_S = 18;
 const LEVEL_CAPTURE_RATE_THRESHOLD_DEG_S = 1.5;
 
 const YAW_TEST_RATE_DEG_S = 12;
@@ -294,7 +294,7 @@ export function integrateFlightState(
   );
 
   // Near level, and only after the commanded angular rate has essentially
-  // stopped, capture small pitch/bank errors back to exactly 0°. Outside ±3°
+  // stopped, capture small pitch/bank errors back to exactly 0°. Outside ±5°
   // there is no auto-level authority, preserving the unrestricted attitude
   // envelope introduced in C1.4.
   let attitude = attitudeFromOrientation(orientation);
