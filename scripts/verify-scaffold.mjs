@@ -9,10 +9,14 @@ const required = [
   "index.html",
   "src/client/main.tsx",
   "src/client/components/EarthScene.tsx",
+  "src/client/components/TheaterStatusPanel.tsx",
   "src/client/diagnostics/useRuntimeDiagnostics.ts",
+  "src/client/theater/model.ts",
   "src/worker/index.ts",
   "src/shared/config.ts",
   "docs/architecture/C0_FOUNDATION.md",
+  "docs/architecture/C1_FLIGHT.md",
+  "docs/architecture/C2_WORLD_THEATER.md",
 ];
 
 for (const relative of required) {

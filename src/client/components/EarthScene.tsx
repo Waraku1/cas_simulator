@@ -22,6 +22,11 @@ import {
   type FlightState,
   type FlightTelemetry,
 } from "../flight/model";
+import {
+  evaluateTheaterPosition,
+  getTheaterBoundaryDegrees,
+  type TheaterStatus,
+} from "../theater/model";
 
 const CONTROLLED_KEYS = new Set([
   "KeyW",
@@ -47,11 +52,11 @@ type FlightFrame = Readonly<{
   up: Cartesian3;
 }>;
 
-/**
- * Converts the canonical local-ENU body frame from the flight model into ECEF.
- * The flight model is now the single authority for attitude: rendering and
- * camera logic do not independently reconstruct heading/pitch/bank.
- */
+type EarthSceneProps = Readonly<{
+  onTelemetry: (telemetry: FlightTelemetry) => void;
+  onTheaterStatus: (status: TheaterStatus) => void;
+}>;
+
 function computeFlightFrame(position: Cartesian3, state: FlightState): FlightFrame {
   const enu = Transforms.eastNorthUpToFixedFrame(position);
   const localFrame = getLocalBodyFrame(state);
@@ -85,7 +90,7 @@ function offsetFrom(position: Cartesian3, direction: Cartesian3, distanceM: numb
   return Cartesian3.add(position, offset, offset);
 }
 
-export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTelemetry) => void }) {
+export function EarthScene({ onTelemetry, onTheaterStatus }: EarthSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<"booting" | "ready" | "missing-token" | "error">("booting");
   const [errorMessage, setErrorMessage] = useState("");
@@ -139,6 +144,19 @@ export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTel
       viewer.scene.fog.enabled = true;
       viewer.scene.requestRenderMode = false;
       viewer.scene.screenSpaceCameraController.enableInputs = false;
+
+      const boundaryPositions = getTheaterBoundaryDegrees().map(([longitudeDeg, latitudeDeg]) =>
+        Cartesian3.fromDegrees(longitudeDeg, latitudeDeg),
+      );
+      viewer.entities.add({
+        name: "C2 theater boundary",
+        polyline: {
+          positions: boundaryPositions,
+          clampToGround: true,
+          width: 2.5,
+          material: Color.fromCssColorString("#76eaff").withAlpha(0.66),
+        },
+      });
 
       const initialPosition = Cartesian3.fromDegrees(
         flightState.longitudeDeg,
@@ -204,6 +222,11 @@ export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTel
         });
       };
 
+      const publishFlightState = () => {
+        onTelemetry(toFlightTelemetry(flightState));
+        onTheaterStatus(evaluateTheaterPosition(flightState.latitudeDeg, flightState.longitudeDeg));
+      };
+
       const animate = (now: number) => {
         if (cancelled || !viewer) return;
         const deltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
@@ -230,7 +253,7 @@ export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTel
 
         if (now - lastTelemetryTime >= 90) {
           lastTelemetryTime = now;
-          onTelemetry(toFlightTelemetry(flightState));
+          publishFlightState();
         }
         frameId = requestAnimationFrame(animate);
       };
@@ -239,7 +262,7 @@ export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTel
       window.addEventListener("keyup", handleKeyUp, { passive: false });
       window.addEventListener("blur", handleBlur);
       updateCamera(initialPosition, initialFrame);
-      onTelemetry(toFlightTelemetry(flightState));
+      publishFlightState();
       frameId = requestAnimationFrame(animate);
       if (!cancelled) setStatus("ready");
     } catch (error) {
@@ -255,7 +278,7 @@ export function EarthScene({ onTelemetry }: { onTelemetry: (telemetry: FlightTel
       window.removeEventListener("blur", handleBlur);
       if (viewer && !viewer.isDestroyed()) viewer.destroy();
     };
-  }, [onTelemetry]);
+  }, [onTelemetry, onTheaterStatus]);
 
   return (
     <section className="earth-shell" aria-label="Cesium Earth flight viewport">
