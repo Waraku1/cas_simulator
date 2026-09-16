@@ -18,7 +18,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       VITE_CESIUM_ION_TOKEN: ${{ secrets.VITE_CESIUM_ION_TOKEN }}
-      PRODUCTION_URL: https://cas-flight-simulator.heleshiheiheleshihei.workers.dev
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL || 'https://cas-flight-simulator.heleshiheiheleshihei.workers.dev' }}
 
     steps:
       - name: Checkout
