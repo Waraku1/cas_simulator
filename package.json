@@ -9,6 +9,8 @@
     "predev": "pnpm sync:cesium",
     "dev": "vite dev --config vite.client.config.ts",
     "dev:cloudflare": "vite dev",
+    "dev:school": "pnpm sync:cesium && vite dev",
+    "verify:school": "SCHOOL_URL=http://127.0.0.1:5173 node scripts/verify-production-multiplayer.mjs",
     "prebuild": "pnpm sync:cesium",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
