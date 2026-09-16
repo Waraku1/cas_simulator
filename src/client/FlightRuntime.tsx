@@ -1,25 +1,57 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { EarthScene } from "./components/EarthScene";
 import { FlightHud } from "./components/FlightHud";
 import { MultiplayerPanel } from "./components/MultiplayerPanel";
 import { TheaterStatusPanel } from "./components/TheaterStatusPanel";
 import { INITIAL_FLIGHT_TELEMETRY } from "./flight/model";
-import { useMultiplayer } from "./multiplayer/useMultiplayer";
+import { useMultiplayer, type MultiplayerStatus } from "./multiplayer/useMultiplayer";
 import { INITIAL_THEATER_STATUS } from "./theater/model";
+
+export type FlightRuntimeMultiplayerState = Readonly<{
+  status: MultiplayerStatus;
+  roomCode: string;
+  peerConnected: boolean;
+  errorMessage: string;
+}>;
 
 type FlightRuntimeProps = Readonly<{
   showDevelopmentPanels?: boolean;
   autoRoomCode?: string | null;
+  onMultiplayerState?: (state: FlightRuntimeMultiplayerState) => void;
 }>;
+
+function productLinkLabel(status: MultiplayerStatus, peerConnected: boolean) {
+  if (status === "connected" && peerConnected) return "PEER LINKED";
+  if (status === "waiting") return "WAITING FOR PEER";
+  if (status === "connecting") return "CONNECTING";
+  if (status === "error") return "LINK ERROR";
+  return "OFFLINE";
+}
 
 export function FlightRuntime({
   showDevelopmentPanels = true,
   autoRoomCode = null,
+  onMultiplayerState,
 }: FlightRuntimeProps) {
   const [telemetry, setTelemetry] = useState(INITIAL_FLIGHT_TELEMETRY);
   const [theaterStatus, setTheaterStatus] = useState(INITIAL_THEATER_STATUS);
   const multiplayer = useMultiplayer(autoRoomCode);
+
+  useEffect(() => {
+    onMultiplayerState?.({
+      status: multiplayer.status,
+      roomCode: multiplayer.roomCode,
+      peerConnected: multiplayer.peerConnected,
+      errorMessage: multiplayer.errorMessage,
+    });
+  }, [
+    multiplayer.status,
+    multiplayer.roomCode,
+    multiplayer.peerConnected,
+    multiplayer.errorMessage,
+    onMultiplayerState,
+  ]);
 
   return (
     <main className="app-shell">
@@ -34,6 +66,36 @@ export function FlightRuntime({
       <TheaterStatusPanel status={theaterStatus} />
       {showDevelopmentPanels && <MultiplayerPanel controller={multiplayer} />}
       {showDevelopmentPanels && <DiagnosticsPanel />}
+      {!showDevelopmentPanels && autoRoomCode && (
+        <div
+          aria-live="polite"
+          title={multiplayer.errorMessage || undefined}
+          style={{
+            position: "absolute",
+            zIndex: 18,
+            right: 22,
+            bottom: 22,
+            display: "grid",
+            gap: 3,
+            minWidth: 142,
+            padding: "8px 11px",
+            border: "1px solid rgba(150, 228, 244, 0.22)",
+            borderRadius: 8,
+            background: "rgba(3, 14, 19, 0.72)",
+            backdropFilter: "blur(10px)",
+            pointerEvents: "none",
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            textShadow: "0 1px 10px rgba(0, 0, 0, 0.72)",
+          }}
+        >
+          <span style={{ fontSize: 8, letterSpacing: "0.16em", color: "rgba(225, 248, 255, 0.55)" }}>
+            ROOM {multiplayer.roomCode || autoRoomCode}
+          </span>
+          <strong style={{ fontSize: 10, letterSpacing: "0.12em", color: "#eaffff" }}>
+            {productLinkLabel(multiplayer.status, multiplayer.peerConnected)}
+          </strong>
+        </div>
+      )}
     </main>
   );
 }

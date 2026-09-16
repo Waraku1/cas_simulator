@@ -45,7 +45,6 @@ export function useMultiplayer(autoRoomCode: string | null = null): MultiplayerC
   const socketRef = useRef<WebSocket | null>(null);
   const sequenceRef = useRef(0);
   const latestPeerPoseRef = useRef<PoseSnapshot | null>(null);
-  const autoJoinedRoomRef = useRef<string | null>(null);
   const [status, setStatus] = useState<MultiplayerStatus>("offline");
   const [roomCode, setRoomCode] = useState("");
   const [playerId, setPlayerId] = useState<string | null>(null);
@@ -193,13 +192,13 @@ export function useMultiplayer(autoRoomCode: string | null = null): MultiplayerC
   }, []);
 
   useEffect(() => {
-    if (!autoRoomCode) {
-      autoJoinedRoomRef.current = null;
-      return;
-    }
+    if (!autoRoomCode) return;
     const normalized = normalizeRoomCode(autoRoomCode);
-    if (!isValidRoomCode(normalized) || autoJoinedRoomRef.current === normalized) return;
-    autoJoinedRoomRef.current = normalized;
+    if (!isValidRoomCode(normalized)) return;
+
+    // This effect intentionally reconnects when React StrictMode re-runs effects
+    // in development. A persistent "already joined" ref would suppress the second,
+    // real connection after StrictMode closes the first probe connection.
     connect(normalized);
   }, [autoRoomCode, connect]);
 
