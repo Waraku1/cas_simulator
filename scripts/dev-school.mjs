@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import net from "node:net";
 
 const children = new Set();
 let shuttingDown = false;
+const schoolInternalToken = randomUUID();
 
 function portIsListening(port) {
   return new Promise((resolve) => {
@@ -31,6 +33,7 @@ async function assertSchoolPortsAvailable() {
   if (await portIsListening(5173)) conflicts.push("5173 (Vite browser origin)");
   if (await portIsListening(8787)) conflicts.push("8787 (school local C3/C4 relay)");
   if (await portIsListening(8788)) conflicts.push("8788 (school local account API)");
+  if (await portIsListening(8789)) conflicts.push("8789 (school authenticated ranked product)");
 
   if (conflicts.length === 0) return;
 
@@ -42,13 +45,14 @@ async function assertSchoolPortsAvailable() {
   console.error("  lsof -nP -iTCP:5173 -sTCP:LISTEN");
   console.error("  lsof -nP -iTCP:8787 -sTCP:LISTEN");
   console.error("  lsof -nP -iTCP:8788 -sTCP:LISTEN");
+  console.error("  lsof -nP -iTCP:8789 -sTCP:LISTEN");
   process.exit(1);
 }
 
-function start(command, args, label) {
+function start(command, args, label, extraEnv = {}) {
   const child = spawn(command, args, {
     cwd: process.cwd(),
-    env: process.env,
+    env: { ...process.env, ...extraEnv },
     stdio: "inherit",
   });
   children.add(child);
@@ -81,8 +85,10 @@ function shutdown(exitCode = 0) {
 
 await assertSchoolPortsAvailable();
 
+const internalEnv = { SCHOOL_INTERNAL_TOKEN: schoolInternalToken };
 start(process.execPath, ["scripts/school-local-backend.mjs"], "school local multiplayer backend");
-start(process.execPath, ["scripts/school-account-backend.mjs"], "school local account backend");
+start(process.execPath, ["scripts/school-account-backend.mjs"], "school local account backend", internalEnv);
+start(process.execPath, ["scripts/school-ranked-product-backend.mjs"], "school authenticated ranked product", internalEnv);
 start("pnpm", ["exec", "vite", "dev", "--config", "vite.school.config.ts"], "Vite school client");
 
 process.on("SIGINT", () => shutdown(0));
