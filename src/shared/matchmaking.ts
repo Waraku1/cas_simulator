@@ -20,6 +20,7 @@ export type ClientMatchmakingMessage =
 export type MatchFoundAssignment = Readonly<{
   matchId: string;
   roomCode: string;
+  joinToken: string;
   aircraftId: string;
   peerAircraftId: string;
   spawnSide: SpawnSide;
@@ -89,6 +90,8 @@ export function parseServerMatchmakingMessage(text: string): ServerMatchmakingMe
       || assignment.matchId.length < 8
       || typeof assignment.roomCode !== "string"
       || !isValidRoomCode(assignment.roomCode)
+      || typeof assignment.joinToken !== "string"
+      || assignment.joinToken.length < 16
       || !isAircraftId(assignment.aircraftId)
       || !isAircraftId(assignment.peerAircraftId)
       || (assignment.spawnSide !== "left" && assignment.spawnSide !== "right")
