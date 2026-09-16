@@ -41,10 +41,11 @@ function websocketUrl(roomCode: string) {
   return `${protocol}//${window.location.host}/api/rooms/${roomCode}/ws`;
 }
 
-export function useMultiplayer(): MultiplayerController {
+export function useMultiplayer(autoRoomCode: string | null = null): MultiplayerController {
   const socketRef = useRef<WebSocket | null>(null);
   const sequenceRef = useRef(0);
   const latestPeerPoseRef = useRef<PoseSnapshot | null>(null);
+  const autoJoinedRoomRef = useRef<string | null>(null);
   const [status, setStatus] = useState<MultiplayerStatus>("offline");
   const [roomCode, setRoomCode] = useState("");
   const [playerId, setPlayerId] = useState<string | null>(null);
@@ -190,6 +191,17 @@ export function useMultiplayer(): MultiplayerController {
     sequenceRef.current += 1;
     socket.send(JSON.stringify({ type: "pose", pose: snapshot }));
   }, []);
+
+  useEffect(() => {
+    if (!autoRoomCode) {
+      autoJoinedRoomRef.current = null;
+      return;
+    }
+    const normalized = normalizeRoomCode(autoRoomCode);
+    if (!isValidRoomCode(normalized) || autoJoinedRoomRef.current === normalized) return;
+    autoJoinedRoomRef.current = normalized;
+    connect(normalized);
+  }, [autoRoomCode, connect]);
 
   useEffect(() => () => {
     const socket = socketRef.current;
