@@ -34,15 +34,13 @@ const MIN_SPEED_MPS = 90;
 const MAX_SPEED_MPS = 230;
 const MIN_ALTITUDE_M = 450;
 const MAX_ALTITUDE_M = 9_000;
-const MAX_PITCH_DEG = 35;
-const MAX_BANK_DEG = 55;
+const MAX_BANK_DEG = 85;
 const SPEED_RESPONSE_MPS2 = 42;
 const PITCH_RATE_DEG_S = 28;
 const BANK_RATE_DEG_S = 48;
 const YAW_RATE_DEG_S = 12;
 const BANK_TURN_RATE_DEG_S = 17;
 const THROTTLE_RATE_PER_S = 0.42;
-const PITCH_RECENTER_DEG_S = 7;
 const BANK_RECENTER_DEG_S = 18;
 
 const clamp = (value: number, minimum: number, maximum: number) =>
@@ -55,6 +53,13 @@ const approach = (value: number, target: number, maximumStep: number) => {
 };
 
 const wrapDegrees = (value: number) => ((value % 360) + 360) % 360;
+
+// Pitch is intentionally not clamped in C1.3. Wrapping keeps the numeric state
+// bounded while allowing continuous loops through the full 360° attitude range.
+const wrapSignedDegrees = (value: number) => {
+  const wrapped = ((value + 180) % 360 + 360) % 360 - 180;
+  return wrapped === -180 ? 180 : wrapped;
+};
 
 const wrapLongitude = (value: number) => {
   const wrapped = ((value + 180) % 360 + 360) % 360 - 180;
@@ -92,13 +97,9 @@ export function integrateFlightState(
   const targetSpeedMps = MIN_SPEED_MPS + (MAX_SPEED_MPS - MIN_SPEED_MPS) * throttle;
   const speedMps = approach(previous.speedMps, targetSpeedMps, SPEED_RESPONSE_MPS2 * dt);
 
-  const pitchDeg = clamp(
-    Math.abs(pitchInput) > 0.01
-      ? previous.pitchDeg + pitchInput * PITCH_RATE_DEG_S * dt
-      : approach(previous.pitchDeg, 0, PITCH_RECENTER_DEG_S * dt),
-    -MAX_PITCH_DEG,
-    MAX_PITCH_DEG,
-  );
+  // W/S commands pitch rate. Releasing the keys now preserves the attained
+  // pitch instead of automatically returning the nose to level.
+  const pitchDeg = wrapSignedDegrees(previous.pitchDeg + pitchInput * PITCH_RATE_DEG_S * dt);
 
   const bankDeg = clamp(
     Math.abs(rollInput) > 0.01
@@ -109,17 +110,16 @@ export function integrateFlightState(
   );
 
   const bankTurn = Math.sin((bankDeg * Math.PI) / 180) * BANK_TURN_RATE_DEG_S;
+  // Q/E direct yaw is experimental C1 instrumentation only and is tracked for
+  // removal before the release gate. Bank-induced turning remains canonical.
   const headingDeg = wrapDegrees(previous.headingDeg + (bankTurn + yawInput * YAW_RATE_DEG_S) * dt);
 
   const pitchRad = (pitchDeg * Math.PI) / 180;
   const headingRad = (headingDeg * Math.PI) / 180;
-  const verticalSpeedMps = clamp(speedMps * Math.sin(pitchRad), -85, 85);
+  const verticalSpeedMps = speedMps * Math.sin(pitchRad);
   const horizontalSpeedMps = speedMps * Math.cos(pitchRad);
 
-  let altitudeM = clamp(previous.altitudeM + verticalSpeedMps * dt, MIN_ALTITUDE_M, MAX_ALTITUDE_M);
-  let correctedPitchDeg = pitchDeg;
-  if (altitudeM <= MIN_ALTITUDE_M && correctedPitchDeg < 0) correctedPitchDeg = 0;
-  if (altitudeM >= MAX_ALTITUDE_M && correctedPitchDeg > 0) correctedPitchDeg = 0;
+  const altitudeM = clamp(previous.altitudeM + verticalSpeedMps * dt, MIN_ALTITUDE_M, MAX_ALTITUDE_M);
 
   const distanceNorthM = horizontalSpeedMps * Math.cos(headingRad) * dt;
   const distanceEastM = horizontalSpeedMps * Math.sin(headingRad) * dt;
@@ -133,7 +133,7 @@ export function integrateFlightState(
     longitudeDeg: wrapLongitude((longitudeRad * 180) / Math.PI),
     altitudeM,
     headingDeg,
-    pitchDeg: correctedPitchDeg,
+    pitchDeg,
     bankDeg,
     speedMps,
     throttle,
