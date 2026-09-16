@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { aircraftById } from "../../shared/aircraft";
+import type { MatchFoundAssignment } from "../../shared/matchmaking";
 import {
   MATCH_RULES,
   type LeaderboardEntry,
@@ -6,6 +8,7 @@ import {
   type ProductScreen,
 } from "../../shared/product";
 import { FlightRuntime } from "../FlightRuntime";
+import { useMatchmaking } from "./useMatchmaking";
 
 const PREVIEW_PROFILE: PlayerProfile = {
   userId: "preview-pilot",
@@ -40,12 +43,12 @@ function AuthPreview({ onEnter }: Readonly<{ onEnter: () => void }>) {
       <div className="product-grid" aria-hidden="true" />
       <Brand />
       <section className="auth-card" aria-label="Account preview">
-        <p className="product-eyebrow">C4R PRODUCT PREVIEW</p>
+        <p className="product-eyebrow">C4 PRODUCT PREVIEW</p>
         <h1>{mode === "login" ? "Welcome back" : "Create pilot ID"}</h1>
         <p className="product-copy">
           {mode === "login"
             ? "Sign in to enter matchmaking, review rating, and manage your fixed aircraft."
-            : "Registration UI is wired to the public contract; persistence arrives in C4A."}
+            : "Registration follows the public account contract; production persistence remains adapter-backed."}
         </p>
         <div className="segmented-control" role="tablist" aria-label="Authentication mode">
           <button className={mode === "login" ? "is-active" : ""} onClick={() => setMode("login")}>LOGIN</button>
@@ -63,10 +66,10 @@ function AuthPreview({ onEnter }: Readonly<{ onEnter: () => void }>) {
         )}
         <label className="product-field">
           <span>PASSWORD</span>
-          <input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder="••••••••" />
+          <input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder="••••••••••" />
         </label>
-        <button className="product-primary" onClick={onEnter}>ENTER UI PREVIEW</button>
-        <p className="preview-note">No credentials are submitted or stored in C4R preview mode.</p>
+        <button className="product-primary" onClick={onEnter}>ENTER PRODUCT PREVIEW</button>
+        <p className="preview-note">Preview credentials are not submitted or stored yet.</p>
       </section>
     </div>
   );
@@ -100,7 +103,7 @@ function HomePreview({
           <p className="product-eyebrow">RANKED // 1V1</p>
           <h1>Own the airspace.</h1>
           <p className="product-copy">
-            Match with one opponent, receive a balanced fictional aircraft, and compete over a continuous 100 Heart Point match.
+            Match with one opponent, receive a sidegrade fictional aircraft, and compete over a continuous 100 Heart Point match.
           </p>
           <button className="start-button" onClick={onStart}>
             <span>START</span>
@@ -126,63 +129,156 @@ function HomePreview({
           </button>
         </section>
       </main>
-      <footer className="product-footer">C4R UI PREVIEW // BACKEND ADAPTERS PENDING</footer>
+      <footer className="product-footer">C4B LIVE MATCHMAKING PREVIEW // ACCOUNT PERSISTENCE PENDING</footer>
     </div>
   );
 }
 
-function MatchmakingPreview({ onMatched, onCancel }: Readonly<{ onMatched: () => void; onCancel: () => void }>) {
+function MatchmakingPreview({
+  fixedAircraftId,
+  onMatched,
+  onCancel,
+}: Readonly<{
+  fixedAircraftId: string | null;
+  onMatched: (assignment: MatchFoundAssignment) => void;
+  onCancel: () => void;
+}>) {
+  const matchmaking = useMatchmaking();
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    matchmaking.enqueue(fixedAircraftId);
+    return matchmaking.cancel;
+  }, [fixedAircraftId, matchmaking.enqueue, matchmaking.cancel]);
+
+  useEffect(() => {
+    if (matchmaking.assignment) onMatched(matchmaking.assignment);
+  }, [matchmaking.assignment, onMatched]);
+
+  useEffect(() => {
+    if (matchmaking.queuedAtMs === null) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const update = () => setElapsedSeconds(Math.max(0, Math.floor((Date.now() - matchmaking.queuedAtMs!) / 1_000)));
+    update();
+    const timer = window.setInterval(update, 250);
+    return () => window.clearInterval(timer);
+  }, [matchmaking.queuedAtMs]);
+
+  const cancel = () => {
+    matchmaking.cancel();
+    onCancel();
+  };
+
   return (
     <div className="product-screen product-screen--matchmaking">
       <div className="product-grid" aria-hidden="true" />
       <Brand />
       <section className="queue-card">
         <div className="queue-orbit" aria-hidden="true"><span /></div>
-        <p className="product-eyebrow">MATCHMAKING</p>
-        <h1>Searching for opponent</h1>
-        <p className="product-copy">Your current queue position and elapsed wait time will be server-backed in C4B.</p>
-        <div className="queue-meta"><span>RATED 1V1</span><span>REGION AUTO</span><span>00:08</span></div>
+        <p className="product-eyebrow">MATCHMAKING // LIVE LOCAL CONTRACT</p>
+        <h1>{matchmaking.status === "connecting" ? "Connecting to queue" : "Searching for opponent"}</h1>
+        <p className="product-copy">
+          The server pairs exactly two waiting clients, assigns the room and fictional aircraft, then synchronizes the reveal and countdown.
+        </p>
+        <div className="queue-meta">
+          <span>RATED 1V1</span>
+          <span>{fixedAircraftId ? "FIXED AIRCRAFT" : "RANDOM AIRCRAFT"}</span>
+          <span>{String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:{String(elapsedSeconds % 60).padStart(2, "0")}</span>
+        </div>
+        {matchmaking.status === "error" && <p className="preview-note">{matchmaking.errorMessage}</p>}
         <div className="queue-actions">
-          <button className="product-secondary" onClick={onCancel}>CANCEL</button>
-          <button className="product-primary product-primary--compact" onClick={onMatched}>PREVIEW MATCH FOUND</button>
+          <button className="product-secondary" onClick={cancel}>CANCEL</button>
         </div>
       </section>
     </div>
   );
 }
 
-function AircraftAssignmentPreview({ onContinue }: Readonly<{ onContinue: () => void }>) {
+function AircraftAssignmentPreview({
+  assignment,
+  onCountdown,
+}: Readonly<{
+  assignment: MatchFoundAssignment;
+  onCountdown: () => void;
+}>) {
+  const aircraft = aircraftById(assignment.aircraftId);
+  const peerAircraft = aircraftById(assignment.peerAircraftId);
+
+  useEffect(() => {
+    const timer = window.setTimeout(onCountdown, Math.max(0, assignment.assignmentEndsAtMs - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [assignment.assignmentEndsAtMs, onCountdown]);
+
   return (
     <div className="product-screen product-screen--assignment">
       <div className="product-grid" aria-hidden="true" />
       <Brand />
       <section className="assignment-card">
-        <p className="product-eyebrow">AIRCRAFT ASSIGNMENT</p>
+        <p className="product-eyebrow">MATCH FOUND // AIRCRAFT ASSIGNMENT</p>
         <div className="aircraft-silhouette" aria-hidden="true"><span /></div>
-        <h1>ORBIT // A1</h1>
-        <p className="product-copy">Balanced fictional profile assigned for this match. Final catalog and balance budget arrive in C4B.</p>
+        <h1>{aircraft?.displayName ?? assignment.aircraftId}</h1>
+        <p className="product-copy">
+          Server-assigned fictional sidegrade. Opponent profile: {peerAircraft?.displayName ?? assignment.peerAircraftId}. Spawn side: {assignment.spawnSide.toUpperCase()}.
+        </p>
         <dl className="spec-strip">
-          <div><dt>SPEED</dt><dd>BALANCED</dd></div>
-          <div><dt>HANDLING</dt><dd>AGILE</dd></div>
-          <div><dt>SIZE</dt><dd>MEDIUM</dd></div>
-          <div><dt>ACTION</dt><dd>STANDARD</dd></div>
+          <div><dt>SPEED</dt><dd>{aircraft ? `${aircraft.minimumSpeedMps}–${aircraft.maximumSpeedMps}` : "—"}</dd></div>
+          <div><dt>PITCH</dt><dd>{aircraft?.pitchAccelerationDegS2 ?? "—"}</dd></div>
+          <div><dt>ROLL</dt><dd>{aircraft?.rollAccelerationDegS2 ?? "—"}</dd></div>
+          <div><dt>ACTION</dt><dd>{aircraft?.actionModuleId.toUpperCase() ?? "—"}</dd></div>
         </dl>
-        <button className="product-primary" onClick={onContinue}>ENTER COUNTDOWN</button>
+        <p className="preview-note">Assignment reveal advances automatically into the synchronized countdown.</p>
       </section>
     </div>
   );
 }
 
-function MatchPreview({ onExit }: Readonly<{ onExit: () => void }>) {
+function CountdownPreview({
+  assignment,
+  onActive,
+}: Readonly<{
+  assignment: MatchFoundAssignment;
+  onActive: () => void;
+}>) {
+  const [remainingMs, setRemainingMs] = useState(() => Math.max(0, assignment.activeAtMs - Date.now()));
+
+  useEffect(() => {
+    const update = () => {
+      const next = Math.max(0, assignment.activeAtMs - Date.now());
+      setRemainingMs(next);
+      if (next === 0) onActive();
+    };
+    update();
+    const timer = window.setInterval(update, 100);
+    return () => window.clearInterval(timer);
+  }, [assignment.activeAtMs, onActive]);
+
+  return (
+    <div className="product-screen product-screen--matchmaking">
+      <div className="product-grid" aria-hidden="true" />
+      <Brand />
+      <section className="queue-card">
+        <p className="product-eyebrow">MATCH {assignment.matchId.slice(0, 8).toUpperCase()}</p>
+        <h1>{Math.max(1, Math.ceil(remainingMs / 1_000))}</h1>
+        <p className="product-copy">Room {assignment.roomCode} // synchronized start</p>
+        <div className="queue-meta"><span>100 HP</span><span>04:00</span><span>{assignment.spawnSide.toUpperCase()} SIDE</span></div>
+      </section>
+    </div>
+  );
+}
+
+function MatchPreview({ assignment, onExit }: Readonly<{ assignment: MatchFoundAssignment; onExit: () => void }>) {
+  const aircraft = aircraftById(assignment.aircraftId);
   return (
     <div className="product-match-shell">
-      <FlightRuntime showDevelopmentPanels={false} />
+      <FlightRuntime showDevelopmentPanels={false} autoRoomCode={assignment.roomCode} />
       <div className="c4-match-hud" aria-label="C4 match HUD preview">
         <div className="match-hud__top">
           <div className="hp-block hp-block--local">
-            <span>YOU</span><strong>{MATCH_RULES.startingHeartPoints}</strong><div><i style={{ width: "100%" }} /></div>
+            <span>YOU // {aircraft?.displayName ?? assignment.aircraftId}</span><strong>{MATCH_RULES.startingHeartPoints}</strong><div><i style={{ width: "100%" }} /></div>
           </div>
-          <div className="match-clock"><span>REGULATION</span><strong>04:00</strong><small>RATED MATCH</small></div>
+          <div className="match-clock"><span>REGULATION</span><strong>04:00</strong><small>{assignment.roomCode}</small></div>
           <div className="hp-block hp-block--peer">
             <span>PEER</span><strong>{MATCH_RULES.startingHeartPoints}</strong><div><i style={{ width: "100%" }} /></div>
           </div>
@@ -215,26 +311,42 @@ function LeaderboardPreview({ onBack }: Readonly<{ onBack: () => void }>) {
 
 export function ProductPreview() {
   const [screen, setScreen] = useState<ProductScreen>("auth");
+  const [assignment, setAssignment] = useState<MatchFoundAssignment | null>(null);
 
   if (screen === "auth") return <AuthPreview onEnter={() => setScreen("home")} />;
   if (screen === "home") {
     return (
       <HomePreview
         profile={PREVIEW_PROFILE}
-        onStart={() => setScreen("matchmaking")}
+        onStart={() => {
+          setAssignment(null);
+          setScreen("matchmaking");
+        }}
         onLeaderboard={() => setScreen("leaderboard")}
         onSignOut={() => setScreen("auth")}
       />
     );
   }
   if (screen === "matchmaking") {
-    return <MatchmakingPreview onMatched={() => setScreen("aircraft-assignment")} onCancel={() => setScreen("home")} />;
+    return (
+      <MatchmakingPreview
+        fixedAircraftId={PREVIEW_PROFILE.fixedAircraftId}
+        onMatched={(nextAssignment) => {
+          setAssignment(nextAssignment);
+          setScreen("aircraft-assignment");
+        }}
+        onCancel={() => setScreen("home")}
+      />
+    );
   }
-  if (screen === "aircraft-assignment") {
-    return <AircraftAssignmentPreview onContinue={() => setScreen("match")} />;
+  if (screen === "aircraft-assignment" && assignment) {
+    return <AircraftAssignmentPreview assignment={assignment} onCountdown={() => setScreen("countdown")} />;
+  }
+  if (screen === "countdown" && assignment) {
+    return <CountdownPreview assignment={assignment} onActive={() => setScreen("match")} />;
   }
   if (screen === "leaderboard") return <LeaderboardPreview onBack={() => setScreen("home")} />;
-  if (screen === "match") return <MatchPreview onExit={() => setScreen("home")} />;
+  if (screen === "match" && assignment) return <MatchPreview assignment={assignment} onExit={() => setScreen("home")} />;
 
   return <HomePreview profile={PREVIEW_PROFILE} onStart={() => setScreen("matchmaking")} onLeaderboard={() => setScreen("leaderboard")} onSignOut={() => setScreen("auth")} />;
 }
