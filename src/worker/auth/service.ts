@@ -21,7 +21,7 @@ import {
 } from "./crypto";
 import type { AuthRepository, StoredUser } from "./repository";
 
-const PASSWORD_KDF_ITERATIONS = 120_000;
+const PASSWORD_KDF_ITERATIONS = 600_000;
 const SESSION_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
 
 function profile(user: StoredUser): PublicUserProfile {
