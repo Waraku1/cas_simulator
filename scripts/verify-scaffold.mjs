@@ -52,6 +52,7 @@ const required = [
   "scripts/school-ranked-runtime.mjs",
   "scripts/school-ranked-product-backend.mjs",
   "scripts/verify-production-multiplayer.mjs",
+  "scripts/verify-production-rated-product.mjs",
   "scripts/verify-school-matchmaking.mjs",
   "scripts/verify-school-competition.mjs",
   "scripts/verify-school-accounts.mjs",
@@ -82,6 +83,9 @@ if (!pkg.scripts?.["verify:school:c4c"] || !pkg.scripts?.["verify:c4c:runtime"])
 }
 if (!pkg.scripts?.["verify:school:c4d"] || !pkg.scripts?.["verify:school:c4d:ranked"]) {
   throw new Error("Missing C4D school account/rated-product verification scripts");
+}
+if (!pkg.scripts?.["verify:production:c4d"]?.includes("verify-production-rated-product.mjs")) {
+  throw new Error("Missing C4D production rated-product verification command");
 }
 
 const schoolConfig = await readFile(join(root, "vite.school.config.ts"), "utf8");
@@ -171,7 +175,27 @@ if (!schoolRuntime.includes("disconnectDeadlineMs: init.activeAtMs + DISCONNECT_
   throw new Error("C4D school runtime must mirror the production initial connection grace");
 }
 
+const productionRatedSmoke = await readFile(join(root, "scripts/verify-production-rated-product.mjs"), "utf8");
+for (const evidence of [
+  "account_in_active_match",
+  "fixableAircraftId === null",
+  "duplicateResultIgnored",
+  "activeMatchLockReleased",
+  "fixedAircraftRematchPersisted",
+  "C4D_PRODUCTION_RATED_PRODUCT_SMOKE",
+]) {
+  if (!productionRatedSmoke.includes(evidence)) {
+    throw new Error(`C4D production rated smoke is missing evidence: ${evidence}`);
+  }
+}
+
 const deployWorkflow = await readFile(join(root, ".github/workflows/deploy.yml"), "utf8");
 if (!deployWorkflow.includes("verify-production-multiplayer.mjs")) throw new Error("Missing C3 production multiplayer deploy verification");
+if (!deployWorkflow.includes("C4D_RATED_PRODUCTION_GATE") || !deployWorkflow.includes("verify:production:c4d")) {
+  throw new Error("C4D production rated smoke must be gated into the deploy workflow");
+}
+if (!deployWorkflow.includes("C4D_PRODUCTION_SMOKE_CLEANUP=PASS") || !deployWorkflow.includes("DELETE FROM rated_matches")) {
+  throw new Error("C4D production smoke must clean up rated-match and account test rows");
+}
 
 console.log(`Scaffold integrity OK (${required.length} required files).`);
