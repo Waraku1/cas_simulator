@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { access, copyFile, cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 const root = new URL("..", import.meta.url).pathname;
@@ -98,7 +99,7 @@ async function sha256(path) {
   return createHash("sha256").update(data).digest("hex");
 }
 
-async function buildPackage(manifestPathInput) {
+async function buildPackage(manifestPathInput, outputRootOverride = null) {
   const manifestPath = resolve(process.cwd(), manifestPathInput);
   const manifestDirectory = dirname(manifestPath);
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
@@ -132,7 +133,9 @@ async function buildPackage(manifestPathInput) {
     stdio: "inherit",
   });
 
-  const outputRoot = resolve(root, ".c5-evidence/cas-package", manifest.releaseSha);
+  const outputRoot = outputRootOverride
+    ? resolve(outputRootOverride)
+    : resolve(root, ".c5-evidence/cas-package", manifest.releaseSha);
   await rm(outputRoot, { recursive: true, force: true });
   await mkdir(outputRoot, { recursive: true });
 
@@ -218,8 +221,88 @@ async function buildPackage(manifestPathInput) {
     output: outputRoot,
     packagedFiles: packageFiles.length + 1,
   }, null, 2));
+  return outputRoot;
+}
+
+async function selfTestPackageGenerator() {
+  const checkoutSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  const tempRoot = await mkdtemp(join(tmpdir(), "cas-c5f-self-test-"));
+  try {
+    const c5eCases = Array.from({ length: 16 }, (_, index) => ({
+      id: `C5E-${String(index + 1).padStart(2, "0")}`,
+      status: "PASS",
+      notes: "Synthetic C5F generator self-test observation.",
+      evidenceRefs: ["self-test"],
+    }));
+    const c5eRecord = {
+      gate: "C5E_HUMAN_QA_VISUAL_SIGNOFF",
+      releaseSha: checkoutSha,
+      tester: "C5F CI self-test",
+      capturedAt: new Date().toISOString(),
+      environment: {
+        kind: "ci-self-test",
+        url: "https://example.invalid/self-test",
+        browser: "synthetic",
+        browserVersion: "1",
+        operatingSystem: process.platform,
+        device: "GitHub Actions synthetic evidence",
+      },
+      cases: c5eCases,
+      surfaceCaptures: {
+        auth: "self-test",
+        home: "self-test",
+        matchmaking: "self-test",
+        aircraftAssignment: "self-test",
+        countdown: "self-test",
+        activeHud: "self-test",
+        result: "self-test",
+        leaderboard: "self-test",
+      },
+      multiplayerCapture: "self-test",
+      overallNotes: "Synthetic record used only to exercise the C5F package generator in CI.",
+    };
+
+    await writeFile(join(tempRoot, "c5e.json"), JSON.stringify(c5eRecord, null, 2), "utf8");
+    await writeFile(join(tempRoot, "performance.json"), '{"ok":true,"synthetic":true}\n', "utf8");
+    await writeFile(join(tempRoot, "school.json"), '{"ok":true,"synthetic":true}\n', "utf8");
+
+    const manifest = {
+      gate: "C5F_CAS_EVIDENCE_PACKAGE",
+      releaseSha: checkoutSha,
+      releaseLabel: "C5F CI self-test",
+      preparedBy: "Project CI",
+      preparedAt: new Date().toISOString(),
+      repository: "Waraku1/cas_simulator",
+      evidence: {
+        c4dProduction: { status: "PASS", files: [], refs: ["self-test:c4d"], notes: "Synthetic." },
+        c5bPerformance: { status: "PASS", files: ["performance.json"], refs: [], notes: "Synthetic." },
+        c5cDeploy: { status: "PASS", files: [], refs: ["self-test:deploy"], notes: "Synthetic." },
+        c5cRollback: { status: "PASS", files: [], refs: ["self-test:rollback"], notes: "Synthetic." },
+        c5dSchool: { status: "PASS", files: ["school.json"], refs: [], notes: "Synthetic." },
+        c5eHumanQa: { status: "PASS", files: ["c5e.json"], refs: [], notes: "Synthetic." },
+        finalMainCi: { status: "PASS", files: [], refs: ["self-test:ci"], notes: "Synthetic." },
+      },
+      summary: "Synthetic manifest used only to exercise C5F generation, copying, indexing, and checksums.",
+    };
+    const manifestPath = join(tempRoot, "manifest.json");
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+
+    const outputRoot = await buildPackage(manifestPath, join(tempRoot, "package"));
+    await access(join(outputRoot, "PACKAGE_INDEX.md"));
+    const checksums = await readFile(join(outputRoot, "CHECKSUMS.sha256"), "utf8");
+    assert(checksums.includes("manifest.json"), "C5F self-test checksum file must cover manifest.json");
+    assert(checksums.includes("PACKAGE_INDEX.md"), "C5F self-test checksum file must cover PACKAGE_INDEX.md");
+    assert(checksums.includes("evidence/c5eHumanQa/01-c5e.json"), "C5F self-test must package C5E evidence");
+    console.log(JSON.stringify({ ok: true, gate: "C5F_PACKAGE_GENERATOR_SELF_TEST", releaseSha: checkoutSha }, null, 2));
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
 }
 
 const manifestFile = process.env.C5F_MANIFEST_FILE;
-if (manifestFile) await buildPackage(manifestFile);
-else await validateContract();
+if (manifestFile) {
+  await buildPackage(manifestFile);
+} else {
+  await validateContract();
+  if (process.env.C5F_SELF_TEST === "1") await selfTestPackageGenerator();
+}
