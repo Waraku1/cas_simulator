@@ -45,13 +45,21 @@ File paths are resolved relative to the manifest file. Directories are accepted 
 
 ## Contract verification
 
-CI runs:
+Locally, run:
 
 ```bash
 pnpm verify:c5f
 ```
 
-With no manifest environment variable, this validates only the committed C5F contract/template and required repository documentation.
+With no manifest environment variable, this validates the committed C5F contract/template and required repository documentation.
+
+Project CI additionally runs:
+
+```bash
+C5F_SELF_TEST=1 pnpm verify:c5f
+```
+
+The CI-only synthetic self-test creates temporary PASS-shaped evidence, validates it through the real C5E verifier, exercises the actual package copy/index/checksum generator, verifies representative generated paths, and then deletes the temporary files. Synthetic evidence is never written into the final `.c5-evidence/cas-package/<releaseSha>` path and never counts toward release closure.
 
 ## Build the final package
 
@@ -85,4 +93,4 @@ For final submission/archive, keep the package directory unchanged after checksu
 
 ## Closure boundary
 
-C5F implementation is closed when the contract/generator is merged and CI-protected. The C5F release gate is closed only when a complete package is successfully generated from the final release SHA after C4D and C5B-E execution evidence are all closed.
+C5F implementation is closed when the contract/generator and CI self-test are merged and CI-protected. The C5F release gate is closed only when a complete package is successfully generated from the final release SHA after C4D and C5B-E execution evidence are all closed.
