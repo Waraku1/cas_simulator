@@ -2,6 +2,11 @@ name: Deploy production
 
 on:
   workflow_dispatch:
+    inputs:
+      confirm_sha:
+        description: Paste the exact full commit SHA selected for this production deployment
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -21,10 +26,34 @@ jobs:
       PRODUCTION_URL: ${{ vars.PRODUCTION_URL || 'https://cas-flight-simulator.heleshiheiheleshihei.workers.dev' }}
       C4D_RATED_PRODUCTION_GATE: ${{ vars.C4D_RATED_PRODUCTION_GATE || 'disabled' }}
       C4D_ACCOUNTS_DB_NAME: cas-simulator-accounts
+      EVIDENCE_DIR: /tmp/c5-release-evidence
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Confirm immutable release SHA
+        shell: bash
+        env:
+          CONFIRM_SHA: ${{ inputs.confirm_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$CONFIRM_SHA" != "$GITHUB_SHA" ]; then
+            echo "Refusing production deploy: confirm_sha does not match the selected workflow commit."
+            echo "expected=$GITHUB_SHA"
+            echo "received=$CONFIRM_SHA"
+            exit 1
+          fi
+          mkdir -p "$EVIDENCE_DIR"
+          {
+            echo "action=deploy"
+            echo "git_sha=$GITHUB_SHA"
+            echo "git_ref=$GITHUB_REF"
+            echo "github_run_id=$GITHUB_RUN_ID"
+            echo "github_run_attempt=$GITHUB_RUN_ATTEMPT"
+            echo "c4d_rated_production_gate=$C4D_RATED_PRODUCTION_GATE"
+            echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$EVIDENCE_DIR/metadata.txt"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -41,6 +70,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Capture pre-deploy Cloudflare state
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler deployments status --json > "$EVIDENCE_DIR/deployments-before.json"
+          pnpm exec wrangler versions list --json > "$EVIDENCE_DIR/versions-before.json"
+
       - name: Validate scaffold
         run: pnpm validate:scaffold
 
@@ -52,25 +88,40 @@ jobs:
 
       - name: Deploy to Cloudflare Workers
         id: deploy
-        run: pnpm exec wrangler deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler deploy --message "C5 deploy git:${GITHUB_SHA} run:${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
 
       - name: Verify production root
-        run: curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$PRODUCTION_URL/" > /dev/null
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            -o /dev/null -w '%{http_code}\n' "$PRODUCTION_URL/" | tee "$EVIDENCE_DIR/root-http-status.txt"
 
       - name: Verify health endpoint
+        shell: bash
         run: |
+          set -euo pipefail
           HEALTH_JSON="$(curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$PRODUCTION_URL/api/health")"
-          echo "$HEALTH_JSON"
+          printf '%s\n' "$HEALTH_JSON" | tee "$EVIDENCE_DIR/health-after.json"
           HEALTH_JSON="$HEALTH_JSON" node -e 'const j = JSON.parse(process.env.HEALTH_JSON); if (j.ok !== true || j.stage !== "C0_FOUNDATION" || j.features?.multiplayer !== "C3_FOUNDATION") process.exit(1)'
 
       - name: Verify multiplayer WebSocket relay
-        run: node scripts/verify-production-multiplayer.mjs
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-production-multiplayer.mjs | tee "$EVIDENCE_DIR/multiplayer-smoke.txt"
 
       - name: Verify C4D production rated product
         if: env.C4D_RATED_PRODUCTION_GATE == 'enabled'
         env:
           C4D_SMOKE_RUN_ID: ${{ github.run_id }}${{ github.run_attempt }}
-        run: pnpm verify:production:c4d
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm verify:production:c4d | tee "$EVIDENCE_DIR/c4d-rated-smoke.txt"
 
       - name: Cleanup C4D production smoke accounts
         if: ${{ always() && env.C4D_RATED_PRODUCTION_GATE == 'enabled' && steps.deploy.outcome == 'success' }}
@@ -82,4 +133,22 @@ jobs:
           LOGIN_B="c4dpb_${SEED}"
           SQL="DELETE FROM rated_matches WHERE first_user_id IN (SELECT user_id FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B')) OR second_user_id IN (SELECT user_id FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B')); DELETE FROM sessions WHERE user_id IN (SELECT user_id FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B')); DELETE FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B');"
           pnpm exec wrangler d1 execute "$C4D_ACCOUNTS_DB_NAME" --remote --command "$SQL"
-          echo "C4D_PRODUCTION_SMOKE_CLEANUP=PASS"
+          echo "C4D_PRODUCTION_SMOKE_CLEANUP=PASS" | tee "$EVIDENCE_DIR/c4d-cleanup.txt"
+
+      - name: Capture post-deploy Cloudflare state
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "$EVIDENCE_DIR"
+          pnpm exec wrangler deployments status --json > "$EVIDENCE_DIR/deployments-after.json" 2> "$EVIDENCE_DIR/deployments-after.stderr.txt" || true
+          pnpm exec wrangler versions list --json > "$EVIDENCE_DIR/versions-after.json" 2> "$EVIDENCE_DIR/versions-after.stderr.txt" || true
+          echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$EVIDENCE_DIR/metadata.txt"
+
+      - name: Upload C5 deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c5-production-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/c5-release-evidence
+          if-no-files-found: error
+          retention-days: 30
