@@ -6,6 +6,11 @@ export const AUTH_CONTRACT = Object.freeze({
   maximumLoginIdLength: 24,
   minimumDisplayNameLength: 2,
   maximumDisplayNameLength: 24,
+  credentialVersion: "cas-auth-v1",
+  clientPbkdf2Iterations: 600_000,
+  serverPbkdf2Iterations: 100_000,
+  credentialByteLength: 32,
+  credentialBase64UrlLength: 43,
 });
 
 export const ACCOUNT_API = Object.freeze({
@@ -32,12 +37,12 @@ export type PublicUserProfile = Readonly<{
 export type RegisterRequest = Readonly<{
   loginId: string;
   displayName: string;
-  password: string;
+  credential: string;
 }>;
 
 export type LoginRequest = Readonly<{
   loginId: string;
-  password: string;
+  credential: string;
 }>;
 
 export type FixedAircraftRequest = Readonly<{
@@ -106,4 +111,9 @@ export function isValidDisplayName(value: string) {
 export function isValidPassword(value: string) {
   return value.length >= AUTH_CONTRACT.minimumPasswordLength
     && value.length <= AUTH_CONTRACT.maximumPasswordLength;
+}
+
+export function isValidCredential(value: string) {
+  return value.length === AUTH_CONTRACT.credentialBase64UrlLength
+    && /^[A-Za-z0-9_-]+$/.test(value);
 }
