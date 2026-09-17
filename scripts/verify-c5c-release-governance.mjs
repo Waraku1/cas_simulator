@@ -11,6 +11,7 @@ const runbook = read("docs/operations/C5C_DEPLOY_ROLLBACK.md");
 const releaseScaffold = read("scripts/verify-release-scaffold.mjs");
 const bindingValidator = read("scripts/verify-c4d-production-binding.mjs");
 const versionStateValidator = read("scripts/verify-c5c-version-state.mjs");
+const targetBindingValidator = read("scripts/verify-c5c-production-target.mjs");
 const pkg = JSON.parse(read("package.json"));
 
 const deployScaffoldIndex = deploy.indexOf("pnpm validate:scaffold");
@@ -27,6 +28,7 @@ const checks = [
   ["deploy records Cloudflare state before mutation", deploy.includes("deployments-before.json") && deploy.includes("versions-before.json")],
   ["deploy captures Wrangler structured output", deploy.includes("WRANGLER_OUTPUT_FILE_PATH") && deploy.includes("wrangler-output.ndjson")],
   ["deploy verifies structured version is 100 percent live", deploy.includes("C5C_VERSION_STATE_MODE: deploy") && deploy.includes("deployments-live.json") && deploy.includes("c5c-deploy-version-state.json")],
+  ["deploy binds production URL to Wrangler HTTP target", deploy.includes("C5C_TARGET_STATE_FILE") && deploy.includes("pnpm verify:c5c:target")],
   ["deploy tags Cloudflare history with Git SHA and purpose", deploy.includes('wrangler deploy --message "C5 deploy purpose:${{ inputs.deployment_purpose }} git:${GITHUB_SHA}')],
   ["deploy records Cloudflare state after mutation", deploy.includes("deployments-after.json") && deploy.includes("versions-after.json")],
   ["deploy retains smoke evidence", deploy.includes("multiplayer-smoke.txt") && deploy.includes("health-after.json")],
@@ -34,8 +36,10 @@ const checks = [
   ["deploy uploads purpose-labeled evidence artifact", deploy.includes("actions/upload-artifact@v4") && deploy.includes("c5-production-deploy-${{ inputs.deployment_purpose }}-")],
   ["package exposes C4D production binding verifier", pkg.scripts?.["verify:c4d:binding"]?.includes("verify-c4d-production-binding.mjs")],
   ["package exposes C5C Worker version-state verifier", pkg.scripts?.["verify:c5c:version-state"]?.includes("verify-c5c-version-state.mjs")],
+  ["package exposes C5C production-target verifier", pkg.scripts?.["verify:c5c:target"]?.includes("verify-c5c-production-target.mjs")],
   ["CI self-tests C4D production binding validator", ci.includes("C4D_BINDING_SELF_TEST=1 pnpm verify:c4d:binding")],
   ["CI self-tests C5C Worker version-state validator", ci.includes("C5C_VERSION_STATE_SELF_TEST=1 pnpm verify:c5c:version-state")],
+  ["CI self-tests C5C production-target validator", ci.includes("C5C_TARGET_SELF_TEST=1 pnpm verify:c5c:target")],
   ["rated release scaffold requires real D1 binding", releaseScaffold.includes('C4D_RATED_PRODUCTION_GATE === "enabled"') && releaseScaffold.includes('C4D_BINDING_REQUIRED: "1"') && releaseScaffold.includes("verify-c4d-production-binding.mjs")],
   ["deploy runs guarded scaffold before Worker mutation", deployScaffoldIndex >= 0 && deployMutationIndex > deployScaffoldIndex],
   ["binding validator freezes ACCOUNTS database identity", bindingValidator.includes('EXPECTED_BINDING = "ACCOUNTS"') && bindingValidator.includes('EXPECTED_DATABASE_NAME = "cas-simulator-accounts"')],
@@ -43,6 +47,8 @@ const checks = [
   ["version-state validator freezes deploy and rollback gates", versionStateValidator.includes("C5C_DEPLOY_VERSION_STATE") && versionStateValidator.includes("C5C_ROLLBACK_VERSION_STATE")],
   ["version-state validator requires sole 100 percent live version", versionStateValidator.includes("exactly one Worker version at 100% traffic") && versionStateValidator.includes("afterLiveVersionId")],
   ["version-state validator rejects no-op rollback", versionStateValidator.includes("Refusing no-op rollback") && versionStateValidator.includes("Rollback evidence is a no-op")],
+  ["production-target validator requires retained Wrangler targets", targetBindingValidator.includes("has no Wrangler deploy targets") && targetBindingValidator.includes("productionUrl is not represented by any Wrangler deploy HTTP target")],
+  ["production-target validator handles route paths", targetBindingValidator.includes("targetPath") && targetBindingValidator.includes("productionPath.startsWith")],
   ["rollback remains manual-only", rollback.includes("workflow_dispatch:") && !rollback.includes("pull_request:") && !rollback.includes("push:")],
   ["rollback requires exact SHA confirmation", rollback.includes("confirm_sha:") && rollback.includes('if [ "$CONFIRM_SHA" != "$GITHUB_SHA" ]')],
   ["rollback requires explicit version ID", rollback.includes("target_version_id:") && rollback.includes('TARGET_VERSION_ID: ${{ inputs.target_version_id }}')],
@@ -62,6 +68,7 @@ const checks = [
   ["runbook documents verified cleanup evidence", runbook.includes("c4d-cleanup-verification.json") && runbook.includes("zero-count")],
   ["runbook requires post-rollback same-SHA restoration", runbook.includes("restore_after_rollback") && runbook.includes("initial_release") && runbook.includes("same release SHA")],
   ["runbook documents version-state evidence and no-op rejection", runbook.includes("c5c-deploy-version-state.json") && runbook.includes("c5c-rollback-version-state.json") && runbook.includes("no-op rollback")],
+  ["runbook documents production URL target binding", runbook.includes("Wrangler deploy target") && runbook.includes("production URL")],
   ["runbook documents final production state closure", runbook.includes("final production state") && runbook.includes("restoration deploy")],
   ["runbook documents Durable Object rollback boundary", runbook.includes("Durable Object / binding constraint")],
 ];
