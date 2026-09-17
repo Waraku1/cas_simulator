@@ -58,23 +58,31 @@ jobs:
             exit 1
           fi
           echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
-          echo "C5_KDF_BENCHMARK_WORKER=$WORKER_URL"
 
-      - name: Warm benchmark Worker
+      - name: Wait for benchmark Worker
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --retry 5 --retry-delay 1 --retry-all-errors \
-            "${{ steps.deploy.outputs.worker_url }}/benchmark?iterations=100000" > /dev/null
+          for attempt in 1 2 3 4 5 6 7 8; do
+            status="$(curl --silent --output /tmp/kdf-warm.json --write-out '%{http_code}' \
+              "${{ steps.deploy.outputs.worker_url }}/benchmark?iterations=100000" || true)"
+            if [ "$status" = "200" ]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Benchmark Worker did not become ready." >&2
+          cat /tmp/kdf-warm.json 2>/dev/null || true
+          exit 1
 
-      - name: Measure PBKDF2 work factors
-        id: measure
+      - name: Measure PBKDF2 Free-plan execution boundary
         shell: bash
         run: |
           set -euo pipefail
           : > /tmp/kdf-results.ndjson
-          for iterations in 100000 200000 300000 400000 500000 600000; do
-            for sample in 1 2 3 4 5; do
+          ITERATIONS_LIST="100000 110000 120000 130000 140000 150000 160000 170000 180000 190000 200000"
+          for iterations in $ITERATIONS_LIST; do
+            for sample in 1 2 3 4 5 6 7 8 9 10; do
               BODY_FILE="/tmp/kdf-body-${iterations}-${sample}.txt"
               HTTP_CODE="$(curl --silent --show-error --output "$BODY_FILE" --write-out '%{http_code}' \
                 "${{ steps.deploy.outputs.worker_url }}/benchmark?iterations=${iterations}" || true)"
@@ -83,15 +91,17 @@ jobs:
           const iterations = Number(process.env.ITERATIONS);
           const sample = Number(process.env.SAMPLE);
           const status = Number(process.env.HTTP_CODE || 0);
+          const rawBody = process.env.BODY || "";
           let body = null;
-          try { body = JSON.parse(process.env.BODY || "null"); } catch { body = null; }
-          const success = status === 200 && body?.ok === true && Number.isFinite(body?.elapsedMs);
+          try { body = JSON.parse(rawBody || "null"); } catch { body = null; }
+          const success = status === 200 && body?.ok === true && body?.iterations === iterations;
+          const normalizedFailure = success ? null : rawBody.replace(/\s+/g, " ").slice(0, 180);
           process.stdout.write(JSON.stringify({
             iterations,
             sample,
             status,
             success,
-            elapsedMs: success ? body.elapsedMs : null,
+            failureBodyPrefix: normalizedFailure,
           }) + "\n");
           NODE
             done
@@ -102,26 +112,32 @@ jobs:
           const fs = require("node:fs");
           const rows = fs.readFileSync("/tmp/kdf-results.ndjson", "utf8")
             .trim().split(/\n+/).filter(Boolean).map(JSON.parse);
-          const summary = [];
-          for (const iterations of [100000, 200000, 300000, 400000, 500000, 600000]) {
+          const iterationsList = [100000,110000,120000,130000,140000,150000,160000,170000,180000,190000,200000];
+          const summary = iterationsList.map((iterations) => {
             const set = rows.filter((row) => row.iterations === iterations);
-            const good = set.filter((row) => row.success).map((row) => row.elapsedMs).sort((a, b) => a - b);
-            const median = good.length ? good[Math.floor(good.length / 2)] : null;
-            const max = good.length ? good[good.length - 1] : null;
-            summary.push({
+            return {
               iterations,
-              successes: good.length,
+              successes: set.filter((row) => row.success).length,
               attempts: set.length,
-              medianElapsedMs: median,
-              maxElapsedMs: max,
-              httpFailures: set.filter((row) => !row.success).map((row) => row.status),
-            });
-          }
-          fs.writeFileSync("/tmp/kdf-summary.json", JSON.stringify(summary, null, 2));
-          console.log(JSON.stringify({ gate: "C5_KDF_WORKERS_BENCHMARK", summary }, null, 2));
+              statuses: [...new Set(set.map((row) => row.status))],
+              failureBodyPrefixes: [...new Set(set.filter((row) => !row.success).map((row) => row.failureBodyPrefix).filter(Boolean))].slice(0, 3),
+            };
+          });
+          const fullyReliable = summary.filter((entry) => entry.successes === entry.attempts);
+          const highestFullyReliableIterations = fullyReliable.length
+            ? Math.max(...fullyReliable.map((entry) => entry.iterations))
+            : null;
+          const evidence = {
+            gate: "C5_KDF_WORKERS_FREE_BOUNDARY",
+            samplesPerWorkFactor: 10,
+            highestFullyReliableIterations,
+            summary,
+          };
+          fs.writeFileSync("/tmp/kdf-summary.json", JSON.stringify(evidence, null, 2));
+          console.log(JSON.stringify(evidence, null, 2));
           const baseline = summary.find((entry) => entry.iterations === 100000);
-          if (!baseline || baseline.successes < 3) {
-            throw new Error("Benchmark runtime is not stable enough even at 100k iterations.");
+          if (!baseline || baseline.successes !== baseline.attempts) {
+            throw new Error("100k PBKDF2 was not fully reliable across benchmark requests.");
           }
           NODE
 
