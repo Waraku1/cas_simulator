@@ -33,33 +33,48 @@ export default {
       );
     }
 
-    const passwordKey = await crypto.subtle.importKey(
-      "raw",
-      passwordBytes,
-      "PBKDF2",
-      false,
-      ["deriveBits"],
-    );
-    await crypto.subtle.deriveBits(
-      {
-        name: "PBKDF2",
-        hash: "SHA-256",
-        salt,
-        iterations,
-      },
-      passwordKey,
-      256,
-    );
+    try {
+      const passwordKey = await crypto.subtle.importKey(
+        "raw",
+        passwordBytes,
+        "PBKDF2",
+        false,
+        ["deriveBits"],
+      );
+      await crypto.subtle.deriveBits(
+        {
+          name: "PBKDF2",
+          hash: "SHA-256",
+          salt,
+          iterations,
+        },
+        passwordKey,
+        256,
+      );
 
-    return Response.json({
-      ok: true,
-      algorithm: "PBKDF2-HMAC-SHA256",
-      iterations,
-      derivedBits: 256,
-    }, {
-      headers: {
-        "cache-control": "no-store",
-      },
-    });
+      return Response.json({
+        ok: true,
+        algorithm: "PBKDF2-HMAC-SHA256",
+        iterations,
+        derivedBits: 256,
+      }, {
+        headers: {
+          "cache-control": "no-store",
+        },
+      });
+    } catch (error) {
+      return Response.json({
+        ok: false,
+        error: "pbkdf2_rejected",
+        iterations,
+        exceptionName: error instanceof Error ? error.name : "UnknownError",
+        exceptionMessage: error instanceof Error ? error.message : String(error),
+      }, {
+        status: 422,
+        headers: {
+          "cache-control": "no-store",
+        },
+      });
+    }
   },
 };
