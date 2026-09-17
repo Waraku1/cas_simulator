@@ -1,0 +1,36 @@
+.c5a-live-region {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.product-screen :is(button, input, a, [tabindex]):focus-visible,
+.product-match-shell :is(button, input, a, [tabindex]):focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 3px;
+}
+
+.segmented-control button[role="tab"][aria-selected="true"] {
+  text-decoration-thickness: 0.12em;
+  text-underline-offset: 0.22em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .product-screen *,
+  .product-screen *::before,
+  .product-screen *::after,
+  .product-match-shell *,
+  .product-match-shell *::before,
+  .product-match-shell *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

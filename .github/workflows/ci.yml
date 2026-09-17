@@ -42,6 +42,9 @@ jobs:
       - name: Verify C4C lifecycle contract
         run: pnpm verify:c4c:runtime
 
+      - name: Verify C5A hardening contract
+        run: pnpm verify:c5a
+
       - name: Production build
         run: pnpm build
 

@@ -17,6 +17,7 @@
     "verify:school:c4d:ranked": "SCHOOL_URL=http://127.0.0.1:5173 node scripts/verify-school-rated-product.mjs",
     "verify:production:c4d": "node scripts/verify-production-rated-product.mjs",
     "verify:c4c:runtime": "node scripts/verify-c4c-runtime.mjs",
+    "verify:c5a": "node scripts/verify-c5a-hardening.mjs",
     "prebuild": "pnpm sync:cesium",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
