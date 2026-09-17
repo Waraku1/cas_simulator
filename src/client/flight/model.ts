@@ -3,7 +3,6 @@ import { THEATER } from "../../shared/config";
 export type FlightInput = Readonly<{
   pitch: number;
   roll: number;
-  yaw: number;
   throttle: number;
 }>;
 
@@ -62,7 +61,6 @@ const LEVEL_CAPTURE_DEG = 5;
 const LEVEL_CAPTURE_RATE_DEG_S = 18;
 const LEVEL_CAPTURE_RATE_THRESHOLD_DEG_S = 1.5;
 
-const YAW_TEST_RATE_DEG_S = 12;
 const THROTTLE_RATE_PER_S = 0.42;
 const EPSILON = 1e-9;
 
@@ -243,14 +241,13 @@ export function integrateFlightState(
   const dt = clamp(Number.isFinite(deltaSeconds) ? deltaSeconds : 0, 0, 0.05);
   const pitchInput = clamp(input.pitch, -1, 1);
   const rollInput = clamp(input.roll, -1, 1);
-  const yawInput = clamp(input.yaw, -1, 1);
   const throttleInput = clamp(input.throttle, -1, 1);
 
   const throttle = clamp(previous.throttle + throttleInput * THROTTLE_RATE_PER_S * dt, 0, 1);
   const targetSpeedMps = MIN_SPEED_MPS + (MAX_SPEED_MPS - MIN_SPEED_MPS) * throttle;
   const speedMps = approach(previous.speedMps, targetSpeedMps, SPEED_RESPONSE_MPS2 * dt);
 
-  // Keyboard input now commands angular acceleration rather than instantaneous
+  // Keyboard input commands angular acceleration rather than instantaneous
   // angular velocity. Holding a key builds pitch/roll rate; releasing it applies
   // a stronger braking acceleration so the rate falls rapidly but continuously.
   const pitchRateDegS = updateAngularRate(
@@ -270,9 +267,11 @@ export function integrateFlightState(
     dt,
   );
 
-  // Apply rotations in body coordinates. Because orientation maps body -> local
-  // ENU, post-multiplication keeps W/S on the aircraft lateral axis and A/D on
-  // its forward axis at every bank attitude.
+  // Apply release controls in body coordinates. Because orientation maps body
+  // -> local ENU, post-multiplication keeps W/S on the aircraft lateral axis
+  // and A/D on its forward axis at every bank attitude. There is no direct-yaw
+  // input in the release control contract; heading changes through the banked
+  // flight path rather than a body-Z test rotation.
   const pitchDelta = axisAngleQuaternion(
     [0, 1, 0],
     radians(-pitchRateDegS * dt),
@@ -281,16 +280,10 @@ export function integrateFlightState(
     [1, 0, 0],
     radians(rollRateDegS * dt),
   );
-  // Temporary C1 instrumentation only. E is positive input but right-yaw is a
-  // negative body-Z rotation with this +Y-left body frame.
-  const yawTestDelta = axisAngleQuaternion(
-    [0, 0, 1],
-    radians(-yawInput * YAW_TEST_RATE_DEG_S * dt),
-  );
 
   let orientation = multiplyQuaternion(
-    multiplyQuaternion(multiplyQuaternion(previous.orientation, pitchDelta), rollDelta),
-    yawTestDelta,
+    multiplyQuaternion(previous.orientation, pitchDelta),
+    rollDelta,
   );
 
   // Near level, and only after the commanded angular rate has essentially
