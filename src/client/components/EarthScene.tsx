@@ -42,8 +42,6 @@ const CONTROLLED_KEYS = new Set([
   "KeyS",
   "KeyA",
   "KeyD",
-  "KeyQ",
-  "KeyE",
   "ArrowUp",
   "ArrowDown",
 ]);
@@ -465,7 +463,6 @@ export function EarthScene({
         const input: FlightInput = {
           pitch: keyAxis(pressedKeys, "KeyW", "KeyS"),
           roll: keyAxis(pressedKeys, "KeyD", "KeyA"),
-          yaw: keyAxis(pressedKeys, "KeyE", "KeyQ"),
           throttle: keyAxis(pressedKeys, "ArrowUp", "ArrowDown"),
         };
         flightState = integrateFlightState(flightState, input, deltaSeconds);
