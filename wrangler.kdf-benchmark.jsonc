@@ -1,0 +1,8 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cas-kdf-benchmark-placeholder",
+  "main": "scripts/cloudflare-kdf-benchmark-worker.mjs",
+  "compatibility_date": "2026-09-17",
+  "workers_dev": true,
+  "preview_urls": false
+}
