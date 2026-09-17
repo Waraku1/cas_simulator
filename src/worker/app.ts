@@ -4,6 +4,11 @@ import coreWorker, { MultiplayerRoom, RankedMatchmaker } from "./index";
 import { D1AuthRepository, type D1DatabaseLike } from "./auth/repository";
 import { authenticateRequest, handleAccountApi } from "./auth/service";
 import { RankedMatch } from "./ranked-match-integrity";
+import {
+  crossOriginRequestRejected,
+  isSameOriginBrowserRequest,
+  withSecurityHeaders,
+} from "./security";
 
 export { MultiplayerRoom, RankedMatch, RankedMatchmaker };
 
@@ -23,6 +28,7 @@ const accountPaths = new Set<string>([
 const RANKED_MATCH_SOCKET_ROUTE = /^\/api\/matches\/[0-9a-f-]{36}\/ws$/i;
 const AUTHENTICATED_USER_HEADER = "x-cas-user-id";
 const FIXED_AIRCRAFT_HEADER = "x-cas-fixed-aircraft-id";
+const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
 function storageUnavailable() {
   return Response.json(
@@ -43,31 +49,36 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
     const accounts = env.ACCOUNTS ? new D1AuthRepository(env.ACCOUNTS) : null;
+    const rankedTransport = path === MATCHMAKING_PATH || RANKED_MATCH_SOCKET_ROUTE.test(path);
+    const accountMutation = accountPaths.has(path) && !SAFE_METHODS.has(request.method);
+
+    if ((accountMutation || rankedTransport) && !isSameOriginBrowserRequest(request)) {
+      return withSecurityHeaders(crossOriginRequestRejected());
+    }
 
     if (accountPaths.has(path)) {
-      if (!accounts) return storageUnavailable();
+      if (!accounts) return withSecurityHeaders(storageUnavailable());
       const accountResponse = await handleAccountApi(
         request,
         accounts,
         url.protocol === "https:",
       );
-      if (accountResponse) return accountResponse;
+      if (accountResponse) return withSecurityHeaders(accountResponse);
     }
 
-    const rankedTransport = path === MATCHMAKING_PATH || RANKED_MATCH_SOCKET_ROUTE.test(path);
     if (rankedTransport) {
-      if (!accounts) return storageUnavailable();
+      if (!accounts) return withSecurityHeaders(storageUnavailable());
       const user = await authenticateRequest(request, accounts);
-      if (!user) return authenticationRequired();
+      if (!user) return withSecurityHeaders(authenticationRequired());
 
       const headers = new Headers(request.headers);
       // Never trust identity-like headers supplied by the public client.
       headers.set(AUTHENTICATED_USER_HEADER, user.userId);
       headers.set(FIXED_AIRCRAFT_HEADER, user.fixedAircraftId ?? "");
       const authenticatedRequest = new Request(request, { headers });
-      return coreWorker.fetch(authenticatedRequest, env);
+      return withSecurityHeaders(await coreWorker.fetch(authenticatedRequest, env));
     }
 
-    return coreWorker.fetch(request, env);
+    return withSecurityHeaders(await coreWorker.fetch(request, env));
   },
 };
