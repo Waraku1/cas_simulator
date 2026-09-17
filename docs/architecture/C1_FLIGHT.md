@@ -21,9 +21,10 @@ Body axes are `+X forward`, `+Y left`, `+Z up`. Local geographic axes are `+X ea
 - `W / S`: body-axis pitch command.
 - `A / D`: body-axis roll command.
 - `ArrowUp / ArrowDown`: throttle.
-- `Q / E`: experimental direct-yaw instrumentation retained only during development; mandatory removal before final release is tracked by Issue #7.
 
 Pitch and roll angle authority are unrestricted. The orientation quaternion is normalized after updates, permitting full loops and continuous rolls. Pitch acts about the aircraft's own lateral axis, so its earth-relative effect naturally depends on bank attitude.
+
+During C1 development, `Q / E` existed as temporary direct-yaw instrumentation for isolating heading and camera behavior. C5 release integration removes that path completely; release heading change is bank-mediated.
 
 ## Accepted control response
 
@@ -39,7 +40,19 @@ Roll:
 - acceleration while held: 160 deg/s²;
 - release deceleration: 360 deg/s².
 
-C1.6 finalized near-level capture. Pitch and bank independently return toward exactly 0° only when the displayed residual angle is within ±5°, the relevant input is released, and the relevant angular rate is at or below 1.5 deg/s. Capture rate is 18 deg/s. Outside ±5° there is no auto-level authority.
+C1.6 established near-level capture. The C5 release refinement narrows the capture window to ±3°: pitch and bank independently return toward exactly 0° only when the displayed residual angle is within ±3°, the relevant input is released, and the relevant angular rate is at or below 1.5 deg/s. Capture rate remains 18 deg/s. Outside ±3° there is no auto-level authority.
+
+## C5 release turn integration
+
+Release turning is generated from bank rather than a direct yaw input.
+
+- Positive/right bank generates a positive/right heading change; negative/left bank generates the opposite change.
+- Turn authority is bounded to a maximum 3.5 deg/s.
+- The response uses `sin(bank)` so it remains continuous and bounded through unrestricted rolls, is zero when wings-level, and returns to zero when fully inverted rather than diverging near 90° bank.
+- Turn authority is multiplied by the horizontal component implied by pitch, fading toward zero near vertical flight where geographic heading becomes poorly defined.
+- The heading turn is applied as a local/world-up quaternion rotation to the complete attitude, rather than as a pilot-commanded body-axis yaw.
+
+This is intentionally a gentle game-flight coupling, not a claim of real-aircraft coordinated-turn performance.
 
 ## Rendering alignment
 
@@ -56,6 +69,6 @@ C1.6 final implementation:
 - `pnpm check`: PASS;
 - `pnpm build`: PASS.
 
-Localhost visual/interaction QA was accepted on 2026-09-16. The accepted baseline includes corrected forward direction, unrestricted pitch/roll, bank-dependent body-axis pitch behavior, progressive control response, softer ±5° level capture, readable HUD, and acceptable control sensitivity.
+Localhost visual/interaction QA was accepted on 2026-09-16. The accepted baseline includes corrected forward direction, unrestricted pitch/roll, bank-dependent body-axis pitch behavior, progressive control response, readable HUD, and acceptable control sensitivity.
 
-C1 is frozen except for later-gate integration requirements and the explicitly deferred C5 removal of experimental direct yaw.
+C1 remains closed. The bank-mediated heading turn, ±3° capture refinement, and removal of direct yaw are C5 release integration changes layered on the accepted C1 architecture and must pass the C5 release verification gate before merge to the release baseline.

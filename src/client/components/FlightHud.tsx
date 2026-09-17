@@ -89,8 +89,7 @@ export function FlightHud({ telemetry }: { telemetry: FlightTelemetry }) {
 
       <section className="flight-hud__controls" aria-label="Flight controls">
         <span className="control-chip"><kbd>W</kbd><kbd>S</kbd> PITCH</span>
-        <span className="control-chip"><kbd>A</kbd><kbd>D</kbd> BANK</span>
-        <span className="control-chip"><kbd>Q</kbd><kbd>E</kbd> YAW TEST</span>
+        <span className="control-chip"><kbd>A</kbd><kbd>D</kbd> BANK / TURN</span>
         <span className="control-chip"><kbd>↑</kbd><kbd>↓</kbd> THROTTLE</span>
       </section>
 
