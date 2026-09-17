@@ -6,6 +6,7 @@ import {
   type LeaderboardResponse,
   type PublicUserProfile,
 } from "../../shared/auth";
+import { deriveAuthCredential } from "../../shared/auth-credential";
 
 export type AccountStatus = "loading" | "anonymous" | "authenticated" | "submitting" | "error";
 
@@ -57,9 +58,14 @@ export function useAccount() {
     setStatus("submitting");
     setErrorMessage("");
     try {
+      const credential = await deriveAuthCredential(input.loginId, input.password);
       const result = await authFetch(mode === "login" ? ACCOUNT_API.login : ACCOUNT_API.register, {
         method: "POST",
-        body: JSON.stringify(input),
+        body: JSON.stringify({
+          loginId: input.loginId,
+          ...(mode === "register" ? { displayName: input.displayName } : {}),
+          credential,
+        }),
       });
       if (!result.ok) {
         setUser(null);
