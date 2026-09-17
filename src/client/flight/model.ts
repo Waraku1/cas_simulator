@@ -3,7 +3,6 @@ import { THEATER } from "../../shared/config";
 export type FlightInput = Readonly<{
   pitch: number;
   roll: number;
-  yaw: number;
   throttle: number;
 }>;
 
@@ -58,11 +57,17 @@ const PITCH_ACCEL_DEG_S2 = 70;
 const ROLL_ACCEL_DEG_S2 = 160;
 const PITCH_RELEASE_DECEL_DEG_S2 = 180;
 const ROLL_RELEASE_DECEL_DEG_S2 = 360;
-const LEVEL_CAPTURE_DEG = 5;
+const LEVEL_CAPTURE_DEG = 3;
 const LEVEL_CAPTURE_RATE_DEG_S = 18;
 const LEVEL_CAPTURE_RATE_THRESHOLD_DEG_S = 1.5;
 
-const YAW_TEST_RATE_DEG_S = 12;
+// Release turn coupling. Bank produces a deliberately gentle, bounded heading
+// change without exposing a direct yaw control. sin(bank) keeps the response
+// smooth through continuous rolls and naturally returns turn authority to zero
+// when the aircraft is wings-level or fully inverted. Near vertical flight,
+// heading authority fades out because geographic heading is poorly defined.
+const BANK_TURN_MAX_RATE_DEG_S = 3.5;
+
 const THROTTLE_RATE_PER_S = 0.42;
 const EPSILON = 1e-9;
 
@@ -221,6 +226,11 @@ function correctionTowardZero(angleDeg: number, dt: number) {
   return -Math.sign(angleDeg) * step;
 }
 
+function bankDrivenHeadingRateDegS(bankDeg: number, pitchDeg: number) {
+  const horizontalAuthority = Math.max(0, Math.cos(radians(pitchDeg)));
+  return Math.sin(radians(bankDeg)) * BANK_TURN_MAX_RATE_DEG_S * horizontalAuthority;
+}
+
 export function createInitialFlightState(): FlightState {
   return {
     latitudeDeg: THEATER.centerLatitudeDeg,
@@ -243,7 +253,6 @@ export function integrateFlightState(
   const dt = clamp(Number.isFinite(deltaSeconds) ? deltaSeconds : 0, 0, 0.05);
   const pitchInput = clamp(input.pitch, -1, 1);
   const rollInput = clamp(input.roll, -1, 1);
-  const yawInput = clamp(input.yaw, -1, 1);
   const throttleInput = clamp(input.throttle, -1, 1);
 
   const throttle = clamp(previous.throttle + throttleInput * THROTTLE_RATE_PER_S * dt, 0, 1);
@@ -270,9 +279,9 @@ export function integrateFlightState(
     dt,
   );
 
-  // Apply rotations in body coordinates. Because orientation maps body -> local
-  // ENU, post-multiplication keeps W/S on the aircraft lateral axis and A/D on
-  // its forward axis at every bank attitude.
+  // Apply commanded rotations in body coordinates. Because orientation maps
+  // body -> local ENU, post-multiplication keeps W/S on the aircraft lateral
+  // axis and A/D on its forward axis at every bank attitude.
   const pitchDelta = axisAngleQuaternion(
     [0, 1, 0],
     radians(-pitchRateDegS * dt),
@@ -281,22 +290,15 @@ export function integrateFlightState(
     [1, 0, 0],
     radians(rollRateDegS * dt),
   );
-  // Temporary C1 instrumentation only. E is positive input but right-yaw is a
-  // negative body-Z rotation with this +Y-left body frame.
-  const yawTestDelta = axisAngleQuaternion(
-    [0, 0, 1],
-    radians(-yawInput * YAW_TEST_RATE_DEG_S * dt),
-  );
 
   let orientation = multiplyQuaternion(
-    multiplyQuaternion(multiplyQuaternion(previous.orientation, pitchDelta), rollDelta),
-    yawTestDelta,
+    multiplyQuaternion(previous.orientation, pitchDelta),
+    rollDelta,
   );
 
   // Near level, and only after the commanded angular rate has essentially
-  // stopped, capture small pitch/bank errors back to exactly 0°. Outside ±5°
-  // there is no auto-level authority, preserving the unrestricted attitude
-  // envelope introduced in C1.4.
+  // stopped, capture small pitch/bank errors back to exactly 0°. Outside ±3°
+  // there is no auto-level authority, preserving unrestricted attitude.
   let attitude = attitudeFromOrientation(orientation);
   if (
     Math.abs(pitchInput) <= 0.01
@@ -323,6 +325,19 @@ export function integrateFlightState(
         axisAngleQuaternion([1, 0, 0], radians(bankCorrectionDeg)),
       );
     }
+  }
+
+  // Release heading behavior is bank-mediated rather than directly commanded.
+  // Pre-multiplication applies the bounded turn about local/world up, rotating
+  // the complete aircraft attitude while preserving the current body attitude.
+  attitude = attitudeFromOrientation(orientation);
+  const headingTurnRateDegS = bankDrivenHeadingRateDegS(attitude.bankDeg, attitude.pitchDeg);
+  if (Math.abs(headingTurnRateDegS) > EPSILON) {
+    const headingTurnDelta = axisAngleQuaternion(
+      [0, 0, 1],
+      radians(-headingTurnRateDegS * dt),
+    );
+    orientation = multiplyQuaternion(headingTurnDelta, orientation);
   }
 
   const forward = rotateVector(orientation, [1, 0, 0]);
