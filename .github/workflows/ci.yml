@@ -54,6 +54,9 @@ jobs:
       - name: Verify C5E human QA contract
         run: pnpm verify:c5e
 
+      - name: Verify C5F evidence package contract and generator
+        run: C5F_SELF_TEST=1 pnpm verify:c5f
+
       - name: Production build
         run: pnpm build
 

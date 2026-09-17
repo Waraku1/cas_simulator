@@ -1,0 +1,18 @@
+{
+  "gate": "C5F_CAS_EVIDENCE_PACKAGE",
+  "releaseSha": "",
+  "releaseLabel": "",
+  "preparedBy": "",
+  "preparedAt": "",
+  "repository": "Waraku1/cas_simulator",
+  "evidence": {
+    "c4dProduction": { "status": "PENDING", "files": [], "refs": [], "notes": "" },
+    "c5bPerformance": { "status": "PENDING", "files": [], "refs": [], "notes": "" },
+    "c5cDeploy": { "status": "PENDING", "files": [], "refs": [], "notes": "" },
+    "c5cRollback": { "status": "PENDING", "files": [], "refs": [], "notes": "" },
+    "c5dSchool": { "status": "PENDING", "files": [], "refs": [], "notes": "" },
+    "c5eHumanQa": { "status": "PENDING", "files": [], "refs": [], "notes": "" },
+    "finalMainCi": { "status": "PENDING", "files": [], "refs": [], "notes": "" }
+  },
+  "summary": ""
+}
