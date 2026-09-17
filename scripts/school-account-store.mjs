@@ -3,7 +3,7 @@ import aircraftCatalog from "../src/shared/aircraft-catalog.json" with { type: "
 
 const SESSION_COOKIE = "cas_session";
 const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1_000;
-const PASSWORD_ITERATIONS = 120_000;
+const PASSWORD_ITERATIONS = 600_000;
 const AIRCRAFT_IDS = new Set(aircraftCatalog.map((aircraft) => aircraft.aircraftId));
 
 function base64url(buffer) {
