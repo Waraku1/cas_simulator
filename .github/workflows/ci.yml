@@ -51,6 +51,12 @@ jobs:
       - name: Verify C5B performance evidence contract
         run: pnpm verify:c5b
 
+      - name: Verify C5B structured evidence validator
+        run: C5B_EVIDENCE_SELF_TEST=1 pnpm verify:c5b:evidence
+
+      - name: Verify C5D managed Mac evidence validator
+        run: C5D_EVIDENCE_SELF_TEST=1 pnpm verify:c5d:evidence
+
       - name: Verify C5C release governance contract
         run: pnpm verify:c5c
 

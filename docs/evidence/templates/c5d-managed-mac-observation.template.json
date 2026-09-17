@@ -1,0 +1,19 @@
+{
+  "gate": "C5D_MANAGED_MAC_OBSERVATION",
+  "releaseSha": "",
+  "tester": "",
+  "capturedAt": "",
+  "browser": "",
+  "browserVersion": "",
+  "operatingSystem": "",
+  "device": "",
+  "observations": {
+    "devSchoolStarted": false,
+    "browserOpenedLocalhost": false,
+    "fiveAutomatedGatesPassed": false,
+    "noSecurityBypassUsed": false,
+    "flightInputUsable": false,
+    "productUiUsable": false
+  },
+  "notes": ""
+}
