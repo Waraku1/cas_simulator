@@ -24,6 +24,7 @@
     "verify:c5b": "node scripts/verify-c5b-performance.mjs",
     "verify:c5b:evidence": "node scripts/verify-c5b-evidence.mjs",
     "verify:c5c": "node scripts/verify-c5c-release-governance.mjs",
+    "verify:c5c:version-state": "node scripts/verify-c5c-version-state.mjs",
     "verify:c5e": "node scripts/verify-c5e-human-qa.mjs",
     "verify:c5f": "node scripts/verify-c5f-entrypoint.mjs",
     "prebuild": "pnpm sync:cesium",
