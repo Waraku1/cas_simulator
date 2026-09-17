@@ -123,7 +123,7 @@ jobs:
           set -euo pipefail
           pnpm verify:production:c4d | tee "$EVIDENCE_DIR/c4d-rated-smoke.txt"
 
-      - name: Cleanup C4D production smoke accounts
+      - name: Cleanup and verify C4D production smoke accounts
         if: ${{ always() && env.C4D_RATED_PRODUCTION_GATE == 'enabled' && steps.deploy.outcome == 'success' }}
         shell: bash
         run: |
@@ -131,8 +131,42 @@ jobs:
           SEED="$(printf '%s' '${{ github.run_id }}${{ github.run_attempt }}' | tr -cd '[:alnum:]' | tail -c 10)"
           LOGIN_A="c4dpa_${SEED}"
           LOGIN_B="c4dpb_${SEED}"
-          SQL="DELETE FROM rated_matches WHERE first_user_id IN (SELECT user_id FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B')) OR second_user_id IN (SELECT user_id FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B')); DELETE FROM sessions WHERE user_id IN (SELECT user_id FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B')); DELETE FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B');"
+
+          LOOKUP_JSON="$(pnpm exec wrangler d1 execute "$C4D_ACCOUNTS_DB_NAME" --remote --json --command "SELECT user_id FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B') ORDER BY login_id;")"
+          SQL_IDS="$(LOOKUP_JSON="$LOOKUP_JSON" node <<'NODE'
+          const payload = JSON.parse(process.env.LOOKUP_JSON || "[]");
+          const rows = Array.isArray(payload)
+            ? payload.flatMap((entry) => entry?.results ?? [])
+            : (payload?.results ?? []);
+          const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
+          const ids = rows.map((row) => row?.user_id).filter(Boolean);
+          process.stdout.write(ids.length > 0 ? ids.map(quote).join(",") : "''");
+          NODE
+          )"
+
+          SQL="DELETE FROM rated_matches WHERE first_user_id IN ($SQL_IDS) OR second_user_id IN ($SQL_IDS); DELETE FROM sessions WHERE user_id IN ($SQL_IDS); DELETE FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B');"
           pnpm exec wrangler d1 execute "$C4D_ACCOUNTS_DB_NAME" --remote --command "$SQL"
+
+          VERIFY_SQL="SELECT (SELECT COUNT(*) FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B')) AS users_remaining, (SELECT COUNT(*) FROM sessions WHERE user_id IN ($SQL_IDS)) AS sessions_remaining, (SELECT COUNT(*) FROM rated_matches WHERE first_user_id IN ($SQL_IDS) OR second_user_id IN ($SQL_IDS)) AS rated_matches_remaining;"
+          VERIFY_JSON="$(pnpm exec wrangler d1 execute "$C4D_ACCOUNTS_DB_NAME" --remote --json --command "$VERIFY_SQL")"
+          printf '%s\n' "$VERIFY_JSON" > "$EVIDENCE_DIR/c4d-cleanup-verification.json"
+          VERIFY_JSON="$VERIFY_JSON" node <<'NODE'
+          const payload = JSON.parse(process.env.VERIFY_JSON || "[]");
+          const rows = Array.isArray(payload)
+            ? payload.flatMap((entry) => entry?.results ?? [])
+            : (payload?.results ?? []);
+          const row = rows[0] ?? {};
+          const counts = {
+            users: Number(row.users_remaining),
+            sessions: Number(row.sessions_remaining),
+            ratedMatches: Number(row.rated_matches_remaining),
+          };
+          if (Object.values(counts).some((value) => !Number.isFinite(value) || value !== 0)) {
+            console.error("C4D smoke cleanup verification failed", counts);
+            process.exit(1);
+          }
+          console.log("C4D_SMOKE_CLEANUP_ZERO_COUNTS=PASS");
+          NODE
           echo "C4D_PRODUCTION_SMOKE_CLEANUP=PASS" | tee "$EVIDENCE_DIR/c4d-cleanup.txt"
 
       - name: Capture post-deploy Cloudflare state
