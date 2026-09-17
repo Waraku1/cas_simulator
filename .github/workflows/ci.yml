@@ -94,6 +94,24 @@ jobs:
           cat /tmp/school-health.json
           C5D_EVIDENCE_DIR=/tmp/c5d-school-regression pnpm verify:c5d:school
 
+      - name: Record CI lineage metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          GIT_SHA="$GITHUB_SHA" GIT_REF="$GITHUB_REF" EVENT_NAME="$GITHUB_EVENT_NAME" RUN_ID="$GITHUB_RUN_ID" RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" node <<'NODE'
+          const fs = require("node:fs");
+          const value = {
+            gate: "C5_FINAL_MAIN_CI",
+            gitSha: process.env.GIT_SHA,
+            gitRef: process.env.GIT_REF,
+            event: process.env.EVENT_NAME,
+            githubRunId: process.env.RUN_ID,
+            githubRunAttempt: process.env.RUN_ATTEMPT,
+            verificationStepsPassed: true,
+          };
+          fs.writeFileSync("/tmp/c5-final-ci.json", `${JSON.stringify(value, null, 2)}\n`);
+          NODE
+
       - name: Upload C5D school regression evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -103,5 +121,6 @@ jobs:
             /tmp/c5d-school-regression
             /tmp/school-health.json
             /tmp/school-dev.log
+            /tmp/c5-final-ci.json
           if-no-files-found: warn
           retention-days: 30
