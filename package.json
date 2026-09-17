@@ -21,6 +21,7 @@
     "verify:c5a": "node scripts/verify-c5a-hardening.mjs",
     "verify:c5b": "node scripts/verify-c5b-performance.mjs",
     "verify:c5c": "node scripts/verify-c5c-release-governance.mjs",
+    "verify:c5e": "node scripts/verify-c5e-human-qa.mjs",
     "prebuild": "pnpm sync:cesium",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
