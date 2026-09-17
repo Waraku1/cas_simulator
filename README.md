@@ -67,10 +67,11 @@ Two independent browser contexts on the same Mac can use the local room backend.
 
 ## Flight controls
 
-- `W / S`: pitch
-- `A / D`: roll/bank
+- `W / S`: body-axis pitch
+- `A / D`: body-axis roll/bank; bank generates the release heading turn automatically
 - `ArrowUp / ArrowDown`: throttle
-- `Q / E`: temporary `YAW TEST` development instrumentation; removal before release is tracked by Issue #7
+
+There is no direct-yaw keyboard control in the release path. Heading changes are bank-mediated and deliberately bounded for controllability. Small residual pitch/bank angles are captured back to 0° only inside ±3° after the corresponding angular rate has nearly stopped.
 
 The aircraft is fictional and uses game-oriented kinematics rather than real-aircraft performance data.
 
