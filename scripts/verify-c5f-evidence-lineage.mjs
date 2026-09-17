@@ -1,11 +1,19 @@
 import { execFileSync } from "node:child_process";
-import { access, mkdtemp, readFile, readdir, rm, stat, writeFile, mkdir } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 const root = new URL("..", import.meta.url).pathname;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const TARGET_GATES = ["c4dProduction", "c5cDeploy", "c5cRollback", "finalMainCi"];
+const REQUIRED_GATES = [
+  "c4dProduction",
+  "c5bPerformance",
+  "c5cDeploy",
+  "c5cRollback",
+  "c5dSchool",
+  "c5eHumanQa",
+  "finalMainCi",
+];
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -55,6 +63,20 @@ function uniqueFile(files, name, gate) {
   return matches[0];
 }
 
+async function uniqueJsonByGate(files, expectedGate, label) {
+  const matches = [];
+  for (const path of files.filter((entry) => entry.endsWith(".json"))) {
+    try {
+      const value = JSON.parse(await readFile(path, "utf8"));
+      if (value?.gate === expectedGate) matches.push({ path, value });
+    } catch {
+      // Non-JSON or unrelated JSON evidence is ignored here and may still be packaged.
+    }
+  }
+  assert(matches.length === 1, `${label} must contain exactly one JSON record with gate=${expectedGate}; found ${matches.length}`);
+  return matches[0];
+}
+
 function d1Rows(payload) {
   if (Array.isArray(payload)) return payload.flatMap((entry) => entry?.results ?? []);
   return payload?.results ?? [];
@@ -88,6 +110,14 @@ async function currentAccountsDatabaseId() {
   return match[1].toLowerCase();
 }
 
+function runValidator(script, env) {
+  execFileSync(process.execPath, [resolve(root, script)], {
+    cwd: root,
+    env: { ...process.env, ...env },
+    stdio: "inherit",
+  });
+}
+
 async function validateLineage(manifestPathInput, bindingIdOverride = null) {
   const manifestPath = resolve(process.cwd(), manifestPathInput);
   const manifestDirectory = dirname(manifestPath);
@@ -96,7 +126,7 @@ async function validateLineage(manifestPathInput, bindingIdOverride = null) {
   assert(manifest.evidence && typeof manifest.evidence === "object", "C5F lineage requires evidence object");
 
   const byGate = {};
-  for (const gate of TARGET_GATES) byGate[gate] = await evidenceFiles(manifestDirectory, manifest.evidence[gate], gate);
+  for (const gate of REQUIRED_GATES) byGate[gate] = await evidenceFiles(manifestDirectory, manifest.evidence[gate], gate);
 
   const provision = JSON.parse(await readFile(uniqueFile(byGate.c4dProduction, "c4d-provision.json", "c4dProduction"), "utf8"));
   assert(provision.gate === "C4D_PRODUCTION_D1", "c4dProduction has unexpected provisioning gate identifier");
@@ -107,6 +137,13 @@ async function validateLineage(manifestPathInput, bindingIdOverride = null) {
   assert(UUID_PATTERN.test(provision.databaseId ?? ""), "c4dProduction databaseId is not a valid D1 UUID");
   const boundDatabaseId = (bindingIdOverride ?? await currentAccountsDatabaseId()).toLowerCase();
   assert(provision.databaseId.toLowerCase() === boundDatabaseId, "C4D provisioned database ID does not match final ACCOUNTS binding");
+
+  const c5b = await uniqueJsonByGate(byGate.c5bPerformance, "C5B_PERFORMANCE_EVIDENCE", "c5bPerformance");
+  runValidator("scripts/verify-c5b-evidence.mjs", {
+    C5B_EVIDENCE_FILE: c5b.path,
+    C5_EXPECTED_RELEASE_SHA: manifest.releaseSha,
+    C5B_EVIDENCE_SELF_TEST: "0",
+  });
 
   const deployMetadata = parseKeyValue(await readFile(uniqueFile(byGate.c5cDeploy, "metadata.txt", "c5cDeploy"), "utf8"));
   assert(deployMetadata.action === "deploy", "c5cDeploy metadata action must be deploy");
@@ -123,6 +160,18 @@ async function validateLineage(manifestPathInput, bindingIdOverride = null) {
   await assertRatedSmoke(byGate.c5cRollback, "c5cRollback");
   await assertCleanupZero(byGate.c5cRollback, "c5cRollback", "C4D_ROLLBACK_SMOKE_CLEANUP=PASS");
 
+  const c5dReport = await uniqueJsonByGate(byGate.c5dSchool, "C5D_SCHOOL_RELEASE_REGRESSION", "c5dSchool");
+  const c5dObservation = await uniqueJsonByGate(byGate.c5dSchool, "C5D_MANAGED_MAC_OBSERVATION", "c5dSchool");
+  runValidator("scripts/verify-c5d-managed-evidence.mjs", {
+    C5D_REPORT_FILE: c5dReport.path,
+    C5D_OBSERVATION_FILE: c5dObservation.path,
+    C5_EXPECTED_RELEASE_SHA: manifest.releaseSha,
+    C5D_EVIDENCE_SELF_TEST: "0",
+  });
+
+  const c5e = await uniqueJsonByGate(byGate.c5eHumanQa, "C5E_HUMAN_QA_VISUAL_SIGNOFF", "c5eHumanQa");
+  assert(c5e.value.releaseSha === manifest.releaseSha, "C5E human-QA releaseSha does not match final C5F releaseSha");
+
   const finalCi = JSON.parse(await readFile(uniqueFile(byGate.finalMainCi, "c5-final-ci.json", "finalMainCi"), "utf8"));
   assert(finalCi.gate === "C5_FINAL_MAIN_CI", "finalMainCi has unexpected gate identifier");
   assert(finalCi.gitSha === manifest.releaseSha, "finalMainCi Git SHA does not match releaseSha");
@@ -135,17 +184,20 @@ async function validateLineage(manifestPathInput, bindingIdOverride = null) {
     gate: "C5F_EVIDENCE_LINEAGE",
     releaseSha: manifest.releaseSha,
     databaseId: boundDatabaseId,
-    verified: TARGET_GATES,
+    verified: REQUIRED_GATES,
   }, null, 2));
 }
 
 async function validateCommittedContract() {
   const provisionWorkflow = await readFile(resolve(root, ".github/workflows/c4d-provision-d1.yml"), "utf8");
   const ciWorkflow = await readFile(resolve(root, ".github/workflows/ci.yml"), "utf8");
+  const packageJson = await readFile(resolve(root, "package.json"), "utf8");
   const runbook = await readFile(resolve(root, "docs/operations/C5F_CAS_EVIDENCE_PACKAGE.md"), "utf8");
   assert(provisionWorkflow.includes("c4d-provision.json") && provisionWorkflow.includes("c4d-d1-provision-"), "C4D provisioning workflow must retain machine-readable lineage evidence");
   assert(ciWorkflow.includes("c5-final-ci.json"), "Project CI must retain final-main lineage metadata");
-  for (const token of ["c4d-provision.json", "c4d-cleanup-verification.json", "c5-final-ci.json", "same release SHA"]) {
+  assert(ciWorkflow.includes("C5B_EVIDENCE_SELF_TEST=1") && ciWorkflow.includes("C5D_EVIDENCE_SELF_TEST=1"), "Project CI must self-test C5B/C5D structured evidence validators");
+  assert(packageJson.includes('"verify:c5b:evidence"') && packageJson.includes('"verify:c5d:evidence"'), "package scripts must expose C5B/C5D evidence validators");
+  for (const token of ["c4d-provision.json", "c5b-performance.json", "c4d-cleanup-verification.json", "c5d-managed-mac-observation.json", "C5E", "c5-final-ci.json", "all seven", "same release SHA"]) {
     assert(runbook.includes(token), `C5F runbook missing lineage requirement: ${token}`);
   }
   console.log("C5F evidence lineage contract PASS");
@@ -161,16 +213,36 @@ async function expectFailure(label, callback) {
   throw new Error(`Lineage self-test unexpectedly accepted ${label}`);
 }
 
+function performanceSnapshot(seconds, benchmarkComplete = false) {
+  return {
+    capturedAt: new Date().toISOString(), fps: 60, averageFps: 55, minimumFps: 42, transferredMiB: 80,
+    resourceCount: 100, opaqueCrossOriginResourceCount: 10, zeroTransferResourceCount: 20,
+    sessionSeconds: seconds, benchmarkComplete, usedHeapMiB: 100, targetFps: 45,
+    minimumRequiredFps: 30, targetTransferMiBPerPlayerSession: 150,
+    targetFpsMet: true, minimumFpsMet: true, transferBudgetMet: true,
+  };
+}
+
 async function selfTest() {
   const releaseSha = "a".repeat(40);
   const databaseId = "123e4567-e89b-42d3-a456-426614174000";
   const temp = await mkdtemp(join(tmpdir(), "cas-c5f-lineage-"));
   try {
-    for (const directory of ["provision", "deploy", "rollback", "ci"]) await mkdir(join(temp, directory), { recursive: true });
+    for (const directory of ["provision", "performance", "deploy", "rollback", "school", "human", "ci"]) await mkdir(join(temp, directory), { recursive: true });
     await writeFile(join(temp, "provision/c4d-provision.json"), JSON.stringify({
       gate: "C4D_PRODUCTION_D1", status: "PASS", provisioning: "PASS", d1ReadAuthorization: "PASS", schema: "PASS",
       databaseName: "cas-simulator-accounts", databaseId,
     }), "utf8");
+
+    const c5b = {
+      gate: "C5B_PERFORMANCE_EVIDENCE", releaseSha, tester: "C5F self-test", capturedAt: new Date().toISOString(),
+      environment: { kind: "synthetic", operatingSystem: "test", device: "test", browserA: "A", browserAVersion: "1", browserB: "B", browserBVersion: "1" },
+      preflight: performanceSnapshot(181, false), sustained: performanceSnapshot(1801, true),
+      rankedProduct: { durationSeconds: 301, clientA: performanceSnapshot(299, false), clientB: performanceSnapshot(299, false), peerAircraftRendered: true, hudResponsive: true, serverAuthorityObserved: true, visibleStutterObserved: false, notes: "Synthetic." },
+      overallNotes: "Synthetic C5F lineage record.",
+    };
+    await writeFile(join(temp, "performance/c5b-performance.json"), JSON.stringify(c5b, null, 2), "utf8");
+
     const cleanup = JSON.stringify([{ results: [{ users_remaining: 0, sessions_remaining: 0, rated_matches_remaining: 0 }] }]);
     const smoke = JSON.stringify({ ok: true, gate: "C4D_PRODUCTION_RATED_PRODUCT_SMOKE" });
     await writeFile(join(temp, "deploy/metadata.txt"), `action=deploy\ngit_sha=${releaseSha}\nc4d_rated_production_gate=enabled\n`, "utf8");
@@ -181,15 +253,38 @@ async function selfTest() {
     await writeFile(join(temp, "rollback/c4d-rated-smoke.txt"), smoke, "utf8");
     await writeFile(join(temp, "rollback/c4d-cleanup-verification.json"), cleanup, "utf8");
     await writeFile(join(temp, "rollback/c4d-cleanup.txt"), "C4D_ROLLBACK_SMOKE_CLEANUP=PASS\n", "utf8");
+
+    const schoolReport = {
+      gate: "C5D_SCHOOL_RELEASE_REGRESSION", ok: true,
+      environment: { gitSha: releaseSha, platform: "darwin" },
+      gates: ["c3_multiplayer", "c4b_matchmaking", "c4c_competition", "c4d_accounts", "c4d_ranked_product"].map((id) => ({ id, passed: true, exitCode: 0 })),
+    };
+    const schoolObservation = {
+      gate: "C5D_MANAGED_MAC_OBSERVATION", releaseSha, tester: "C5F self-test", capturedAt: new Date().toISOString(),
+      browser: "Browser", browserVersion: "1", operatingSystem: "macOS", device: "Managed Mac",
+      observations: { devSchoolStarted: true, browserOpenedLocalhost: true, fiveAutomatedGatesPassed: true, noSecurityBypassUsed: true, flightInputUsable: true, productUiUsable: true },
+      notes: "Synthetic.",
+    };
+    await writeFile(join(temp, "school/c5d-school-regression.json"), JSON.stringify(schoolReport, null, 2), "utf8");
+    await writeFile(join(temp, "school/c5d-managed-mac-observation.json"), JSON.stringify(schoolObservation, null, 2), "utf8");
+
+    const c5e = {
+      gate: "C5E_HUMAN_QA_VISUAL_SIGNOFF", releaseSha,
+    };
+    await writeFile(join(temp, "human/c5e.json"), JSON.stringify(c5e, null, 2), "utf8");
     await writeFile(join(temp, "ci/c5-final-ci.json"), JSON.stringify({
       gate: "C5_FINAL_MAIN_CI", gitSha: releaseSha, gitRef: "refs/heads/main", event: "push", verificationStepsPassed: true,
     }), "utf8");
+
     const manifest = {
       releaseSha,
       evidence: {
         c4dProduction: { status: "PASS", files: ["provision"] },
+        c5bPerformance: { status: "PASS", files: ["performance"] },
         c5cDeploy: { status: "PASS", files: ["deploy"] },
         c5cRollback: { status: "PASS", files: ["rollback"] },
+        c5dSchool: { status: "PASS", files: ["school"] },
+        c5eHumanQa: { status: "PASS", files: ["human"] },
         finalMainCi: { status: "PASS", files: ["ci"] },
       },
     };
@@ -210,7 +305,11 @@ async function selfTest() {
     await writeFile(join(temp, "deploy/c4d-cleanup-verification.json"), cleanup, "utf8");
 
     await expectFailure("provision/binding mismatch", () => validateLineage(manifestPath, "223e4567-e89b-42d3-a456-426614174000"));
-    console.log("C5F evidence lineage self-test PASS");
+
+    const wrongC5e = { ...c5e, releaseSha: "b".repeat(40) };
+    await writeFile(join(temp, "human/c5e.json"), JSON.stringify(wrongC5e, null, 2), "utf8");
+    await expectFailure("C5E evidence from another release", () => validateLineage(manifestPath, databaseId));
+    console.log("C5F all-gate evidence lineage self-test PASS");
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
