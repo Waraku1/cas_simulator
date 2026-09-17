@@ -14,6 +14,16 @@ export interface RuntimeDiagnostics {
   usedHeapMiB: number | null;
 }
 
+export interface PerformanceEvidenceSnapshot extends RuntimeDiagnostics {
+  capturedAt: string;
+  targetFps: number;
+  minimumRequiredFps: number;
+  targetTransferMiBPerPlayerSession: number;
+  targetFpsMet: boolean;
+  minimumFpsMet: boolean;
+  transferBudgetMet: boolean;
+}
+
 const MEBIBYTE = 1024 * 1024;
 let renderedFrameCount = 0;
 
@@ -75,6 +85,24 @@ function readUsedHeapMiB() {
     : null;
 }
 
+function publishPerformanceEvidence(diagnostics: RuntimeDiagnostics) {
+  if (typeof window === "undefined") return;
+
+  const snapshot: PerformanceEvidenceSnapshot = {
+    ...diagnostics,
+    capturedAt: new Date().toISOString(),
+    targetFps: C2_RESOURCE_BUDGET.targetFps,
+    minimumRequiredFps: C2_RESOURCE_BUDGET.minimumFps,
+    targetTransferMiBPerPlayerSession: C2_RESOURCE_BUDGET.targetTransferMiBPerPlayerSession,
+    targetFpsMet: diagnostics.averageFps >= C2_RESOURCE_BUDGET.targetFps,
+    minimumFpsMet: diagnostics.minimumFps >= C2_RESOURCE_BUDGET.minimumFps,
+    transferBudgetMet: diagnostics.transferredMiB <= C2_RESOURCE_BUDGET.targetTransferMiBPerPlayerSession,
+  };
+
+  (window as Window & { __CAS_PERFORMANCE_EVIDENCE__?: PerformanceEvidenceSnapshot })
+    .__CAS_PERFORMANCE_EVIDENCE__ = snapshot;
+}
+
 /**
  * C2 measures Cesium render cadence during active foreground time only.
  * Background-tab throttling and long browser suspension are excluded from the
@@ -130,7 +158,7 @@ export function useRuntimeDiagnostics(): RuntimeDiagnostics {
           minimumFps = Math.min(minimumFps, fps);
 
           const network = readNetworkUsage();
-          setDiagnostics({
+          const nextDiagnostics: RuntimeDiagnostics = {
             fps,
             averageFps: validSampleSeconds > 0 ? weightedFpsTotal / validSampleSeconds : fps,
             minimumFps: Number.isFinite(minimumFps) ? minimumFps : fps,
@@ -138,7 +166,9 @@ export function useRuntimeDiagnostics(): RuntimeDiagnostics {
             sessionSeconds: activeSeconds,
             benchmarkComplete: activeSeconds >= C2_RESOURCE_BUDGET.benchmarkMinutes * 60,
             usedHeapMiB: readUsedHeapMiB(),
-          });
+          };
+          setDiagnostics(nextDiagnostics);
+          publishPerformanceEvidence(nextDiagnostics);
         }
       }
 
