@@ -1,8 +1,11 @@
+import { deriveAuthCredential } from "./auth-credential.mjs";
+
 const base = process.env.SCHOOL_URL ?? "http://127.0.0.1:5173";
 const suffix = Math.random().toString(36).slice(2, 8);
 const loginId = `pilot_${suffix}`;
 const password = `school-${suffix}-pass`;
 const displayName = `Pilot ${suffix}`;
+const credential = deriveAuthCredential(loginId, password);
 
 async function request(path, options = {}, cookie = "") {
   const headers = new Headers(options.headers ?? {});
@@ -20,7 +23,7 @@ function sessionCookie(setCookie) {
 
 const registration = await request("/api/auth/register", {
   method: "POST",
-  body: JSON.stringify({ loginId, displayName, password }),
+  body: JSON.stringify({ loginId, displayName, credential }),
 });
 if (!registration.response.ok || !registration.body?.ok || registration.body.user.rating !== 1200) {
   throw new Error(`Registration failed: ${JSON.stringify(registration.body)}`);
@@ -35,7 +38,7 @@ if (!session.response.ok || session.body?.user?.loginId !== loginId) {
 
 const duplicate = await request("/api/auth/register", {
   method: "POST",
-  body: JSON.stringify({ loginId, displayName: "Duplicate", password }),
+  body: JSON.stringify({ loginId, displayName: "Duplicate", credential }),
 });
 if (duplicate.response.status !== 409 || duplicate.body?.code !== "LOGIN_ID_TAKEN") {
   throw new Error("Duplicate login ID was not rejected.");
@@ -43,7 +46,7 @@ if (duplicate.response.status !== 409 || duplicate.body?.code !== "LOGIN_ID_TAKE
 
 const badLogin = await request("/api/auth/login", {
   method: "POST",
-  body: JSON.stringify({ loginId, password: `${password}-wrong` }),
+  body: JSON.stringify({ loginId, credential: deriveAuthCredential(loginId, `${password}-wrong`) }),
 });
 if (badLogin.response.status !== 401 || badLogin.body?.code !== "INVALID_CREDENTIALS") {
   throw new Error("Invalid password was not rejected.");
@@ -68,4 +71,5 @@ console.log(JSON.stringify({
   initialRating: registration.body.user.rating,
   leaderboardVisible: true,
   logoutInvalidatedSession: true,
+  rawPasswordSentToServer: false,
 }, null, 2));
