@@ -1,10 +1,18 @@
-name: Deploy production
+name: Rollback production
 
 on:
   workflow_dispatch:
     inputs:
       confirm_sha:
-        description: Paste the exact full commit SHA selected for this production deployment
+        description: Paste the exact full commit SHA of this rollback workflow ref
+        required: true
+        type: string
+      target_version_id:
+        description: Cloudflare Worker version ID to restore at 100 percent traffic
+        required: true
+        type: string
+      confirmation:
+        description: Type ROLLBACK to confirm production traffic replacement
         required: true
         type: string
 
@@ -16,39 +24,49 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  rollback:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      VITE_CESIUM_ION_TOKEN: ${{ secrets.VITE_CESIUM_ION_TOKEN }}
       PRODUCTION_URL: ${{ vars.PRODUCTION_URL || 'https://cas-flight-simulator.heleshiheiheleshihei.workers.dev' }}
       C4D_RATED_PRODUCTION_GATE: ${{ vars.C4D_RATED_PRODUCTION_GATE || 'disabled' }}
       C4D_ACCOUNTS_DB_NAME: cas-simulator-accounts
-      EVIDENCE_DIR: /tmp/c5-release-evidence
+      EVIDENCE_DIR: /tmp/c5-rollback-evidence
 
     steps:
-      - name: Checkout
+      - name: Checkout governance ref
         uses: actions/checkout@v4
 
-      - name: Confirm immutable release SHA
+      - name: Confirm rollback request
         shell: bash
         env:
           CONFIRM_SHA: ${{ inputs.confirm_sha }}
+          TARGET_VERSION_ID: ${{ inputs.target_version_id }}
+          CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
           if [ "$CONFIRM_SHA" != "$GITHUB_SHA" ]; then
-            echo "Refusing production deploy: confirm_sha does not match the selected workflow commit."
+            echo "Refusing rollback: confirm_sha does not match the selected workflow commit."
             echo "expected=$GITHUB_SHA"
             echo "received=$CONFIRM_SHA"
             exit 1
           fi
+          if [ "$CONFIRMATION" != "ROLLBACK" ]; then
+            echo "Refusing rollback: confirmation must be exactly ROLLBACK."
+            exit 1
+          fi
+          if [ -z "$TARGET_VERSION_ID" ]; then
+            echo "Refusing rollback: target_version_id is required."
+            exit 1
+          fi
           mkdir -p "$EVIDENCE_DIR"
           {
-            echo "action=deploy"
-            echo "git_sha=$GITHUB_SHA"
-            echo "git_ref=$GITHUB_REF"
+            echo "action=rollback"
+            echo "governance_git_sha=$GITHUB_SHA"
+            echo "governance_git_ref=$GITHUB_REF"
+            echo "target_version_id=$TARGET_VERSION_ID"
             echo "github_run_id=$GITHUB_RUN_ID"
             echo "github_run_attempt=$GITHUB_RUN_ATTEMPT"
             echo "c4d_rated_production_gate=$C4D_RATED_PRODUCTION_GATE"
@@ -70,37 +88,31 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Capture pre-deploy Cloudflare state
+      - name: Capture pre-rollback Cloudflare state
         shell: bash
         run: |
           set -euo pipefail
           pnpm exec wrangler deployments status --json > "$EVIDENCE_DIR/deployments-before.json"
           pnpm exec wrangler versions list --json > "$EVIDENCE_DIR/versions-before.json"
 
-      - name: Validate scaffold
-        run: pnpm validate:scaffold
-
-      - name: Type-check
-        run: pnpm check
-
-      - name: Build
-        run: pnpm build
-
-      - name: Deploy to Cloudflare Workers
-        id: deploy
+      - name: Roll back to explicit Worker version
+        id: rollback
         shell: bash
+        env:
+          TARGET_VERSION_ID: ${{ inputs.target_version_id }}
         run: |
           set -euo pipefail
-          pnpm exec wrangler deploy --message "C5 deploy git:${GITHUB_SHA} run:${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          pnpm exec wrangler rollback "$TARGET_VERSION_ID" \
+            --message "C5 rollback target:${TARGET_VERSION_ID} governance-git:${GITHUB_SHA} run:${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
 
-      - name: Verify production root
+      - name: Verify production root after rollback
         shell: bash
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
             -o /dev/null -w '%{http_code}\n' "$PRODUCTION_URL/" | tee "$EVIDENCE_DIR/root-http-status.txt"
 
-      - name: Verify health endpoint
+      - name: Verify health endpoint after rollback
         shell: bash
         run: |
           set -euo pipefail
@@ -108,34 +120,34 @@ jobs:
           printf '%s\n' "$HEALTH_JSON" | tee "$EVIDENCE_DIR/health-after.json"
           HEALTH_JSON="$HEALTH_JSON" node -e 'const j = JSON.parse(process.env.HEALTH_JSON); if (j.ok !== true || j.stage !== "C0_FOUNDATION" || j.features?.multiplayer !== "C3_FOUNDATION") process.exit(1)'
 
-      - name: Verify multiplayer WebSocket relay
+      - name: Verify multiplayer WebSocket relay after rollback
         shell: bash
         run: |
           set -euo pipefail
           node scripts/verify-production-multiplayer.mjs | tee "$EVIDENCE_DIR/multiplayer-smoke.txt"
 
-      - name: Verify C4D production rated product
+      - name: Verify C4D production rated product after rollback
         if: env.C4D_RATED_PRODUCTION_GATE == 'enabled'
         env:
-          C4D_SMOKE_RUN_ID: ${{ github.run_id }}${{ github.run_attempt }}
+          C4D_SMOKE_RUN_ID: rb${{ github.run_id }}${{ github.run_attempt }}
         shell: bash
         run: |
           set -euo pipefail
           pnpm verify:production:c4d | tee "$EVIDENCE_DIR/c4d-rated-smoke.txt"
 
-      - name: Cleanup C4D production smoke accounts
-        if: ${{ always() && env.C4D_RATED_PRODUCTION_GATE == 'enabled' && steps.deploy.outcome == 'success' }}
+      - name: Cleanup C4D rollback smoke accounts
+        if: ${{ always() && env.C4D_RATED_PRODUCTION_GATE == 'enabled' && steps.rollback.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
-          SEED="$(printf '%s' '${{ github.run_id }}${{ github.run_attempt }}' | tr -cd '[:alnum:]' | tail -c 10)"
+          SEED="$(printf '%s' 'rb${{ github.run_id }}${{ github.run_attempt }}' | tr -cd '[:alnum:]' | tail -c 10)"
           LOGIN_A="c4dpa_${SEED}"
           LOGIN_B="c4dpb_${SEED}"
           SQL="DELETE FROM rated_matches WHERE first_user_id IN (SELECT user_id FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B')) OR second_user_id IN (SELECT user_id FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B')); DELETE FROM sessions WHERE user_id IN (SELECT user_id FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B')); DELETE FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B');"
           pnpm exec wrangler d1 execute "$C4D_ACCOUNTS_DB_NAME" --remote --command "$SQL"
-          echo "C4D_PRODUCTION_SMOKE_CLEANUP=PASS" | tee "$EVIDENCE_DIR/c4d-cleanup.txt"
+          echo "C4D_ROLLBACK_SMOKE_CLEANUP=PASS" | tee "$EVIDENCE_DIR/c4d-cleanup.txt"
 
-      - name: Capture post-deploy Cloudflare state
+      - name: Capture post-rollback Cloudflare state
         if: always()
         shell: bash
         run: |
@@ -144,11 +156,11 @@ jobs:
           pnpm exec wrangler versions list --json > "$EVIDENCE_DIR/versions-after.json" 2> "$EVIDENCE_DIR/versions-after.stderr.txt" || true
           echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$EVIDENCE_DIR/metadata.txt"
 
-      - name: Upload C5 deployment evidence
+      - name: Upload C5 rollback evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: c5-production-deploy-${{ github.run_id }}-${{ github.run_attempt }}
-          path: /tmp/c5-release-evidence
+          name: c5-production-rollback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/c5-rollback-evidence
           if-no-files-found: error
           retention-days: 30
