@@ -10,6 +10,7 @@ The package combines:
 - C5 security/accessibility, performance, release-governance, school-local, and human-QA runbooks;
 - final external/device evidence references and locally retained evidence files;
 - a release manifest tied to one exact Git SHA;
+- machine-checked production evidence lineage;
 - a generated package index;
 - SHA-256 checksums for the package contents.
 
@@ -25,7 +26,33 @@ The C5F manifest requires all of the following to be `PASS` before a final packa
 6. `c5eHumanQa` — completed C5E human QA / visual sign-off record.
 7. `finalMainCi` — final `main` Project CI success for the same release lineage.
 
-Each gate must include at least one `files` or `refs` entry. A URL/Actions run reference may be placed in `refs`. Downloaded JSON, logs, screenshots, recordings, or artifact ZIPs should be placed in `files` when practical so the final package is self-contained.
+Every gate must include retained local evidence in `files`; `refs` may additionally record GitHub Actions URLs or other external references. Directories are accepted and copied recursively.
+
+The following production-lineage files are mandatory:
+
+- `c4dProduction`: retained **C4D provision D1** artifact containing `c4d-provision.json`;
+- `c5cDeploy`: retained production deploy artifact containing `metadata.txt`, `c4d-rated-smoke.txt`, `c4d-cleanup-verification.json`, and `c4d-cleanup.txt`;
+- `c5cRollback`: retained rollback artifact containing the same rated-smoke/cleanup evidence plus rollback `metadata.txt`;
+- `finalMainCi`: retained final Project CI artifact containing `c5-final-ci.json`.
+
+C5B, C5D, and C5E continue to require their existing local browser/device, managed-school-Mac, and human-QA evidence respectively.
+
+## Evidence lineage contract
+
+Before the existing package generator copies any evidence, `pnpm verify:c5f` runs a dedicated lineage validator. Final package generation fails unless all of the following are true:
+
+- the final checked-out `releaseSha` is the same release SHA recorded by the production deploy artifact;
+- rollback governance was executed from that same release SHA;
+- the final Project CI artifact records a `push` run from `refs/heads/main` at that same release SHA;
+- the rated production gate was `enabled` for deploy and rollback evidence;
+- both deploy and rollback rated-product smoke records report `C4D_PRODUCTION_RATED_PRODUCT_SMOKE` with `ok=true`;
+- both `c4d-cleanup-verification.json` records prove zero remaining run-scoped users, sessions, and rated matches and their cleanup PASS markers are present;
+- `c4d-provision.json` records successful D1 read authorization, provisioning, and schema verification for `cas-simulator-accounts`;
+- the real D1 UUID recorded by `c4d-provision.json` exactly matches the final reviewed `ACCOUNTS` binding in `wrangler.jsonc`.
+
+The D1 provisioning workflow normally runs before the final binding PR, so its Git SHA is not required to equal the final release SHA. Instead, lineage is closed by the exact provisioned D1 UUID matching the final `ACCOUNTS` binding.
+
+A URL or manually written `PASS` string alone cannot satisfy these four production-lineage gates.
 
 ## Prepare the manifest
 
@@ -39,7 +66,8 @@ Fill:
 - full 40-character `releaseSha`;
 - a human-readable `releaseLabel`;
 - `preparedBy` and ISO timestamp `preparedAt`;
-- every gate status and evidence reference.
+- every gate status and evidence reference;
+- retained artifact directories/files under each gate's `files` array.
 
 File paths are resolved relative to the manifest file. Directories are accepted and copied recursively.
 
@@ -51,7 +79,7 @@ Locally, run:
 pnpm verify:c5f
 ```
 
-With no manifest environment variable, this validates the committed C5F contract/template and required repository documentation.
+With no manifest environment variable, this validates the committed C5F contract/template, required repository documentation, and production-lineage workflow contract.
 
 Project CI additionally runs:
 
@@ -59,22 +87,30 @@ Project CI additionally runs:
 C5F_SELF_TEST=1 pnpm verify:c5f
 ```
 
-The CI-only synthetic self-test creates temporary PASS-shaped evidence, validates it through the real C5E verifier, exercises the actual package copy/index/checksum generator, verifies representative generated paths, and then deletes the temporary files. Synthetic evidence is never written into the final `.c5-evidence/cas-package/<releaseSha>` path and never counts toward release closure.
+The CI-only synthetic self-test exercises both layers:
+
+1. the existing package generator creates temporary PASS-shaped evidence, validates it through the real C5E verifier, copies/indexes/checksums the package, and deletes it;
+2. the lineage validator accepts a complete synthetic production evidence chain and rejects wrong deploy SHA, non-zero cleanup, and D1 provision/binding mismatch.
+
+Synthetic evidence never counts toward release closure.
 
 ## Build the final package
 
-Checkout the exact release SHA first. Then run:
+Checkout the exact final release SHA first. Download and extract the required retained GitHub Actions artifacts into the `.c5-evidence` working area, then run:
 
 ```bash
 C5F_MANIFEST_FILE=.c5-evidence/c5f-package.json pnpm verify:c5f
 ```
 
-The generator refuses to continue when:
+The command first validates evidence lineage and then invokes the existing package generator. It refuses to continue when, among other conditions:
 
 - `releaseSha` is not a full SHA;
 - the current checkout does not equal `releaseSha`;
 - any required gate is not `PASS`;
-- a gate has no evidence reference;
+- required local evidence is absent;
+- production deploy/rollback/final-main-CI lineage does not match the release SHA;
+- D1 provisioning evidence does not match the final `ACCOUNTS` binding;
+- rated smoke or zero-count cleanup evidence is invalid;
 - a declared local evidence file/directory does not exist.
 
 The generated package is written under:
@@ -93,4 +129,4 @@ For final submission/archive, keep the package directory unchanged after checksu
 
 ## Closure boundary
 
-C5F implementation is closed when the contract/generator and CI self-test are merged and CI-protected. The C5F release gate is closed only when a complete package is successfully generated from the final release SHA after C4D and C5B-E execution evidence are all closed.
+C5F implementation is closed when the package generator, lineage validator, and CI self-tests are merged and CI-protected. The C5F release gate is closed only when a complete lineage-validated package is successfully generated from the final release SHA after C4D and C5B-E execution evidence are all closed.
