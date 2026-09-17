@@ -12,17 +12,30 @@ Do not bind a placeholder D1 ID and do not enable the rated production gate unti
 2. Confirm `C4D_D1_READ_AUTHORIZATION=PASS`.
 3. Provision or reuse `cas-simulator-accounts` and record the returned real database ID.
 4. Confirm both migrations apply remotely and the schema contains `users`, `sessions`, `rated_matches`, and `d1_migrations`.
-5. Add the real `ACCOUNTS` D1 binding to `wrangler.jsonc` in a normal branch/PR. Never use a placeholder ID.
-6. Confirm `pnpm verify:c4d:binding` reports `C4D_PRODUCTION_BINDING=PASS` for that reviewed config.
-7. Set repository variable `C4D_RATED_PRODUCTION_GATE=enabled` only with the release change that introduces the real binding.
-8. Run normal CI and merge only if green.
-9. Dispatch `Deploy production` using the exact merged release SHA. The deploy scaffold must fail closed before Worker mutation unless the rated binding validator passes.
-10. Require existing C3 production root/health/WebSocket smoke to remain green.
-11. Require `C4D_PRODUCTION_RATED_PRODUCT_SMOKE` to pass.
-12. Require `c4d-cleanup-verification.json` to show zero remaining run-scoped users, sessions, and rated matches.
-13. Require `C4D_PRODUCTION_SMOKE_CLEANUP=PASS`, then close C4D and proceed to final C5 evidence execution.
+5. Retain the `c4d-d1-provision-<run>-<attempt>` artifact. Its `c4d-provision.json` is the canonical machine-readable record for the provisioned D1 UUID and successful authorization/schema gates.
+6. Add the real `ACCOUNTS` D1 binding to `wrangler.jsonc` in a normal branch/PR. Never use a placeholder ID.
+7. Confirm `pnpm verify:c4d:binding` reports `C4D_PRODUCTION_BINDING=PASS` for that reviewed config.
+8. Set repository variable `C4D_RATED_PRODUCTION_GATE=enabled` only with the release change that introduces the real binding.
+9. Run normal CI and merge only if green.
+10. Dispatch `Deploy production` using the exact merged release SHA. The deploy scaffold must fail closed before Worker mutation unless the rated binding validator passes.
+11. Require existing C3 production root/health/WebSocket smoke to remain green.
+12. Require `C4D_PRODUCTION_RATED_PRODUCT_SMOKE` to pass.
+13. Require `c4d-cleanup-verification.json` to show zero remaining run-scoped users, sessions, and rated matches.
+14. Require `C4D_PRODUCTION_SMOKE_CLEANUP=PASS`, then close C4D and proceed to final C5 evidence execution.
 
-The provisioning workflow performs no Worker deployment. It only validates Cloudflare identity/D1 authorization, creates or reuses the named D1 database, applies migrations, validates the expected schema, and prints the real database ID for the subsequent reviewed binding PR.
+The provisioning workflow performs no Worker deployment. It validates Cloudflare identity/D1 authorization, creates or reuses the named D1 database, applies migrations, validates the expected schema, and retains the provisioning lineage artifact for the subsequent reviewed binding PR and final C5F package.
+
+## Provisioning evidence contract
+
+The provisioning workflow retains a 30-day artifact named `c4d-d1-provision-<run>-<attempt>`. Successful evidence includes:
+
+- `c4d-provision.json` with gate `C4D_PRODUCTION_D1`, status/provisioning/read-authorization/schema all `PASS`, database name `cas-simulator-accounts`, and the real D1 UUID;
+- `d1-list-before.json` and `d1-list-after.json`;
+- `migrations.txt`;
+- `schema-after.json` and `schema-verification.txt`;
+- run/SHA metadata.
+
+C5F later compares the UUID in `c4d-provision.json` with the final reviewed `ACCOUNTS` binding. The provisioning Git SHA itself need not equal the final release SHA because the binding PR necessarily follows provisioning and changes repository history.
 
 ## Binding release contract
 
