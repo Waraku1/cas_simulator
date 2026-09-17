@@ -38,7 +38,10 @@ Before and after each production action, the workflow records:
 - production root HTTP status;
 - `/api/health` response;
 - production multiplayer smoke output;
-- C4D rated-product smoke output and cleanup evidence when that gate is enabled.
+- C4D rated-product smoke output when that gate is enabled;
+- `c4d-cleanup-verification.json`, proving zero-count cleanup for the run-scoped smoke users, sessions, and rated matches before the cleanup PASS marker is emitted.
+
+The cleanup step first resolves only the two run-scoped smoke account IDs, deletes rated-match/session rows for those IDs and the two corresponding users, then queries D1 again. `C4D_PRODUCTION_SMOKE_CLEANUP=PASS` or `C4D_ROLLBACK_SMOKE_CLEANUP=PASS` is emitted only when the post-cleanup counts for `users`, `sessions`, and `rated_matches` are all exactly zero.
 
 The evidence directory is uploaded with `actions/upload-artifact@v4` even when a later verification step fails. Retention is 30 days.
 
@@ -53,7 +56,8 @@ The evidence directory is uploaded with `actions/upload-artifact@v4` even when a
 7. Confirm the artifact's `metadata.txt` records the intended SHA.
 8. Confirm `deployments-after.json` and `versions-after.json` show the resulting Worker deployment/version state.
 9. Confirm root, health and multiplayer smoke evidence are PASS.
-10. For final C5 closure, repeat this evidence with `C4D_RATED_PRODUCTION_GATE=enabled` after the C4D production D1 prerequisite is closed.
+10. For final C5 closure, run with `C4D_RATED_PRODUCTION_GATE=enabled` after the C4D production D1 prerequisite is closed and require the rated-product smoke to pass.
+11. Confirm `c4d-cleanup-verification.json` reports zero remaining run-scoped users, sessions, and rated matches, and require `C4D_PRODUCTION_SMOKE_CLEANUP=PASS`.
 
 `wrangler deploy` receives a version/deployment message containing the Git SHA and Actions run identity, creating a direct trace from Cloudflare version history back to GitHub evidence.
 
@@ -68,7 +72,8 @@ The evidence directory is uploaded with `actions/upload-artifact@v4` even when a
 7. Enter `ROLLBACK` exactly in `confirmation`.
 8. Dispatch the workflow.
 9. Retain the `c5-production-rollback-<run>-<attempt>` artifact.
-10. Confirm the post-rollback deployment state and smoke evidence before declaring rollback verification complete.
+10. Confirm the post-rollback deployment state and smoke evidence.
+11. Confirm `c4d-cleanup-verification.json` reports zero remaining run-scoped users, sessions, and rated matches, and require `C4D_ROLLBACK_SMOKE_CLEANUP=PASS` before declaring rollback verification complete.
 
 The rollback workflow calls `wrangler rollback <VERSION_ID> --message ...`, so production is restored to the exact already-published Worker version rather than rebuilt from source during the incident path.
 
@@ -94,6 +99,7 @@ C5C implementation is ready when:
 - rollback requires an explicit version ID and explicit confirmation;
 - before/after Cloudflare state is captured;
 - production smoke evidence is retained as an artifact;
+- rated smoke cleanup is followed by D1 zero-count verification for the run-scoped users, sessions, and rated matches;
 - C1-C4 semantics remain unchanged.
 
 C5C execution evidence is closed only after the manual production deploy and rollback runs have been completed and their artifacts retained.
