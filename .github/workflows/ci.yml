@@ -51,6 +51,9 @@ jobs:
       - name: Verify C5C release governance contract
         run: pnpm verify:c5c
 
+      - name: Verify C5E human QA contract
+        run: pnpm verify:c5e
+
       - name: Production build
         run: pnpm build
 
