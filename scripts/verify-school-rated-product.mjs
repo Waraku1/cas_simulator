@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import http from "node:http";
+import { deriveAuthCredential } from "./auth-credential.mjs";
 
 const baseUrl = new URL(process.env.SCHOOL_URL ?? "http://127.0.0.1:5173");
 const AIRCRAFT_IDS = ["orbit-a1", "strata-b2", "kite-c3"];
@@ -211,9 +212,10 @@ function connectWebSocket(path, cookie) {
 async function register(label) {
   const suffix = randomBytes(4).toString("hex");
   const loginId = `c4d_${label}_${suffix}`;
+  const credential = deriveAuthCredential(loginId, PASSWORD);
   const { response, value } = await jsonRequest("/api/auth/register", {
     method: "POST",
-    body: { loginId, displayName: `C4D ${label.toUpperCase()}`, password: PASSWORD },
+    body: { loginId, displayName: `C4D ${label.toUpperCase()}`, credential },
   });
   assert(response.ok && value?.ok, `${label} registration failed`);
   assert(value.user.rating === 1200, `${label} initial rating is not 1200`);
@@ -351,4 +353,5 @@ console.log(JSON.stringify({
   fixableAssignmentPersisted: true,
   fixedAircraftRematchPersisted: true,
   duplicateResultIgnored: true,
+  rawPasswordSentToServer: false,
 }, null, 2));
