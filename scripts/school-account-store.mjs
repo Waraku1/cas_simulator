@@ -3,15 +3,16 @@ import aircraftCatalog from "../src/shared/aircraft-catalog.json" with { type: "
 
 const SESSION_COOKIE = "cas_session";
 const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1_000;
-const PASSWORD_ITERATIONS = 600_000;
+const SERVER_KDF_ITERATIONS = 100_000;
+const CREDENTIAL_LENGTH = 43;
 const AIRCRAFT_IDS = new Set(aircraftCatalog.map((aircraft) => aircraft.aircraftId));
 
 function base64url(buffer) {
   return Buffer.from(buffer).toString("base64url");
 }
 
-function passwordHash(password, salt) {
-  return base64url(pbkdf2Sync(password, Buffer.from(salt, "base64url"), PASSWORD_ITERATIONS, 32, "sha256"));
+function credentialHash(credential, salt) {
+  return base64url(pbkdf2Sync(credential, Buffer.from(salt, "base64url"), SERVER_KDF_ITERATIONS, 32, "sha256"));
 }
 
 function tokenHash(token) {
@@ -50,7 +51,9 @@ export function createSchoolAccountStore() {
   const normalizeDisplay = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
   const validLogin = (value) => value.length >= 3 && value.length <= 24 && /^[a-z0-9][a-z0-9_-]*$/.test(value);
   const validDisplay = (value) => value.length >= 2 && value.length <= 24;
-  const validPassword = (value) => typeof value === "string" && value.length >= 10 && value.length <= 128;
+  const validCredential = (value) => typeof value === "string"
+    && value.length === CREDENTIAL_LENGTH
+    && /^[A-Za-z0-9_-]+$/.test(value);
 
   function createSession(user) {
     const token = base64url(randomBytes(32));
@@ -66,10 +69,10 @@ export function createSchoolAccountStore() {
     return usersById.get(session.userId) ?? null;
   }
 
-  function register({ loginId, displayName, password }) {
+  function register({ loginId, displayName, credential }) {
     const normalizedLogin = normalizeLogin(loginId);
     const normalizedDisplay = normalizeDisplay(displayName);
-    if (!validLogin(normalizedLogin) || !validDisplay(normalizedDisplay) || !validPassword(password)) {
+    if (!validLogin(normalizedLogin) || !validDisplay(normalizedDisplay) || !validCredential(credential)) {
       return { error: { code: "INVALID_INPUT", message: "Registration fields do not satisfy the account contract." } };
     }
     if (usersByLogin.has(normalizedLogin)) {
@@ -82,7 +85,8 @@ export function createSchoolAccountStore() {
       loginId: normalizedLogin,
       displayName: normalizedDisplay,
       passwordSalt: salt,
-      passwordHash: passwordHash(password, salt),
+      passwordHash: credentialHash(credential, salt),
+      passwordIterations: SERVER_KDF_ITERATIONS,
       rating: 1200,
       wins: 0,
       losses: 0,
@@ -97,9 +101,9 @@ export function createSchoolAccountStore() {
     return { user, token: createSession(user) };
   }
 
-  function login({ loginId, password }) {
+  function login({ loginId, credential }) {
     const user = usersByLogin.get(normalizeLogin(loginId));
-    if (!user || !validPassword(password) || passwordHash(password, user.passwordSalt) !== user.passwordHash) {
+    if (!user || !validCredential(credential) || credentialHash(credential, user.passwordSalt) !== user.passwordHash) {
       return { error: { code: "INVALID_CREDENTIALS", message: "User ID or password is incorrect." } };
     }
     return { user, token: createSession(user) };
