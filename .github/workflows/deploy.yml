@@ -125,6 +125,11 @@ jobs:
           pnpm exec wrangler deployments status --json > "$EVIDENCE_DIR/deployments-live.json"
           pnpm verify:c5c:version-state
 
+      - name: Verify production URL belongs to deployed Worker target
+        env:
+          C5C_TARGET_STATE_FILE: /tmp/c5-release-evidence/c5c-deploy-version-state.json
+        run: pnpm verify:c5c:target
+
       - name: Verify production root
         shell: bash
         run: |
