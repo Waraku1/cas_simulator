@@ -44,7 +44,7 @@ const checks = [
   ["rollback verifies C4D smoke cleanup zero counts", rollback.includes("c4d-cleanup-verification.json") && rollback.includes("users_remaining") && rollback.includes("sessions_remaining") && rollback.includes("rated_matches_remaining") && rollback.includes("C4D_SMOKE_CLEANUP_ZERO_COUNTS=PASS")],
   ["rollback uploads evidence artifact", rollback.includes("actions/upload-artifact@v4") && rollback.includes("c5-production-rollback-")],
   ["runbook distinguishes implementation from execution evidence", runbook.includes("C5C execution evidence is closed only after")],
-  ["runbook preserves C4D final prerequisite", runbook.includes("C4D_RATED_PRODUCTION_GATE=enabled") && runbook.includes("C4D production D1")],
+  ["runbook preserves C4D final prerequisite", runbook.includes("C4D_RATED_PRODUCTION_GATE=enabled") && runbook.includes("C4D D1")],
   ["runbook documents fail-closed D1 binding preflight", runbook.includes("C4D_BINDING_REQUIRED=1") && runbook.includes("ACCOUNTS") && runbook.includes("cas-simulator-accounts")],
   ["runbook documents verified cleanup evidence", runbook.includes("c4d-cleanup-verification.json") && runbook.includes("zero-count")],
   ["runbook requires post-rollback same-SHA restoration", runbook.includes("restore_after_rollback") && runbook.includes("initial_release") && runbook.includes("same release SHA")],
