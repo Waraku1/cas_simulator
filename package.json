@@ -15,6 +15,7 @@
     "verify:school:c4c": "SCHOOL_URL=http://127.0.0.1:8787 node scripts/verify-school-competition.mjs",
     "verify:school:c4d": "SCHOOL_URL=http://127.0.0.1:5173 node scripts/verify-school-accounts.mjs",
     "verify:school:c4d:ranked": "SCHOOL_URL=http://127.0.0.1:5173 node scripts/verify-school-rated-product.mjs",
+    "verify:c5d:school": "node scripts/verify-c5d-school-regression.mjs",
     "verify:production:c4d": "node scripts/verify-production-rated-product.mjs",
     "verify:c4c:runtime": "node scripts/verify-c4c-runtime.mjs",
     "verify:c5a": "node scripts/verify-c5a-hardening.mjs",

@@ -83,8 +83,16 @@ jobs:
           fi
 
           cat /tmp/school-health.json
-          pnpm verify:school
-          pnpm verify:school:c4b
-          pnpm verify:school:c4c
-          pnpm verify:school:c4d
-          pnpm verify:school:c4d:ranked
+          C5D_EVIDENCE_DIR=/tmp/c5d-school-regression pnpm verify:c5d:school
+
+      - name: Upload C5D school regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c5d-school-regression-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/c5d-school-regression
+            /tmp/school-health.json
+            /tmp/school-dev.log
+          if-no-files-found: warn
+          retention-days: 30
