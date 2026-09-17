@@ -56,9 +56,9 @@ If the floor is missed because of a reproducible product workload rather than st
 
 Perform a two-browser ranked product run using the current C4 account/matchmaking path. Keep both clients visible where possible (for example side-by-side windows or two devices), allow aircraft assignment/countdown to complete, and keep the match active through the normal product HUD.
 
-For the most deterministic full-duration load, do not trigger abstract actions: equal HP reaches the 4-minute regulation tie, then the complete 60-second overtime, then DRAW. This exercises a five-minute product match without changing the frozen competition contract.
+For final C5B evidence, use the deterministic full-duration path: do not trigger abstract actions. Equal HP reaches the 4-minute regulation tie, then the complete 60-second overtime, then DRAW. Record at least **300 seconds** of ranked-product duration. This exercises the maximum normal product-match duration without changing the frozen competition contract.
 
-Capture `window.__CAS_PERFORMANCE_EVIDENCE__` for both clients immediately after the run. For this shorter product run `benchmarkComplete` is expected to remain false; the evidence is specifically for C4 UI + multiplayer load. Evaluate the same 45 FPS target and 30 FPS floor, and retain observed-transfer data.
+Capture `window.__CAS_PERFORMANCE_EVIDENCE__` for both clients immediately after the run. `benchmarkComplete` may remain false for these ranked-client snapshots because the 30-minute benchmark is a separate run. Evaluate the same 45 FPS target, 30 FPS floor, and 150 MiB observed-transfer target.
 
 Required observations:
 
@@ -68,19 +68,44 @@ Required observations:
 - no visible stutter caused by product overlays or network updates;
 - no C1-C4 behavior change is introduced by the evidence probe.
 
-## Evidence record
+## Structured final evidence record
 
-For each run retain:
+The final C5B gate is represented by one SHA-bound JSON record. Start from:
+
+```bash
+cp docs/evidence/templates/c5b-performance.template.json .c5-evidence/c5b-performance.json
+```
+
+Fill:
+
+- the exact 40-character final `releaseSha`;
+- tester, timestamp, browser/OS/device metadata;
+- the copied preflight snapshot after at least 180 active seconds;
+- the copied sustained snapshot after at least 1800 active seconds with `benchmarkComplete=true`;
+- the two ranked-product client snapshots and ranked duration >= 300 seconds;
+- the required ranked-product observations and concise notes.
+
+Then validate:
+
+```bash
+C5B_EVIDENCE_FILE=.c5-evidence/c5b-performance.json pnpm verify:c5b:evidence
+```
+
+The validator recomputes acceptance from the numeric snapshot fields. A manually-set `targetFpsMet`, `minimumFpsMet`, or `transferBudgetMet` boolean cannot override an average below 45 FPS, a minimum below 30 FPS, or transfer above 150 MiB.
+
+When invoked from C5F, the validator additionally requires the record's `releaseSha` to equal the final package release SHA.
+
+## Evidence record contents
+
+The retained record includes:
 
 - commit SHA;
-- browser and version;
-- operating system/device;
-- local-school or production environment;
-- start/end timestamps;
-- copied diagnostics JSON;
-- whether the 45 FPS average target passed;
-- whether the 30 FPS floor passed;
-- observed transfer result and the Resource Timing caveat;
-- concise notes for any visual or control anomaly.
+- browser versions for both ranked clients;
+- operating system/device and environment kind;
+- timestamps;
+- copied canonical diagnostics JSON;
+- explicit 45 FPS average / 30 FPS floor / 150 MiB transfer results;
+- ranked-product visual/server-authority observations;
+- concise notes for any anomaly.
 
-Automated CI validates that the instrumentation and frozen thresholds remain wired correctly. CI cannot substitute for browser/GPU performance evidence; final C5 closure still requires the human/device runs above.
+Automated CI validates the instrumentation, frozen thresholds, structured evidence contract, and synthetic accept/reject cases. CI cannot substitute for browser/GPU performance evidence; final C5 closure still requires the human/device runs above.
