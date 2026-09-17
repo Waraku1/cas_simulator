@@ -3,9 +3,10 @@
 ## Status
 
 - C4C authoritative match runtime: **CLOSED / ACCEPTED** after human QA.
-- C4D school-local rated product: **AUTOMATED E2E PASS** on main `a6cec45697d9e076bf984843b186660b2671e556` and retained by later main CI.
-- C4D production Worker/Durable Object authority code: **IMPLEMENTED / CI GREEN** on main `e2470fa005ac8f6abd405ba071ba62f6bfb64011`.
-- One-account/one-active-rated-match integrity hardening: **IMPLEMENTED / CI PENDING** on `c4d/active-match-integrity`.
+- C4D school-local rated product: **AUTOMATED E2E PASS** and retained by later main CI.
+- C4D production Worker/Durable Object authority code: **IMPLEMENTED / CI GREEN**.
+- One-account/one-active-rated-match integrity hardening: **IMPLEMENTED / MAIN CI GREEN** on `da66df9b2266e5b9a6c9dee8b7b75d752489c144` (Project CI #102).
+- Production rated-product smoke and deterministic cleanup: **IMPLEMENTED / CI PREPARATION** on `c4d/production-smoke-prep`.
 - Production D1 provisioning, binding, migration, deployment, and public rated-product smoke: **BLOCKED ON CLOUDFLARE D1 API AUTHORIZATION**.
 
 C4D is not closed until the production persistence gate is completed.
@@ -103,6 +104,26 @@ The CI gate `C4D_AUTHENTICATED_RATED_PRODUCT_SMOKE` covers:
 
 The pure runtime gate additionally verifies 20-second reconnect grace, initial-connect grace, and dual-initial-absence NO CONTEST behavior. The same CI run retains C3, C4B, C4C, and account regression gates.
 
+## Production rated-product smoke
+
+`scripts/verify-production-rated-product.mjs` is prepared as the final C4D public verification gate. It is wired into the deploy workflow only when `C4D_RATED_PRODUCTION_GATE=enabled`, so the existing C3 deployment path remains unchanged while D1 is unavailable.
+
+The production gate verifies:
+
+- two production account registrations and HttpOnly sessions;
+- authenticated two-account matchmaking;
+- rejection of a second queue attempt while an account is already locked to an active match;
+- random assignment without premature `fixableAircraftId` mutation;
+- authenticated RankedMatch connection and FORFEIT result;
+- `1200 -> 1184 / 1216` and exactly one LOSS/WIN update;
+- post-result `fixableAircraftId` persistence;
+- duplicate-result idempotency by replaying the completed match;
+- leaderboard ordering;
+- fixed-aircraft selection;
+- active-match lock release followed by a second successful fixed-aircraft match.
+
+Smoke account login IDs are deterministically derived from the GitHub Actions run ID. An `always()` cleanup step removes related `rated_matches`, sessions, and users in that order after a deployed rated smoke, including failure cases.
+
 ## Production D1 deployment gate
 
 The repository contains migrations:
@@ -112,7 +133,12 @@ The repository contains migrations:
 
 The production `ACCOUNTS` D1 binding is intentionally not configured with a placeholder database ID. A real Cloudflare D1 database must first be provisioned, and the resulting real `database_id` must then be bound as `ACCOUNTS` and both migrations applied.
 
-An isolated GitHub Actions provisioning attempt was executed before any production deployment. Cloudflare rejected `wrangler d1 list --json` with API authentication error code `10000`. No D1 database, migration, binding, or Worker deployment was created by that failed run. The existing production service therefore remained unchanged.
+Two isolated provisioning preflights were executed before any production D1 deployment. The second preflight established the exact authorization boundary:
+
+- `wrangler whoami`: **PASS** — the GitHub secret is a valid Cloudflare User API Token and resolves the configured account.
+- `wrangler d1 list --json`: **FAIL** — Cloudflare rejects `/accounts/{account}/d1/database` with authentication error code `10000`.
+
+Therefore the current blocker is specifically D1 API authorization on the existing token, not an invalid Cloudflare identity or account ID. No D1 database, migration, binding, or Worker deployment was created by the failed runs; production remained unchanged.
 
 Until D1 authorization is available:
 
@@ -120,4 +146,4 @@ Until D1 authorization is available:
 - account and authenticated ranked-product routes fail closed with `STORAGE_UNAVAILABLE` rather than falling back to client identity;
 - the D1 provisioning workflow remains safely rerunnable after the Cloudflare token is granted D1 access.
 
-After provisioning, C4D requires a production smoke covering account creation/session, two-account matchmaking, one completed rated result, account refresh, leaderboard update, duplicate-result protection, active-match lock behavior, and fixed-aircraft persistence before C4D can be closed.
+After D1 authorization is corrected, the remaining production sequence is bounded: provision/reuse `cas-simulator-accounts` -> apply both migrations -> bind real `database_id` as `ACCOUNTS` -> enable `C4D_RATED_PRODUCTION_GATE` -> deploy -> run C3 smoke and full C4D production rated smoke -> verify cleanup -> close C4D.

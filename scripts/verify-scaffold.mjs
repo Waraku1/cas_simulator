@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -52,6 +53,7 @@ const required = [
   "scripts/school-ranked-runtime.mjs",
   "scripts/school-ranked-product-backend.mjs",
   "scripts/verify-production-multiplayer.mjs",
+  "scripts/verify-production-rated-product.mjs",
   "scripts/verify-school-matchmaking.mjs",
   "scripts/verify-school-competition.mjs",
   "scripts/verify-school-accounts.mjs",
@@ -69,6 +71,10 @@ for (const relative of required) {
   await access(join(root, relative));
 }
 
+execFileSync(process.execPath, ["--check", join(root, "scripts/verify-production-rated-product.mjs")], {
+  stdio: "inherit",
+});
+
 const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 if (pkg.dependencies?.cesium !== "1.145.0") throw new Error("Unexpected Cesium version");
 if (!pkg.scripts?.build || !pkg.scripts?.deploy) throw new Error("Missing build/deploy scripts");
@@ -82,6 +88,9 @@ if (!pkg.scripts?.["verify:school:c4c"] || !pkg.scripts?.["verify:c4c:runtime"])
 }
 if (!pkg.scripts?.["verify:school:c4d"] || !pkg.scripts?.["verify:school:c4d:ranked"]) {
   throw new Error("Missing C4D school account/rated-product verification scripts");
+}
+if (!pkg.scripts?.["verify:production:c4d"]?.includes("verify-production-rated-product.mjs")) {
+  throw new Error("Missing C4D production rated-product verification command");
 }
 
 const schoolConfig = await readFile(join(root, "vite.school.config.ts"), "utf8");
@@ -171,7 +180,27 @@ if (!schoolRuntime.includes("disconnectDeadlineMs: init.activeAtMs + DISCONNECT_
   throw new Error("C4D school runtime must mirror the production initial connection grace");
 }
 
+const productionRatedSmoke = await readFile(join(root, "scripts/verify-production-rated-product.mjs"), "utf8");
+for (const evidence of [
+  "account_in_active_match",
+  "fixableAircraftId === null",
+  "duplicateResultIgnored",
+  "activeMatchLockReleased",
+  "fixedAircraftRematchPersisted",
+  "C4D_PRODUCTION_RATED_PRODUCT_SMOKE",
+]) {
+  if (!productionRatedSmoke.includes(evidence)) {
+    throw new Error(`C4D production rated smoke is missing evidence: ${evidence}`);
+  }
+}
+
 const deployWorkflow = await readFile(join(root, ".github/workflows/deploy.yml"), "utf8");
 if (!deployWorkflow.includes("verify-production-multiplayer.mjs")) throw new Error("Missing C3 production multiplayer deploy verification");
+if (!deployWorkflow.includes("C4D_RATED_PRODUCTION_GATE") || !deployWorkflow.includes("verify:production:c4d")) {
+  throw new Error("C4D production rated smoke must be gated into the deploy workflow");
+}
+if (!deployWorkflow.includes("C4D_PRODUCTION_SMOKE_CLEANUP=PASS") || !deployWorkflow.includes("DELETE FROM rated_matches")) {
+  throw new Error("C4D production smoke must clean up rated-match and account test rows");
+}
 
 console.log(`Scaffold integrity OK (${required.length} required files).`);

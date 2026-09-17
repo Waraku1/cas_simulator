@@ -13,12 +13,14 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       VITE_CESIUM_ION_TOKEN: ${{ secrets.VITE_CESIUM_ION_TOKEN }}
       PRODUCTION_URL: ${{ vars.PRODUCTION_URL || 'https://cas-flight-simulator.heleshiheiheleshihei.workers.dev' }}
+      C4D_RATED_PRODUCTION_GATE: ${{ vars.C4D_RATED_PRODUCTION_GATE || 'disabled' }}
+      C4D_ACCOUNTS_DB_NAME: cas-simulator-accounts
 
     steps:
       - name: Checkout
@@ -49,6 +51,7 @@ jobs:
         run: pnpm build
 
       - name: Deploy to Cloudflare Workers
+        id: deploy
         run: pnpm exec wrangler deploy
 
       - name: Verify production root
@@ -62,3 +65,21 @@ jobs:
 
       - name: Verify multiplayer WebSocket relay
         run: node scripts/verify-production-multiplayer.mjs
+
+      - name: Verify C4D production rated product
+        if: env.C4D_RATED_PRODUCTION_GATE == 'enabled'
+        env:
+          C4D_SMOKE_RUN_ID: ${{ github.run_id }}${{ github.run_attempt }}
+        run: pnpm verify:production:c4d
+
+      - name: Cleanup C4D production smoke accounts
+        if: ${{ always() && env.C4D_RATED_PRODUCTION_GATE == 'enabled' && steps.deploy.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SEED="$(printf '%s' '${{ github.run_id }}${{ github.run_attempt }}' | tr -cd '[:alnum:]' | tail -c 10)"
+          LOGIN_A="c4dpa_${SEED}"
+          LOGIN_B="c4dpb_${SEED}"
+          SQL="DELETE FROM rated_matches WHERE first_user_id IN (SELECT user_id FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B')) OR second_user_id IN (SELECT user_id FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B')); DELETE FROM sessions WHERE user_id IN (SELECT user_id FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B')); DELETE FROM users WHERE login_id IN ('$LOGIN_A','$LOGIN_B');"
+          pnpm exec wrangler d1 execute "$C4D_ACCOUNTS_DB_NAME" --remote --command "$SQL"
+          echo "C4D_PRODUCTION_SMOKE_CLEANUP=PASS"
