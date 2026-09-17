@@ -45,6 +45,9 @@ jobs:
       - name: Verify C5A hardening contract
         run: pnpm verify:c5a
 
+      - name: Verify C5B performance evidence contract
+        run: pnpm verify:c5b
+
       - name: Production build
         run: pnpm build
 
