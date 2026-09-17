@@ -4,6 +4,7 @@ import { EarthScene } from "./components/EarthScene";
 import { FlightHud } from "./components/FlightHud";
 import { MultiplayerPanel } from "./components/MultiplayerPanel";
 import { TheaterStatusPanel } from "./components/TheaterStatusPanel";
+import { PerformanceEvidenceProbe } from "./diagnostics/PerformanceEvidenceProbe";
 import { INITIAL_FLIGHT_TELEMETRY } from "./flight/model";
 import {
   useMultiplayer,
@@ -90,6 +91,7 @@ export function FlightRuntime({
       <TheaterStatusPanel status={theaterStatus} />
       {showDevelopmentPanels && <MultiplayerPanel controller={manualMultiplayer} />}
       {showDevelopmentPanels && <DiagnosticsPanel />}
+      {!showDevelopmentPanels && <PerformanceEvidenceProbe />}
       {showProductLinkState && (
         <div
           aria-live="polite"
