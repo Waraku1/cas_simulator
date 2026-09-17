@@ -48,6 +48,9 @@ jobs:
       - name: Verify C5B performance evidence contract
         run: pnpm verify:c5b
 
+      - name: Verify C5C release governance contract
+        run: pnpm verify:c5c
+
       - name: Production build
         run: pnpm build
 
