@@ -29,6 +29,12 @@ function parseKeyValue(text) {
   return values;
 }
 
+function timestamp(value, label) {
+  const parsed = Date.parse(value ?? "");
+  assert(Number.isFinite(parsed), `${label} must be a valid timestamp`);
+  return parsed;
+}
+
 async function collectFiles(path) {
   const info = await stat(path);
   if (info.isFile()) return [path];
@@ -70,10 +76,22 @@ async function uniqueJsonByGate(files, expectedGate, label) {
       const value = JSON.parse(await readFile(path, "utf8"));
       if (value?.gate === expectedGate) matches.push({ path, value });
     } catch {
-      // Non-JSON or unrelated JSON evidence is ignored here and may still be packaged.
+      // Unrelated JSON is allowed to remain in retained evidence.
     }
   }
   assert(matches.length === 1, `${label} must contain exactly one JSON record with gate=${expectedGate}; found ${matches.length}`);
+  return matches[0];
+}
+
+async function deployEvidenceByPurpose(files, purpose) {
+  const matches = [];
+  for (const path of files.filter((entry) => basename(entry) === "metadata.txt")) {
+    const metadata = parseKeyValue(await readFile(path, "utf8"));
+    if (metadata.action === "deploy" && metadata.deployment_purpose === purpose) {
+      matches.push({ path, metadata, files: await collectFiles(dirname(path)) });
+    }
+  }
+  assert(matches.length === 1, `c5cDeploy must contain exactly one ${purpose} deployment artifact; found ${matches.length}`);
   return matches[0];
 }
 
@@ -97,6 +115,21 @@ async function assertRatedSmoke(files, gate) {
   const smoke = JSON.parse(await readFile(uniqueFile(files, "c4d-rated-smoke.txt", gate), "utf8"));
   assert(smoke?.ok === true, `${gate} rated-product smoke did not report ok=true`);
   assert(smoke?.gate === "C4D_PRODUCTION_RATED_PRODUCT_SMOKE", `${gate} has unexpected rated-product smoke gate`);
+}
+
+async function assertDeployEvidence(deployEvidence, releaseSha, purpose) {
+  const { metadata, files } = deployEvidence;
+  const label = `c5cDeploy.${purpose}`;
+  assert(metadata.action === "deploy", `${label} metadata action must be deploy`);
+  assert(metadata.deployment_purpose === purpose, `${label} deployment purpose mismatch`);
+  assert(metadata.git_sha === releaseSha, `${label} Git SHA does not match releaseSha`);
+  assert(metadata.c4d_rated_production_gate === "enabled", `${label} rated production gate was not enabled`);
+  const started = timestamp(metadata.started_at, `${label}.started_at`);
+  const finished = timestamp(metadata.finished_at, `${label}.finished_at`);
+  assert(finished >= started, `${label} finished before it started`);
+  await assertRatedSmoke(files, label);
+  await assertCleanupZero(files, label, "C4D_PRODUCTION_SMOKE_CLEANUP=PASS");
+  return { started, finished };
 }
 
 async function currentAccountsDatabaseId() {
@@ -145,20 +178,25 @@ async function validateLineage(manifestPathInput, bindingIdOverride = null) {
     C5B_EVIDENCE_SELF_TEST: "0",
   });
 
-  const deployMetadata = parseKeyValue(await readFile(uniqueFile(byGate.c5cDeploy, "metadata.txt", "c5cDeploy"), "utf8"));
-  assert(deployMetadata.action === "deploy", "c5cDeploy metadata action must be deploy");
-  assert(deployMetadata.git_sha === manifest.releaseSha, "c5cDeploy Git SHA does not match releaseSha");
-  assert(deployMetadata.c4d_rated_production_gate === "enabled", "c5cDeploy rated production gate was not enabled");
-  await assertRatedSmoke(byGate.c5cDeploy, "c5cDeploy");
-  await assertCleanupZero(byGate.c5cDeploy, "c5cDeploy", "C4D_PRODUCTION_SMOKE_CLEANUP=PASS");
+  const initialDeploy = await deployEvidenceByPurpose(byGate.c5cDeploy, "initial_release");
+  const restoreDeploy = await deployEvidenceByPurpose(byGate.c5cDeploy, "restore_after_rollback");
+  const initialTiming = await assertDeployEvidence(initialDeploy, manifest.releaseSha, "initial_release");
+  const restoreTiming = await assertDeployEvidence(restoreDeploy, manifest.releaseSha, "restore_after_rollback");
 
-  const rollbackMetadata = parseKeyValue(await readFile(uniqueFile(byGate.c5cRollback, "metadata.txt", "c5cRollback"), "utf8"));
+  const rollbackMetadataPath = uniqueFile(byGate.c5cRollback, "metadata.txt", "c5cRollback");
+  const rollbackMetadata = parseKeyValue(await readFile(rollbackMetadataPath, "utf8"));
   assert(rollbackMetadata.action === "rollback", "c5cRollback metadata action must be rollback");
   assert(rollbackMetadata.governance_git_sha === manifest.releaseSha, "c5cRollback governance Git SHA does not match releaseSha");
   assert(rollbackMetadata.c4d_rated_production_gate === "enabled", "c5cRollback rated production gate was not enabled");
   assert(typeof rollbackMetadata.target_version_id === "string" && rollbackMetadata.target_version_id.trim(), "c5cRollback target_version_id is missing");
+  const rollbackStarted = timestamp(rollbackMetadata.started_at, "c5cRollback.started_at");
+  const rollbackFinished = timestamp(rollbackMetadata.finished_at, "c5cRollback.finished_at");
+  assert(rollbackFinished >= rollbackStarted, "c5cRollback finished before it started");
   await assertRatedSmoke(byGate.c5cRollback, "c5cRollback");
   await assertCleanupZero(byGate.c5cRollback, "c5cRollback", "C4D_ROLLBACK_SMOKE_CLEANUP=PASS");
+
+  assert(initialTiming.finished < rollbackStarted, "C5C lineage requires initial_release deploy to finish before rollback starts");
+  assert(rollbackFinished < restoreTiming.started, "C5C lineage requires rollback to finish before restore_after_rollback deploy starts");
 
   const c5dReport = await uniqueJsonByGate(byGate.c5dSchool, "C5D_SCHOOL_RELEASE_REGRESSION", "c5dSchool");
   const c5dObservation = await uniqueJsonByGate(byGate.c5dSchool, "C5D_MANAGED_MAC_OBSERVATION", "c5dSchool");
@@ -184,20 +222,23 @@ async function validateLineage(manifestPathInput, bindingIdOverride = null) {
     gate: "C5F_EVIDENCE_LINEAGE",
     releaseSha: manifest.releaseSha,
     databaseId: boundDatabaseId,
+    finalProductionState: "restore_after_rollback",
     verified: REQUIRED_GATES,
   }, null, 2));
 }
 
 async function validateCommittedContract() {
   const provisionWorkflow = await readFile(resolve(root, ".github/workflows/c4d-provision-d1.yml"), "utf8");
+  const deployWorkflow = await readFile(resolve(root, ".github/workflows/deploy.yml"), "utf8");
   const ciWorkflow = await readFile(resolve(root, ".github/workflows/ci.yml"), "utf8");
   const packageJson = await readFile(resolve(root, "package.json"), "utf8");
   const runbook = await readFile(resolve(root, "docs/operations/C5F_CAS_EVIDENCE_PACKAGE.md"), "utf8");
   assert(provisionWorkflow.includes("c4d-provision.json") && provisionWorkflow.includes("c4d-d1-provision-"), "C4D provisioning workflow must retain machine-readable lineage evidence");
+  assert(deployWorkflow.includes("deployment_purpose") && deployWorkflow.includes("initial_release") && deployWorkflow.includes("restore_after_rollback"), "Deploy workflow must distinguish initial release and final restoration evidence");
   assert(ciWorkflow.includes("c5-final-ci.json"), "Project CI must retain final-main lineage metadata");
   assert(ciWorkflow.includes("C5B_EVIDENCE_SELF_TEST=1") && ciWorkflow.includes("C5D_EVIDENCE_SELF_TEST=1"), "Project CI must self-test C5B/C5D structured evidence validators");
   assert(packageJson.includes('"verify:c5b:evidence"') && packageJson.includes('"verify:c5d:evidence"'), "package scripts must expose C5B/C5D evidence validators");
-  for (const token of ["c4d-provision.json", "c5b-performance.json", "c4d-cleanup-verification.json", "c5d-managed-mac-observation.json", "C5E", "c5-final-ci.json", "all seven", "same release SHA"]) {
+  for (const token of ["c4d-provision.json", "c5b-performance.json", "c4d-cleanup-verification.json", "c5d-managed-mac-observation.json", "C5E", "c5-final-ci.json", "all seven", "same release SHA", "initial_release", "restore_after_rollback", "final production state"]) {
     assert(runbook.includes(token), `C5F runbook missing lineage requirement: ${token}`);
   }
   console.log("C5F evidence lineage contract PASS");
@@ -223,12 +264,20 @@ function performanceSnapshot(seconds, benchmarkComplete = false) {
   };
 }
 
+async function writeDeployEvidence(directory, releaseSha, purpose, startedAt, finishedAt, cleanup, smoke) {
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "metadata.txt"), `action=deploy\ndeployment_purpose=${purpose}\ngit_sha=${releaseSha}\nc4d_rated_production_gate=enabled\nstarted_at=${startedAt}\nfinished_at=${finishedAt}\n`, "utf8");
+  await writeFile(join(directory, "c4d-rated-smoke.txt"), smoke, "utf8");
+  await writeFile(join(directory, "c4d-cleanup-verification.json"), cleanup, "utf8");
+  await writeFile(join(directory, "c4d-cleanup.txt"), "C4D_PRODUCTION_SMOKE_CLEANUP=PASS\n", "utf8");
+}
+
 async function selfTest() {
   const releaseSha = "a".repeat(40);
   const databaseId = "123e4567-e89b-42d3-a456-426614174000";
   const temp = await mkdtemp(join(tmpdir(), "cas-c5f-lineage-"));
   try {
-    for (const directory of ["provision", "performance", "deploy", "rollback", "school", "human", "ci"]) await mkdir(join(temp, directory), { recursive: true });
+    for (const directory of ["provision", "performance", "rollback", "school", "human", "ci"]) await mkdir(join(temp, directory), { recursive: true });
     await writeFile(join(temp, "provision/c4d-provision.json"), JSON.stringify({
       gate: "C4D_PRODUCTION_D1", status: "PASS", provisioning: "PASS", d1ReadAuthorization: "PASS", schema: "PASS",
       databaseName: "cas-simulator-accounts", databaseId,
@@ -245,14 +294,12 @@ async function selfTest() {
 
     const cleanup = JSON.stringify([{ results: [{ users_remaining: 0, sessions_remaining: 0, rated_matches_remaining: 0 }] }]);
     const smoke = JSON.stringify({ ok: true, gate: "C4D_PRODUCTION_RATED_PRODUCT_SMOKE" });
-    await writeFile(join(temp, "deploy/metadata.txt"), `action=deploy\ngit_sha=${releaseSha}\nc4d_rated_production_gate=enabled\n`, "utf8");
-    await writeFile(join(temp, "deploy/c4d-rated-smoke.txt"), smoke, "utf8");
-    await writeFile(join(temp, "deploy/c4d-cleanup-verification.json"), cleanup, "utf8");
-    await writeFile(join(temp, "deploy/c4d-cleanup.txt"), "C4D_PRODUCTION_SMOKE_CLEANUP=PASS\n", "utf8");
-    await writeFile(join(temp, "rollback/metadata.txt"), `action=rollback\ngovernance_git_sha=${releaseSha}\ntarget_version_id=version-1\nc4d_rated_production_gate=enabled\n`, "utf8");
+    await writeDeployEvidence(join(temp, "deploy-initial"), releaseSha, "initial_release", "2026-01-01T00:00:00Z", "2026-01-01T00:01:00Z", cleanup, smoke);
+    await writeFile(join(temp, "rollback/metadata.txt"), `action=rollback\ngovernance_git_sha=${releaseSha}\ntarget_version_id=version-1\nc4d_rated_production_gate=enabled\nstarted_at=2026-01-01T00:02:00Z\nfinished_at=2026-01-01T00:03:00Z\n`, "utf8");
     await writeFile(join(temp, "rollback/c4d-rated-smoke.txt"), smoke, "utf8");
     await writeFile(join(temp, "rollback/c4d-cleanup-verification.json"), cleanup, "utf8");
     await writeFile(join(temp, "rollback/c4d-cleanup.txt"), "C4D_ROLLBACK_SMOKE_CLEANUP=PASS\n", "utf8");
+    await writeDeployEvidence(join(temp, "deploy-restore"), releaseSha, "restore_after_rollback", "2026-01-01T00:04:00Z", "2026-01-01T00:05:00Z", cleanup, smoke);
 
     const schoolReport = {
       gate: "C5D_SCHOOL_RELEASE_REGRESSION", ok: true,
@@ -268,9 +315,7 @@ async function selfTest() {
     await writeFile(join(temp, "school/c5d-school-regression.json"), JSON.stringify(schoolReport, null, 2), "utf8");
     await writeFile(join(temp, "school/c5d-managed-mac-observation.json"), JSON.stringify(schoolObservation, null, 2), "utf8");
 
-    const c5e = {
-      gate: "C5E_HUMAN_QA_VISUAL_SIGNOFF", releaseSha,
-    };
+    const c5e = { gate: "C5E_HUMAN_QA_VISUAL_SIGNOFF", releaseSha };
     await writeFile(join(temp, "human/c5e.json"), JSON.stringify(c5e, null, 2), "utf8");
     await writeFile(join(temp, "ci/c5-final-ci.json"), JSON.stringify({
       gate: "C5_FINAL_MAIN_CI", gitSha: releaseSha, gitRef: "refs/heads/main", event: "push", verificationStepsPassed: true,
@@ -281,7 +326,7 @@ async function selfTest() {
       evidence: {
         c4dProduction: { status: "PASS", files: ["provision"] },
         c5bPerformance: { status: "PASS", files: ["performance"] },
-        c5cDeploy: { status: "PASS", files: ["deploy"] },
+        c5cDeploy: { status: "PASS", files: ["deploy-initial", "deploy-restore"] },
         c5cRollback: { status: "PASS", files: ["rollback"] },
         c5dSchool: { status: "PASS", files: ["school"] },
         c5eHumanQa: { status: "PASS", files: ["human"] },
@@ -292,22 +337,27 @@ async function selfTest() {
     await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
     await validateLineage(manifestPath, databaseId);
 
-    await expectFailure("wrong deploy SHA", async () => {
-      await writeFile(join(temp, "deploy/metadata.txt"), `action=deploy\ngit_sha=${"b".repeat(40)}\nc4d_rated_production_gate=enabled\n`, "utf8");
+    await expectFailure("wrong restoration deploy SHA", async () => {
+      await writeDeployEvidence(join(temp, "deploy-restore"), "b".repeat(40), "restore_after_rollback", "2026-01-01T00:04:00Z", "2026-01-01T00:05:00Z", cleanup, smoke);
       await validateLineage(manifestPath, databaseId);
     });
-    await writeFile(join(temp, "deploy/metadata.txt"), `action=deploy\ngit_sha=${releaseSha}\nc4d_rated_production_gate=enabled\n`, "utf8");
+    await writeDeployEvidence(join(temp, "deploy-restore"), releaseSha, "restore_after_rollback", "2026-01-01T00:04:00Z", "2026-01-01T00:05:00Z", cleanup, smoke);
 
-    await expectFailure("non-zero cleanup", async () => {
-      await writeFile(join(temp, "deploy/c4d-cleanup-verification.json"), JSON.stringify([{ results: [{ users_remaining: 1, sessions_remaining: 0, rated_matches_remaining: 0 }] }]), "utf8");
+    await expectFailure("restoration deploy before rollback finished", async () => {
+      await writeDeployEvidence(join(temp, "deploy-restore"), releaseSha, "restore_after_rollback", "2026-01-01T00:02:30Z", "2026-01-01T00:05:00Z", cleanup, smoke);
       await validateLineage(manifestPath, databaseId);
     });
-    await writeFile(join(temp, "deploy/c4d-cleanup-verification.json"), cleanup, "utf8");
+    await writeDeployEvidence(join(temp, "deploy-restore"), releaseSha, "restore_after_rollback", "2026-01-01T00:04:00Z", "2026-01-01T00:05:00Z", cleanup, smoke);
+
+    await expectFailure("non-zero restoration cleanup", async () => {
+      await writeFile(join(temp, "deploy-restore/c4d-cleanup-verification.json"), JSON.stringify([{ results: [{ users_remaining: 1, sessions_remaining: 0, rated_matches_remaining: 0 }] }]), "utf8");
+      await validateLineage(manifestPath, databaseId);
+    });
+    await writeFile(join(temp, "deploy-restore/c4d-cleanup-verification.json"), cleanup, "utf8");
 
     await expectFailure("provision/binding mismatch", () => validateLineage(manifestPath, "223e4567-e89b-42d3-a456-426614174000"));
 
-    const wrongC5e = { ...c5e, releaseSha: "b".repeat(40) };
-    await writeFile(join(temp, "human/c5e.json"), JSON.stringify(wrongC5e, null, 2), "utf8");
+    await writeFile(join(temp, "human/c5e.json"), JSON.stringify({ ...c5e, releaseSha: "b".repeat(40) }, null, 2), "utf8");
     await expectFailure("C5E evidence from another release", () => validateLineage(manifestPath, databaseId));
     console.log("C5F all-gate evidence lineage self-test PASS");
   } finally {

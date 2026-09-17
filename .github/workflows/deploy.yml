@@ -7,6 +7,13 @@ on:
         description: Paste the exact full commit SHA selected for this production deployment
         required: true
         type: string
+      deployment_purpose:
+        description: Select whether this is the initial release deploy or the post-rollback restoration deploy
+        required: true
+        type: choice
+        options:
+          - initial_release
+          - restore_after_rollback
 
 permissions:
   contents: read
@@ -36,6 +43,7 @@ jobs:
         shell: bash
         env:
           CONFIRM_SHA: ${{ inputs.confirm_sha }}
+          DEPLOYMENT_PURPOSE: ${{ inputs.deployment_purpose }}
         run: |
           set -euo pipefail
           if [ "$CONFIRM_SHA" != "$GITHUB_SHA" ]; then
@@ -44,9 +52,14 @@ jobs:
             echo "received=$CONFIRM_SHA"
             exit 1
           fi
+          if [ "$DEPLOYMENT_PURPOSE" != "initial_release" ] && [ "$DEPLOYMENT_PURPOSE" != "restore_after_rollback" ]; then
+            echo "Refusing production deploy: unsupported deployment_purpose=$DEPLOYMENT_PURPOSE"
+            exit 1
+          fi
           mkdir -p "$EVIDENCE_DIR"
           {
             echo "action=deploy"
+            echo "deployment_purpose=$DEPLOYMENT_PURPOSE"
             echo "git_sha=$GITHUB_SHA"
             echo "git_ref=$GITHUB_REF"
             echo "github_run_id=$GITHUB_RUN_ID"
@@ -91,7 +104,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pnpm exec wrangler deploy --message "C5 deploy git:${GITHUB_SHA} run:${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          pnpm exec wrangler deploy --message "C5 deploy purpose:${{ inputs.deployment_purpose }} git:${GITHUB_SHA} run:${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
 
       - name: Verify production root
         shell: bash
@@ -182,7 +195,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: c5-production-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+          name: c5-production-deploy-${{ inputs.deployment_purpose }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: /tmp/c5-release-evidence
           if-no-files-found: error
           retention-days: 30
