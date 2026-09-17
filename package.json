@@ -30,7 +30,7 @@
     "deploy": "pnpm build && wrangler deploy",
     "cf:typegen": "wrangler types",
     "check": "tsc -b",
-    "validate:scaffold": "node scripts/verify-scaffold.mjs"
+    "validate:scaffold": "node scripts/verify-release-scaffold.mjs"
   },
   "dependencies": {
     "cesium": "1.145.0",
