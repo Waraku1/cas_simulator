@@ -7,6 +7,7 @@
 - C5A accessibility and security hardening: merged.
 - C5B performance/evidence instrumentation: merged via PR #53 at `20b66fa33b47cf5aff5f54b081ecb902766261e1`.
 - C5C deploy/rollback governance: merged via PR #54 at `93868f8d7bafcb2e7731865fb01298fc4b706615`.
+- C5D school-local regression evidence packaging: merged via PR #55 at `ad54678253a4fd0ea104f60dbdc00f19fff59ccf`; post-merge Project CI #133 passed.
 
 ## C5B — performance/evidence execution
 
@@ -20,23 +21,27 @@ The merged C5C release-governance contract provides manual-only immutable-SHA pr
 
 C5C implementation is merged, but execution evidence is not closed until production deploy and rollback workflows are actually exercised and their artifacts retained. Final rated-product release evidence must be performed after C4D production D1 provisioning/binding/migrations are operational and `C4D_RATED_PRODUCTION_GATE=enabled`.
 
-## C5D — school-local regression evidence
+## C5D — school-local regression execution
 
-Implementation is in progress on `c5d/school-regression-evidence`.
+The merged C5D gate packages C3 multiplayer, C4B matchmaking/assignment, C4C competition, C4D account/session/leaderboard, and C4D authenticated ranked-product smoke into one structured evidence command. Hosted Project CI retains the aggregate report and launcher/health evidence as an artifact.
 
-C5D packages the existing school-local release surface into one aggregate evidence command. It covers C3 multiplayer, C4B matchmaking/assignment, C4C competition, C4D account/session/leaderboard, and C4D authenticated ranked-product smoke while recording Git/runtime/OS metadata and per-gate output.
+C5D implementation is merged and hosted-CI evidence is green. Final device-specific closure still requires the same aggregate command on the supported managed school Mac plus browser usability observation; hosted Linux CI does not substitute for that managed-device evidence.
 
-Project CI retains the aggregate school regression report as an artifact. Final C5D execution evidence still requires the same aggregate command on the supported managed school Mac plus a browser usability observation; CI on a hosted Linux runner does not substitute for that device-specific evidence.
+## C5E — human QA / visual sign-off
 
-C5D also updates the school compatibility documentation from the earlier two-process C3 description to the current four-service C4 localhost topology.
+Implementation is in progress on `c5e/human-qa-visual-signoff`.
+
+C5E defines a single evidence record for the eight critical product surfaces, accepted flight/camera behavior, two-browser peer rendering, reconnect state, product diagnostics boundary, keyboard path, 200% zoom, compact desktop layout, and explicit final visual/UX sign-off. CI validates the QA contract/template only; it cannot manufacture human visual evidence.
+
+A completed C5E record must identify a concrete 40-character release SHA and environment/device metadata, mark every C5E-01..16 case PASS, retain representative captures for all eight product surfaces plus multiplayer evidence, and pass `C5E_EVIDENCE_FILE=<record> pnpm verify:c5e`.
 
 ## Remaining C5 gates
 
 1. Execute and retain C5B browser/device performance evidence.
 2. Close C4D production D1 provisioning/binding/migrations/rated smoke once Cloudflare D1 authorization is available.
 3. Execute and retain final C5C production deploy/rollback evidence after the C4D prerequisite is closed.
-4. Merge C5D, then execute and retain the supported managed-school-Mac regression evidence.
-5. Complete browser/device human QA and final visual/UX sign-off.
+4. Execute and retain C5D supported managed-school-Mac regression evidence.
+5. Merge C5E, then execute browser/device human QA and final visual/UX sign-off.
 6. Assemble the final CAS development/testing evidence package.
 
 No C1-C4 product semantics are changed by this status packet.
