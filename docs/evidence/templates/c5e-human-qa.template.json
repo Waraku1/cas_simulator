@@ -1,0 +1,44 @@
+{
+  "gate": "C5E_HUMAN_QA_VISUAL_SIGNOFF",
+  "releaseSha": "",
+  "tester": "",
+  "capturedAt": "",
+  "environment": {
+    "kind": "production-or-school-local",
+    "url": "",
+    "browser": "",
+    "browserVersion": "",
+    "operatingSystem": "",
+    "device": ""
+  },
+  "cases": [
+    { "id": "C5E-01", "status": "PENDING", "notes": "Auth", "evidenceRefs": [] },
+    { "id": "C5E-02", "status": "PENDING", "notes": "Home", "evidenceRefs": [] },
+    { "id": "C5E-03", "status": "PENDING", "notes": "Matchmaking", "evidenceRefs": [] },
+    { "id": "C5E-04", "status": "PENDING", "notes": "Aircraft assignment", "evidenceRefs": [] },
+    { "id": "C5E-05", "status": "PENDING", "notes": "Countdown", "evidenceRefs": [] },
+    { "id": "C5E-06", "status": "PENDING", "notes": "Active HUD", "evidenceRefs": [] },
+    { "id": "C5E-07", "status": "PENDING", "notes": "Result", "evidenceRefs": [] },
+    { "id": "C5E-08", "status": "PENDING", "notes": "Leaderboard", "evidenceRefs": [] },
+    { "id": "C5E-09", "status": "PENDING", "notes": "Flight/camera", "evidenceRefs": [] },
+    { "id": "C5E-10", "status": "PENDING", "notes": "Peer rendering/interpolation", "evidenceRefs": [] },
+    { "id": "C5E-11", "status": "PENDING", "notes": "Connection lifecycle", "evidenceRefs": [] },
+    { "id": "C5E-12", "status": "PENDING", "notes": "Product diagnostics boundary", "evidenceRefs": [] },
+    { "id": "C5E-13", "status": "PENDING", "notes": "Keyboard path", "evidenceRefs": [] },
+    { "id": "C5E-14", "status": "PENDING", "notes": "200% zoom", "evidenceRefs": [] },
+    { "id": "C5E-15", "status": "PENDING", "notes": "1280x720 compact desktop viewport", "evidenceRefs": [] },
+    { "id": "C5E-16", "status": "PENDING", "notes": "Final visual/UX sign-off", "evidenceRefs": [] }
+  ],
+  "surfaceCaptures": {
+    "auth": "",
+    "home": "",
+    "matchmaking": "",
+    "aircraftAssignment": "",
+    "countdown": "",
+    "activeHud": "",
+    "result": "",
+    "leaderboard": ""
+  },
+  "multiplayerCapture": "",
+  "overallNotes": ""
+}
