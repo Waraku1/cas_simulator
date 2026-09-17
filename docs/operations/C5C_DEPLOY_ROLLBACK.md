@@ -25,6 +25,18 @@ Rollback never selects an implicit previous version. This avoids ambiguity when 
 
 Both workflows share the `production-deploy` concurrency group, so a deploy and rollback cannot mutate production concurrently.
 
+### Rated D1 binding preflight
+
+`pnpm validate:scaffold` routes through `scripts/verify-release-scaffold.mjs`. When `C4D_RATED_PRODUCTION_GATE=enabled`, the release scaffold invokes the production-binding validator with `C4D_BINDING_REQUIRED=1` before the Worker deployment command can run.
+
+The validator requires exactly one D1 entry with:
+
+- `binding: "ACCOUNTS"`;
+- `database_name: "cas-simulator-accounts"`;
+- a real, non-placeholder D1 UUID in `database_id`.
+
+A missing binding is allowed only while the rated production gate is disabled, which preserves the current pre-provision repository state. Once the rated gate is enabled, missing, duplicate, wrongly named, malformed, or placeholder bindings fail closed before Worker mutation. Project CI runs a synthetic validator self-test so these rejection paths remain protected even before the real database ID exists.
+
 ## Evidence model
 
 Before and after each production action, the workflow records:
@@ -52,12 +64,13 @@ The evidence directory is uploaded with `actions/upload-artifact@v4` even when a
 3. Select the exact release ref.
 4. Copy the full SHA for that ref and paste it into `confirm_sha`.
 5. Dispatch the workflow.
-6. Retain the `c5-production-deploy-<run>-<attempt>` artifact.
-7. Confirm the artifact's `metadata.txt` records the intended SHA.
-8. Confirm `deployments-after.json` and `versions-after.json` show the resulting Worker deployment/version state.
-9. Confirm root, health and multiplayer smoke evidence are PASS.
-10. For final C5 closure, run with `C4D_RATED_PRODUCTION_GATE=enabled` after the C4D production D1 prerequisite is closed and require the rated-product smoke to pass.
-11. Confirm `c4d-cleanup-verification.json` reports zero remaining run-scoped users, sessions, and rated matches, and require `C4D_PRODUCTION_SMOKE_CLEANUP=PASS`.
+6. Require the scaffold phase to report `C4D_PRODUCTION_BINDING=PASS` when `C4D_RATED_PRODUCTION_GATE=enabled`; any binding failure blocks deployment.
+7. Retain the `c5-production-deploy-<run>-<attempt>` artifact.
+8. Confirm the artifact's `metadata.txt` records the intended SHA.
+9. Confirm `deployments-after.json` and `versions-after.json` show the resulting Worker deployment/version state.
+10. Confirm root, health and multiplayer smoke evidence are PASS.
+11. For final C5 closure, run with `C4D_RATED_PRODUCTION_GATE=enabled` after the C4D production D1 prerequisite is closed and require the rated-product smoke to pass.
+12. Confirm `c4d-cleanup-verification.json` reports zero remaining run-scoped users, sessions, and rated matches, and require `C4D_PRODUCTION_SMOKE_CLEANUP=PASS`.
 
 `wrangler deploy` receives a version/deployment message containing the Git SHA and Actions run identity, creating a direct trace from Cloudflare version history back to GitHub evidence.
 
@@ -94,8 +107,10 @@ Final C5 closure requires a production deploy and the required rollback evidence
 C5C implementation is ready when:
 
 - Project CI validates the deploy/rollback governance contract;
+- Project CI self-tests the C4D production binding validator;
 - both workflows remain manual-only;
 - immutable SHA confirmation is enforced;
+- a rated production deploy fails closed unless the reviewed release config contains the exact real `ACCOUNTS` D1 binding;
 - rollback requires an explicit version ID and explicit confirmation;
 - before/after Cloudflare state is captured;
 - production smoke evidence is retained as an artifact;

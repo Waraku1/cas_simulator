@@ -18,6 +18,7 @@
     "verify:c5d:school": "node scripts/verify-c5d-school-regression.mjs",
     "verify:production:c4d": "node scripts/verify-production-rated-product.mjs",
     "verify:c4c:runtime": "node scripts/verify-c4c-runtime.mjs",
+    "verify:c4d:binding": "node scripts/verify-c4d-production-binding.mjs",
     "verify:c5a": "node scripts/verify-c5a-hardening.mjs",
     "verify:c5b": "node scripts/verify-c5b-performance.mjs",
     "verify:c5c": "node scripts/verify-c5c-release-governance.mjs",
@@ -29,7 +30,7 @@
     "deploy": "pnpm build && wrangler deploy",
     "cf:typegen": "wrangler types",
     "check": "tsc -b",
-    "validate:scaffold": "node scripts/verify-scaffold.mjs"
+    "validate:scaffold": "node scripts/verify-release-scaffold.mjs"
   },
   "dependencies": {
     "cesium": "1.145.0",

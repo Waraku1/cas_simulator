@@ -6,7 +6,14 @@ function read(path) {
 
 const deploy = read(".github/workflows/deploy.yml");
 const rollback = read(".github/workflows/rollback.yml");
+const ci = read(".github/workflows/ci.yml");
 const runbook = read("docs/operations/C5C_DEPLOY_ROLLBACK.md");
+const releaseScaffold = read("scripts/verify-release-scaffold.mjs");
+const bindingValidator = read("scripts/verify-c4d-production-binding.mjs");
+const pkg = JSON.parse(read("package.json"));
+
+const deployScaffoldIndex = deploy.indexOf("pnpm validate:scaffold");
+const deployMutationIndex = deploy.indexOf("wrangler deploy --message");
 
 const checks = [
   ["deploy remains manual-only", deploy.includes("workflow_dispatch:") && !deploy.includes("pull_request:") && !deploy.includes("push:")],
@@ -18,6 +25,12 @@ const checks = [
   ["deploy retains smoke evidence", deploy.includes("multiplayer-smoke.txt") && deploy.includes("health-after.json")],
   ["deploy verifies C4D smoke cleanup zero counts", deploy.includes("c4d-cleanup-verification.json") && deploy.includes("users_remaining") && deploy.includes("sessions_remaining") && deploy.includes("rated_matches_remaining") && deploy.includes("C4D_SMOKE_CLEANUP_ZERO_COUNTS=PASS")],
   ["deploy uploads evidence artifact", deploy.includes("actions/upload-artifact@v4") && deploy.includes("c5-production-deploy-")],
+  ["package exposes C4D production binding verifier", pkg.scripts?.["verify:c4d:binding"]?.includes("verify-c4d-production-binding.mjs")],
+  ["CI self-tests C4D production binding validator", ci.includes("C4D_BINDING_SELF_TEST=1 pnpm verify:c4d:binding")],
+  ["rated release scaffold requires real D1 binding", releaseScaffold.includes('C4D_RATED_PRODUCTION_GATE === "enabled"') && releaseScaffold.includes('C4D_BINDING_REQUIRED: "1"') && releaseScaffold.includes("verify-c4d-production-binding.mjs")],
+  ["deploy runs guarded scaffold before Worker mutation", deployScaffoldIndex >= 0 && deployMutationIndex > deployScaffoldIndex],
+  ["binding validator freezes ACCOUNTS database identity", bindingValidator.includes('EXPECTED_BINDING = "ACCOUNTS"') && bindingValidator.includes('EXPECTED_DATABASE_NAME = "cas-simulator-accounts"')],
+  ["binding validator rejects placeholder or malformed database IDs", bindingValidator.includes("UUID_PATTERN") && bindingValidator.includes("ZERO_UUID") && bindingValidator.includes("real non-placeholder D1 UUID")],
   ["rollback remains manual-only", rollback.includes("workflow_dispatch:") && !rollback.includes("pull_request:") && !rollback.includes("push:")],
   ["rollback requires exact SHA confirmation", rollback.includes("confirm_sha:") && rollback.includes('if [ "$CONFIRM_SHA" != "$GITHUB_SHA" ]')],
   ["rollback requires explicit version ID", rollback.includes("target_version_id:") && rollback.includes('TARGET_VERSION_ID: ${{ inputs.target_version_id }}')],
@@ -30,6 +43,7 @@ const checks = [
   ["rollback uploads evidence artifact", rollback.includes("actions/upload-artifact@v4") && rollback.includes("c5-production-rollback-")],
   ["runbook distinguishes implementation from execution evidence", runbook.includes("C5C execution evidence is closed only after")],
   ["runbook preserves C4D final prerequisite", runbook.includes("C4D_RATED_PRODUCTION_GATE=enabled") && runbook.includes("C4D production D1")],
+  ["runbook documents fail-closed D1 binding preflight", runbook.includes("C4D_BINDING_REQUIRED=1") && runbook.includes("ACCOUNTS") && runbook.includes("cas-simulator-accounts")],
   ["runbook documents verified cleanup evidence", runbook.includes("c4d-cleanup-verification.json") && runbook.includes("zero-count")],
   ["runbook documents Durable Object rollback boundary", runbook.includes("Durable Object / binding constraint")],
 ];
