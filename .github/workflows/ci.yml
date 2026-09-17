@@ -60,6 +60,9 @@ jobs:
       - name: Verify C5C release governance contract
         run: pnpm verify:c5c
 
+      - name: Verify C5C Worker version-state validator
+        run: C5C_VERSION_STATE_SELF_TEST=1 pnpm verify:c5c:version-state
+
       - name: Verify C5E human QA contract
         run: pnpm verify:c5e
 
