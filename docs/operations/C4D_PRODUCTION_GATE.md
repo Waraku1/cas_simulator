@@ -8,7 +8,7 @@ Do not bind a placeholder D1 ID and do not enable the rated production gate unti
 
 ## Execution sequence after D1 authorization is available
 
-1. Re-run the isolated `C4D provision D1` workflow on `ops/c4d-d1-provision`.
+1. From the main branch, manually dispatch the `C4D provision D1` GitHub Actions workflow.
 2. Confirm `C4D_D1_READ_AUTHORIZATION=PASS`.
 3. Provision or reuse `cas-simulator-accounts` and record the returned real database ID.
 4. Confirm both migrations apply remotely and the schema contains `users`, `sessions`, `rated_matches`, and `d1_migrations`.
@@ -21,6 +21,8 @@ Do not bind a placeholder D1 ID and do not enable the rated production gate unti
 11. Require `C4D_PRODUCTION_SMOKE_CLEANUP=PASS`.
 12. Verify no smoke users remain in D1, then close C4D and proceed to C5 release hardening.
 
+The provisioning workflow performs no Worker deployment. It only validates Cloudflare identity/D1 authorization, creates or reuses the named D1 database, applies migrations, validates the expected schema, and prints the real database ID for the subsequent reviewed binding PR.
+
 ## Production rated smoke contract
 
 The smoke creates two run-scoped accounts, verifies authenticated matchmaking, the one-account/one-active-match lock, an authoritative FORFEIT result, rating/W-L updates, post-result fixable-aircraft persistence, duplicate-result idempotency, leaderboard ordering, fixed-aircraft selection, lock release, and a second match.
@@ -29,6 +31,7 @@ The deploy workflow derives smoke login IDs from the GitHub Actions run ID. Its 
 
 ## Failure handling
 
+- D1 authorization failure: stop before create/reuse, migration, binding, or deploy.
 - D1 provisioning/migration failure: stop before changing `wrangler.jsonc` or deploying.
 - Worker deploy failure: do not run rated smoke; existing deployment remains the rollback target.
 - C3 production smoke failure: treat as release regression and stop C4D closure.
