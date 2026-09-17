@@ -1,0 +1,144 @@
+name: C5 KDF benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [c5/kdf-worker-benchmark]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c5-kdf-benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_CONFIG: wrangler.kdf-benchmark.jsonc
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Cloudflare identity
+        run: pnpm exec wrangler whoami
+
+      - name: Deploy isolated benchmark Worker
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKER_NAME="cas-kdf-bench-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "worker_name=$WORKER_NAME" >> "$GITHUB_OUTPUT"
+          DEPLOY_LOG="$(pnpm exec wrangler deploy --config "$WRANGLER_CONFIG" --name "$WORKER_NAME" 2>&1)"
+          echo "$DEPLOY_LOG"
+          WORKER_URL="$(printf '%s\n' "$DEPLOY_LOG" | grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' | tail -n 1 || true)"
+          if [ -z "$WORKER_URL" ]; then
+            echo "Unable to determine temporary benchmark Worker URL." >&2
+            exit 1
+          fi
+          echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
+          echo "C5_KDF_BENCHMARK_WORKER=$WORKER_URL"
+
+      - name: Warm benchmark Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 5 --retry-delay 1 --retry-all-errors \
+            "${{ steps.deploy.outputs.worker_url }}/benchmark?iterations=100000" > /dev/null
+
+      - name: Measure PBKDF2 work factors
+        id: measure
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > /tmp/kdf-results.ndjson
+          for iterations in 100000 200000 300000 400000 500000 600000; do
+            for sample in 1 2 3 4 5; do
+              BODY_FILE="/tmp/kdf-body-${iterations}-${sample}.txt"
+              HTTP_CODE="$(curl --silent --show-error --output "$BODY_FILE" --write-out '%{http_code}' \
+                "${{ steps.deploy.outputs.worker_url }}/benchmark?iterations=${iterations}" || true)"
+              BODY="$(cat "$BODY_FILE" 2>/dev/null || true)"
+              ITERATIONS="$iterations" SAMPLE="$sample" HTTP_CODE="$HTTP_CODE" BODY="$BODY" node <<'NODE' >> /tmp/kdf-results.ndjson
+          const iterations = Number(process.env.ITERATIONS);
+          const sample = Number(process.env.SAMPLE);
+          const status = Number(process.env.HTTP_CODE || 0);
+          let body = null;
+          try { body = JSON.parse(process.env.BODY || "null"); } catch { body = null; }
+          const success = status === 200 && body?.ok === true && Number.isFinite(body?.elapsedMs);
+          process.stdout.write(JSON.stringify({
+            iterations,
+            sample,
+            status,
+            success,
+            elapsedMs: success ? body.elapsedMs : null,
+          }) + "\n");
+          NODE
+            done
+          done
+          cat /tmp/kdf-results.ndjson
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const rows = fs.readFileSync("/tmp/kdf-results.ndjson", "utf8")
+            .trim().split(/\n+/).filter(Boolean).map(JSON.parse);
+          const summary = [];
+          for (const iterations of [100000, 200000, 300000, 400000, 500000, 600000]) {
+            const set = rows.filter((row) => row.iterations === iterations);
+            const good = set.filter((row) => row.success).map((row) => row.elapsedMs).sort((a, b) => a - b);
+            const median = good.length ? good[Math.floor(good.length / 2)] : null;
+            const max = good.length ? good[good.length - 1] : null;
+            summary.push({
+              iterations,
+              successes: good.length,
+              attempts: set.length,
+              medianElapsedMs: median,
+              maxElapsedMs: max,
+              httpFailures: set.filter((row) => !row.success).map((row) => row.status),
+            });
+          }
+          fs.writeFileSync("/tmp/kdf-summary.json", JSON.stringify(summary, null, 2));
+          console.log(JSON.stringify({ gate: "C5_KDF_WORKERS_BENCHMARK", summary }, null, 2));
+          const baseline = summary.find((entry) => entry.iterations === 100000);
+          if (!baseline || baseline.successes < 3) {
+            throw new Error("Benchmark runtime is not stable enough even at 100k iterations.");
+          }
+          NODE
+
+      - name: Upload benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: c5-kdf-workers-benchmark-${{ github.run_id }}
+          path: |
+            /tmp/kdf-results.ndjson
+            /tmp/kdf-summary.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Delete isolated benchmark Worker
+        if: ${{ always() && steps.deploy.outputs.worker_name != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler delete --config "$WRANGLER_CONFIG" --name "${{ steps.deploy.outputs.worker_name }}"
+          echo "C5_KDF_BENCHMARK_CLEANUP=PASS"
