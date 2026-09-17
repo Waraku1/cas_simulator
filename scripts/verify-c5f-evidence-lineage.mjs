@@ -35,6 +35,21 @@ function timestamp(value, label) {
   return parsed;
 }
 
+function parseJsonFromLog(text, label) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    assert(start >= 0 && end > start, `${label} does not contain a JSON object`);
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch (error) {
+      throw new Error(`${label} contains an invalid JSON payload: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
 async function collectFiles(path) {
   const info = await stat(path);
   if (info.isFile()) return [path];
@@ -112,7 +127,8 @@ async function assertCleanupZero(files, gate, passMarker) {
 }
 
 async function assertRatedSmoke(files, gate) {
-  const smoke = JSON.parse(await readFile(uniqueFile(files, "c4d-rated-smoke.txt", gate), "utf8"));
+  const path = uniqueFile(files, "c4d-rated-smoke.txt", gate);
+  const smoke = parseJsonFromLog(await readFile(path, "utf8"), `${gate} rated-product smoke`);
   assert(smoke?.ok === true, `${gate} rated-product smoke did not report ok=true`);
   assert(smoke?.gate === "C4D_PRODUCTION_RATED_PRODUCT_SMOKE", `${gate} has unexpected rated-product smoke gate`);
 }
@@ -251,7 +267,7 @@ async function expectFailure(label, callback) {
     console.log(`PASS lineage self-test rejects ${label}`);
     return;
   }
-  throw new Error(`Lineage self-test unexpectedly accepted ${label}`);
+  throw new Error(`Lineage self-test unexpectedly accepted ${label}.`);
 }
 
 function performanceSnapshot(seconds, benchmarkComplete = false) {
@@ -293,7 +309,8 @@ async function selfTest() {
     await writeFile(join(temp, "performance/c5b-performance.json"), JSON.stringify(c5b, null, 2), "utf8");
 
     const cleanup = JSON.stringify([{ results: [{ users_remaining: 0, sessions_remaining: 0, rated_matches_remaining: 0 }] }]);
-    const smoke = JSON.stringify({ ok: true, gate: "C4D_PRODUCTION_RATED_PRODUCT_SMOKE" });
+    const smokePayload = JSON.stringify({ ok: true, gate: "C4D_PRODUCTION_RATED_PRODUCT_SMOKE" }, null, 2);
+    const smoke = `> cas-flight-simulator@0.1.0 verify:production:c4d\n> node scripts/verify-production-rated-product.mjs\n\n${smokePayload}\n`;
     await writeDeployEvidence(join(temp, "deploy-initial"), releaseSha, "initial_release", "2026-01-01T00:00:00Z", "2026-01-01T00:01:00Z", cleanup, smoke);
     await writeFile(join(temp, "rollback/metadata.txt"), `action=rollback\ngovernance_git_sha=${releaseSha}\ntarget_version_id=version-1\nc4d_rated_production_gate=enabled\nstarted_at=2026-01-01T00:02:00Z\nfinished_at=2026-01-01T00:03:00Z\n`, "utf8");
     await writeFile(join(temp, "rollback/c4d-rated-smoke.txt"), smoke, "utf8");
