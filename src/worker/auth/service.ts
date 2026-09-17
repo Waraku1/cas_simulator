@@ -2,9 +2,9 @@ import { isAircraftId } from "../../shared/aircraft";
 import {
   ACCOUNT_API,
   AUTH_CONTRACT,
+  isValidCredential,
   isValidDisplayName,
   isValidLoginId,
-  isValidPassword,
   normalizeDisplayName,
   normalizeLoginId,
   type AuthErrorCode,
@@ -21,7 +21,7 @@ import {
 } from "./crypto";
 import type { AuthRepository, StoredUser } from "./repository";
 
-const PASSWORD_KDF_ITERATIONS = 600_000;
+const SERVER_KDF_ITERATIONS = AUTH_CONTRACT.serverPbkdf2Iterations;
 const SESSION_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
 
 function profile(user: StoredUser): PublicUserProfile {
@@ -123,12 +123,12 @@ export async function handleAccountApi(
 
   if (url.pathname === ACCOUNT_API.register && request.method === "POST") {
     const body = await jsonBody(request);
-    if (!body || typeof body.loginId !== "string" || typeof body.displayName !== "string" || typeof body.password !== "string") {
+    if (!body || typeof body.loginId !== "string" || typeof body.displayName !== "string" || typeof body.credential !== "string") {
       return error("INVALID_INPUT", "Registration payload is invalid.", 400);
     }
     const loginId = normalizeLoginId(body.loginId);
     const displayName = normalizeDisplayName(body.displayName);
-    if (!isValidLoginId(loginId) || !isValidDisplayName(displayName) || !isValidPassword(body.password)) {
+    if (!isValidLoginId(loginId) || !isValidDisplayName(displayName) || !isValidCredential(body.credential)) {
       return error("INVALID_INPUT", "Registration fields do not satisfy the account contract.", 400);
     }
     if (await repository.findUserByLoginId(loginId)) {
@@ -137,14 +137,14 @@ export async function handleAccountApi(
 
     const nowMs = Date.now();
     const passwordSalt = createPasswordSalt();
-    const passwordHash = await derivePasswordHash(body.password, passwordSalt, PASSWORD_KDF_ITERATIONS);
+    const passwordHash = await derivePasswordHash(body.credential, passwordSalt, SERVER_KDF_ITERATIONS);
     const user: StoredUser = {
       userId: crypto.randomUUID(),
       loginId,
       displayName,
       passwordHash,
       passwordSalt,
-      passwordIterations: PASSWORD_KDF_ITERATIONS,
+      passwordIterations: SERVER_KDF_ITERATIONS,
       rating: RATING_RULES.initialRating,
       wins: 0,
       losses: 0,
@@ -167,11 +167,11 @@ export async function handleAccountApi(
 
   if (url.pathname === ACCOUNT_API.login && request.method === "POST") {
     const body = await jsonBody(request);
-    if (!body || typeof body.loginId !== "string" || typeof body.password !== "string") {
+    if (!body || typeof body.loginId !== "string" || typeof body.credential !== "string" || !isValidCredential(body.credential)) {
       return error("INVALID_INPUT", "Login payload is invalid.", 400);
     }
     const user = await repository.findUserByLoginId(normalizeLoginId(body.loginId));
-    if (!user || !(await verifyPasswordHash(body.password, user.passwordSalt, user.passwordIterations, user.passwordHash))) {
+    if (!user || !(await verifyPasswordHash(body.credential, user.passwordSalt, user.passwordIterations, user.passwordHash))) {
       return error("INVALID_CREDENTIALS", "User ID or password is incorrect.", 401);
     }
     return issueSession(user, repository, secureCookie);
