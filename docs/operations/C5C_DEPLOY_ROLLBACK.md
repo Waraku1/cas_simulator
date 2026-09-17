@@ -58,6 +58,14 @@ Rollback receives a stricter preflight. Before any rollback mutation, the curren
 
 After rollback, Cloudflare deployment state is queried again. `c5c-rollback-version-state.json` is emitted only when the requested target is now the sole 100% live version. Its gate is `C5C_ROLLBACK_VERSION_STATE`.
 
+### Production URL / Wrangler deploy target binding
+
+The recorded production URL is not accepted merely because HTTP smoke succeeds against it. After version-state verification, the deploy workflow runs `pnpm verify:c5c:target` against `c5c-deploy-version-state.json`.
+
+The validator requires the recorded production URL to be represented by at least one HTTP URL in Wrangler's structured deploy `targets` array. Scheme and host must match. When a target has a non-root route path, the production URL path must equal that route base or be below it. A target ending in `*` is treated as a route prefix.
+
+This closes the environment-identity gap where Worker version evidence could otherwise belong to one deployed Worker while root/health/multiplayer smoke was accidentally pointed at another endpoint. The same target binding is revalidated from retained deploy artifacts during C5F final package verification.
+
 ## Evidence model
 
 Before and after each production action, the workflow records Cloudflare deployment/version state, Git identity, Actions run identity, production URL, rated-gate state, UTC start/finish timestamps, production root/health, multiplayer smoke, rated-product smoke, and verified D1 cleanup evidence.
@@ -68,7 +76,7 @@ Version-state evidence adds:
 
 - `wrangler-output.ndjson` for deploy identity/version provenance;
 - `deployments-live.json` immediately after the mutation;
-- `c5c-deploy-version-state.json` for each deploy;
+- `c5c-deploy-version-state.json` for each deploy, including the Wrangler deploy target list used for production URL binding;
 - `c5c-rollback-preflight.json` before rollback;
 - `c5c-rollback-version-state.json` after rollback.
 
@@ -80,9 +88,9 @@ Artifacts are retained for 30 days even when a later verification step fails.
 
 Final C5C evidence is intentionally a three-mutation sequence on the same release SHA:
 
-1. **Initial release deploy** — dispatch **Deploy production** on the final release SHA with `deployment_purpose=initial_release`. Require the rated gate enabled, Worker version-state PASS, full smoke PASS, and zero-count cleanup evidence. Retain the purpose-labeled deployment artifact.
+1. **Initial release deploy** — dispatch **Deploy production** on the final release SHA with `deployment_purpose=initial_release`. Require the rated gate enabled, Worker version-state PASS, production URL / Wrangler deploy target binding PASS, full smoke PASS, and zero-count cleanup evidence. Retain the purpose-labeled deployment artifact.
 2. **Rollback proof** — select a known-good compatible Worker version and dispatch **Rollback production** from the same release governance SHA. The target must differ from the current 100% live initial-release version. Require rollback preflight PASS, post-rollback Worker version-state PASS, root/health/multiplayer/rated smoke PASS, and zero-count cleanup. Retain the rollback artifact.
-3. **Final restoration deploy** — dispatch **Deploy production** again on the exact same release SHA with `deployment_purpose=restore_after_rollback`. Require the same full version-state and production validation, then retain the restoration artifact.
+3. **Final restoration deploy** — dispatch **Deploy production** again on the exact same release SHA with `deployment_purpose=restore_after_rollback`. Require the same full version-state, production URL target binding, and production validation, then retain the restoration artifact.
 
 The restoration deploy is mandatory. Successful rollback evidence by itself leaves production on the rollback target and therefore cannot represent the final production state.
 
@@ -95,9 +103,10 @@ The restoration deploy is mandatory. Successful rollback evidence by itself leav
 5. Dispatch the workflow.
 6. Require `C4D_PRODUCTION_BINDING=PASS` when the rated gate is enabled.
 7. Require `c5c-deploy-version-state.json` to report PASS and its `deployedVersionId` to equal `afterLiveVersionId`.
-8. Require root, health, multiplayer, and rated-product smoke PASS.
-9. Require `c4d-cleanup-verification.json` zero counts and `C4D_PRODUCTION_SMOKE_CLEANUP=PASS`.
-10. Retain `c5-production-deploy-initial_release-<run>-<attempt>`.
+8. Require the recorded production URL to match one of the Wrangler deploy targets through `pnpm verify:c5c:target`.
+9. Require root, health, multiplayer, and rated-product smoke PASS.
+10. Require `c4d-cleanup-verification.json` zero counts and `C4D_PRODUCTION_SMOKE_CLEANUP=PASS`.
+11. Retain `c5-production-deploy-initial_release-<run>-<attempt>`.
 
 ## Rollback procedure
 
@@ -118,11 +127,12 @@ The restoration deploy is mandatory. Successful rollback evidence by itself leav
 4. Dispatch the workflow.
 5. Require the same binding preflight and build checks as the initial deploy.
 6. Require restoration `c5c-deploy-version-state.json` PASS.
-7. Require the same root/health/multiplayer/rated-product smoke and zero-count cleanup as the initial deploy.
-8. Retain `c5-production-deploy-restore_after_rollback-<run>-<attempt>`.
-9. Treat this successful restoration deployment as the final production state for C5 closure.
+7. Require the recorded production URL to match one of the restoration Wrangler deploy targets.
+8. Require the same root/health/multiplayer/rated-product smoke and zero-count cleanup as the initial deploy.
+9. Retain `c5-production-deploy-restore_after_rollback-<run>-<attempt>`.
+10. Treat this successful restoration deployment as the final production state for C5 closure.
 
-C5F machine-checks both chronology and Worker version continuity. The final lineage must prove:
+C5F machine-checks chronology, Worker version continuity, and endpoint identity. The final lineage must prove:
 
 - the initial deploy finished before rollback began;
 - rollback finished before restoration began;
@@ -131,11 +141,12 @@ C5F machine-checks both chronology and Worker version continuity. The final line
 - the restoration deploy begins while the rollback target is still the sole 100% live version;
 - the restoration deploy's resulting version becomes the new sole 100% live version;
 - initial and restoration deploys have the same Worker name and Worker identity tag;
-- initial deploy, rollback, and restoration use the same production URL.
+- initial deploy, rollback, and restoration use the same production URL;
+- each deploy's production URL is represented by that deploy's retained Wrangler HTTP target list.
 
 Both deployment artifacts and the rollback artifact must identify the same release SHA/governance SHA.
 
-`wrangler deploy` includes deployment purpose, Git SHA, and Actions run identity in its Cloudflare version message, while structured output preserves the generated version ID and Worker identity for machine verification.
+`wrangler deploy` includes deployment purpose, Git SHA, and Actions run identity in its Cloudflare version message, while structured output preserves the generated version ID, Worker identity, and HTTP deploy targets for machine verification.
 
 ## Durable Object / binding constraint
 
@@ -151,6 +162,6 @@ Final C5 closure requires all three production mutations above only after the C4
 
 ## Closure criteria
 
-C5C implementation is ready when Project CI validates the manual-only workflows, immutable SHA confirmation, explicit deployment purpose, explicit rollback target/confirmation, fail-closed real D1 binding, Wrangler structured deployment identity, no-op rollback rejection, before/after 100% live Worker version checks, production smoke, and zero-count cleanup without changing C1-C4 semantics.
+C5C implementation is ready when Project CI validates the manual-only workflows, immutable SHA confirmation, explicit deployment purpose, explicit rollback target/confirmation, fail-closed real D1 binding, Wrangler structured deployment identity, production URL / Wrangler deploy target binding, no-op rollback rejection, before/after 100% live Worker version checks, production smoke, and zero-count cleanup without changing C1-C4 semantics.
 
-C5C execution evidence is closed only after the `initial_release` deploy, rollback proof, and same release SHA `restore_after_rollback` deployment have all completed successfully, their artifacts are retained, and C5F verifies chronology plus Worker version-state lineage. The restoration deploy, not the rollback target, is the required final production state.
+C5C execution evidence is closed only after the `initial_release` deploy, rollback proof, and same release SHA `restore_after_rollback` deployment have all completed successfully, their artifacts are retained, and C5F verifies chronology plus Worker version-state and endpoint lineage. The restoration deploy, not the rollback target, is the required final production state.
