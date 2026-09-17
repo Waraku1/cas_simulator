@@ -11,6 +11,7 @@ The package combines:
 - final external/device evidence references and locally retained evidence files;
 - a release manifest tied to one exact Git SHA;
 - machine-checked evidence lineage across **all seven** final gates;
+- machine-checked Worker version-state continuity across initial deploy, rollback, and restoration;
 - a verified final production state restored to the intended release after rollback proof;
 - a generated package index;
 - SHA-256 checksums for the package contents.
@@ -33,17 +34,22 @@ The required local lineage records are:
 
 - `c4dProduction`: retained **C4D provision D1** artifact containing `c4d-provision.json`;
 - `c5bPerformance`: structured `c5b-performance.json` validated against the frozen FPS/transfer thresholds;
-- `c5cDeploy`: **two** retained purpose-labeled deploy artifacts, one with `deployment_purpose=initial_release` and one with `deployment_purpose=restore_after_rollback`, each containing `metadata.txt`, `c4d-rated-smoke.txt`, `c4d-cleanup-verification.json`, and `c4d-cleanup.txt`;
-- `c5cRollback`: retained rollback artifact containing rated-smoke/cleanup evidence plus rollback `metadata.txt`;
+- `c5cDeploy`: **two** retained purpose-labeled deploy artifacts, one with `deployment_purpose=initial_release` and one with `deployment_purpose=restore_after_rollback`, each containing `metadata.txt`, `wrangler-output.ndjson`, `deployments-live.json`, `c5c-deploy-version-state.json`, `c4d-rated-smoke.txt`, `c4d-cleanup-verification.json`, and `c4d-cleanup.txt`;
+- `c5cRollback`: retained rollback artifact containing `metadata.txt`, `c5c-rollback-preflight.json`, `deployments-live.json`, `c5c-rollback-version-state.json`, rated-smoke evidence, and verified cleanup evidence;
 - `c5dSchool`: managed-school-Mac automated `C5D_SCHOOL_RELEASE_REGRESSION` report plus `c5d-managed-mac-observation.json`;
 - `c5eHumanQa`: the completed C5E JSON evidence record and its referenced captures/recording evidence;
 - `finalMainCi`: retained final Project CI artifact containing `c5-final-ci.json`.
 
 ## Evidence lineage contract
 
-Before the existing package generator copies any evidence, `pnpm verify:c5f` runs a dedicated lineage validator. Final package generation fails unless all seven evidence gates form one coherent release lineage.
+Before the existing package generator copies any evidence, `pnpm verify:c5f` runs two complementary lineage layers:
 
-The validator requires:
+1. the existing all-seven release lineage validator;
+2. the Worker version-state lineage validator.
+
+Final package generation fails unless both layers pass.
+
+The all-seven validator requires:
 
 - the final checked-out `releaseSha` to be the **same release SHA** recorded by both production deploy artifacts;
 - exactly one `initial_release` deploy artifact and exactly one `restore_after_rollback` deploy artifact;
@@ -60,6 +66,18 @@ The validator requires:
 - all three production mutations to retain `C4D_PRODUCTION_RATED_PRODUCT_SMOKE` with `ok=true` and verified zero-count cleanup evidence;
 - `c4d-provision.json` to record successful D1 read authorization, provisioning, and schema verification for `cas-simulator-accounts`;
 - the real D1 UUID in `c4d-provision.json` to exactly match the final reviewed `ACCOUNTS` binding in `wrangler.jsonc`.
+
+The Worker version-state lineage layer additionally requires:
+
+- each deploy artifact to contain `C5C_DEPLOY_VERSION_STATE=PASS` evidence whose `deployedVersionId` equals the post-deploy sole 100% live version;
+- rollback evidence to contain `C5C_ROLLBACK_VERSION_STATE=PASS` with `beforeLiveVersionId != targetVersionId` and `afterLiveVersionId == targetVersionId`;
+- the rollback `beforeLiveVersionId` to equal the initial deploy's `deployedVersionId`;
+- the restoration deploy's `beforeLiveVersionId` to equal the rollback target;
+- the restoration `deployedVersionId` to differ from the rollback target and become the sole 100% live version;
+- initial and restoration deploys to identify the same Worker name and stable Worker identity tag;
+- initial deploy, rollback, and restoration to identify the same production URL.
+
+This prevents a nominally successful but ineffective **no-op rollback**, cross-environment evidence mixing, and restoration evidence captured from a different Worker.
 
 Rollback evidence alone is intentionally insufficient: a successful rollback changes live production to the rollback target. C5F therefore requires a subsequent same release SHA `restore_after_rollback` deployment before final packaging.
 
@@ -113,7 +131,11 @@ The final release execution order is:
 2. execute the explicit known-good rollback from the same governance release SHA;
 3. deploy that exact same final release SHA again with `deployment_purpose=restore_after_rollback`.
 
-Retain both purpose-labeled deploy artifacts under the `c5cDeploy.files` entry and the rollback artifact under `c5cRollback.files`. C5F parses their UTC timestamps and rejects missing, duplicated, mislabeled, out-of-order, wrong-SHA, failed-smoke, or failed-cleanup evidence.
+Retain both purpose-labeled deploy artifacts under the `c5cDeploy.files` entry and the rollback artifact under `c5cRollback.files`.
+
+The initial deploy must prove that Wrangler's generated Worker `version_id` became the sole 100% live version. The rollback preflight then proves the target differs from that current live version. Post-rollback evidence proves the explicit target became the sole 100% live version. Finally, restoration evidence proves it started from that rollback target and replaced it with the restored release version on the same Worker identity and production URL.
+
+C5F therefore rejects missing, duplicated, mislabeled, out-of-order, wrong-SHA, wrong-Worker, cross-URL, no-op rollback, failed-smoke, failed-cleanup, or version-state-mismatched evidence.
 
 The restoration deployment is not optional cleanup paperwork: it is the operation that returns live production to the intended final release after rollback capability has been demonstrated.
 
@@ -142,7 +164,7 @@ Locally, run:
 pnpm verify:c5f
 ```
 
-With no manifest environment variable, this validates the committed C5F contract/template, required repository documentation, all-gate lineage contract, and required workflow/evidence tooling.
+With no manifest environment variable, this validates the committed C5F contract/template, required repository documentation, all-gate lineage contract, Worker version-state lineage contract, and required workflow/evidence tooling.
 
 Project CI additionally runs:
 
@@ -150,10 +172,11 @@ Project CI additionally runs:
 C5F_SELF_TEST=1 pnpm verify:c5f
 ```
 
-Project CI separately self-tests the C5B and C5D structured evidence validators. The C5F self-test then exercises both C5F layers:
+Project CI separately self-tests C5B, C5D, and C5C Worker version-state evidence validators. The C5F self-test then exercises three layers:
 
 1. the existing package generator creates temporary PASS-shaped evidence, validates it through the real C5E verifier, copies/indexes/checksums the package, and deletes it;
-2. the lineage validator accepts a complete synthetic seven-gate evidence chain and rejects a wrong restoration SHA, restoration before rollback completion, non-zero restoration cleanup, D1 provision/binding mismatch, and C5E evidence from another release.
+2. the all-seven lineage validator accepts a complete synthetic evidence chain and rejects a wrong restoration SHA, restoration before rollback completion, non-zero restoration cleanup, D1 provision/binding mismatch, and C5E evidence from another release;
+3. the Worker version-state lineage validator accepts a coherent initial/rollback/restoration chain and rejects a no-op rollback, rollback starting from another live version, restoration not starting from the rollback target, Worker identity mismatch, and production URL mismatch.
 
 Synthetic evidence never counts toward release closure.
 
@@ -165,7 +188,7 @@ Checkout the exact final release SHA first. Download/extract the required retain
 C5F_MANIFEST_FILE=.c5-evidence/c5f-package.json pnpm verify:c5f
 ```
 
-The command first validates evidence lineage and then invokes the existing package generator. It refuses to continue when, among other conditions:
+The command first validates release lineage and Worker version-state lineage, then invokes the existing package generator. It refuses to continue when, among other conditions:
 
 - `releaseSha` is not a full SHA;
 - the current checkout does not equal `releaseSha`;
@@ -175,6 +198,11 @@ The command first validates evidence lineage and then invokes the existing packa
 - final C5D evidence is not from the managed macOS/darwin path;
 - either required deploy purpose is missing or duplicated;
 - production initial-deploy/rollback/restoration ordering is invalid;
+- a rollback target was already the sole live version before rollback;
+- the initial deployed version is not the version from which rollback began;
+- the rollback target did not become 100% live;
+- restoration did not begin from the rollback target or did not replace it with the release version;
+- Worker identity or production URL differs across the three production mutations;
 - production deploy/rollback/final-main-CI lineage does not match the release SHA;
 - D1 provisioning evidence does not match the final `ACCOUNTS` binding;
 - rated smoke or zero-count cleanup evidence is invalid;
@@ -196,4 +224,4 @@ For final submission/archive, keep the package directory unchanged after checksu
 
 ## Closure boundary
 
-C5F implementation is closed when the package generator, all-gate lineage validator, C5B/C5D evidence validators, final-production-state restoration contract, and CI self-tests are merged and CI-protected. The C5F release gate is closed only when a complete lineage-validated package is successfully generated from the final release SHA after C4D and C5B-E execution evidence are all closed and the restoration deployment is live as the final production state.
+C5F implementation is closed when the package generator, all-gate lineage validator, Worker version-state lineage validator, C5B/C5D evidence validators, final-production-state restoration contract, and CI self-tests are merged and CI-protected. The C5F release gate is closed only when a complete lineage-validated package is successfully generated from the final release SHA after C4D and C5B-E execution evidence are all closed and the restoration deployment is live as the final production state.
