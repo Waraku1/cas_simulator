@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -69,6 +70,10 @@ const required = [
 for (const relative of required) {
   await access(join(root, relative));
 }
+
+execFileSync(process.execPath, ["--check", join(root, "scripts/verify-production-rated-product.mjs")], {
+  stdio: "inherit",
+});
 
 const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 if (pkg.dependencies?.cesium !== "1.145.0") throw new Error("Unexpected Cesium version");
