@@ -1,5 +1,17 @@
 const encoder = new TextEncoder();
-const supportedIterations = new Set([100_000, 200_000, 300_000, 400_000, 500_000, 600_000]);
+const supportedIterations = new Set([
+  100_000,
+  110_000,
+  120_000,
+  130_000,
+  140_000,
+  150_000,
+  160_000,
+  170_000,
+  180_000,
+  190_000,
+  200_000,
+]);
 const passwordBytes = encoder.encode("CAS-KDF-BENCHMARK-NOT-A-REAL-PASSWORD");
 const salt = new Uint8Array([
   0x43, 0x41, 0x53, 0x2d, 0x4b, 0x44, 0x46, 0x2d,
@@ -21,7 +33,6 @@ export default {
       );
     }
 
-    const startedAt = performance.now();
     const passwordKey = await crypto.subtle.importKey(
       "raw",
       passwordBytes,
@@ -39,14 +50,12 @@ export default {
       passwordKey,
       256,
     );
-    const elapsedMs = performance.now() - startedAt;
 
     return Response.json({
       ok: true,
       algorithm: "PBKDF2-HMAC-SHA256",
       iterations,
       derivedBits: 256,
-      elapsedMs: Math.round(elapsedMs * 1000) / 1000,
     }, {
       headers: {
         "cache-control": "no-store",
