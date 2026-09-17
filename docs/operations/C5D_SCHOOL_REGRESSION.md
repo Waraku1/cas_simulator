@@ -66,21 +66,47 @@ For CI, `C5D_EVIDENCE_DIR` redirects the report to an ephemeral artifact directo
 
 ## CI evidence
 
-Project CI starts the same school-local stack, executes `pnpm verify:c5d:school`, and uploads the aggregate report together with the school health response and launcher log. This is continuous regression evidence on the GitHub runner.
+Project CI starts the same school-local stack, executes `pnpm verify:c5d:school`, and uploads the aggregate report together with the school health response, launcher log, and CI lineage metadata. This is continuous regression evidence on the GitHub runner.
 
-CI does not substitute for the managed school Mac evidence because the supported school device has its own OS/network constraints.
+CI does not substitute for the managed school Mac evidence because the supported school device has its own OS/network constraints. The final evidence validator explicitly rejects hosted Linux reports as the managed-Mac closure record.
 
 ## Managed school Mac closure
 
-Final school-local release evidence requires one successful aggregate run on the supported managed Mac path. Retain the generated JSON report and record that:
+Final school-local release evidence requires one successful aggregate run on the supported managed school Mac plus one structured browser-usability observation record.
+
+After the aggregate run, create the human observation record from:
+
+```bash
+cp docs/evidence/templates/c5d-managed-mac-observation.template.json .c5-evidence/c5d-managed-mac-observation.json
+```
+
+Record the same 40-character release SHA as the automated JSON report, tester/timestamp/browser/device metadata, and confirm all of the following:
 
 - `pnpm dev:school` started without port conflicts;
 - the browser opened `http://127.0.0.1:5173` normally;
 - the five automated release gates all passed;
 - no TLS/filter bypass, VPN, alternate DNS, proxy or LAN exposure was used;
-- ordinary flight input and the product UI remained usable in the browser.
+- ordinary flight input remained usable;
+- the product UI remained usable in the browser.
 
-The browser usability observation is human evidence and is not inferred from the automated JSON report.
+Then validate both records together:
+
+```bash
+C5D_REPORT_FILE=.c5-evidence/school-regression/<report>.json \
+C5D_OBSERVATION_FILE=.c5-evidence/c5d-managed-mac-observation.json \
+pnpm verify:c5d:evidence
+```
+
+The validator requires:
+
+- the automated report to be `C5D_SCHOOL_RELEASE_REGRESSION` with `ok=true`;
+- all five underlying gates to have passed with exit code 0;
+- the automated environment platform to be `darwin`;
+- the report Git SHA and observation `releaseSha` to match exactly;
+- every required managed-Mac/browser observation to be true;
+- non-empty tester/browser/device/notes metadata.
+
+When invoked from C5F, the same SHA must also equal the final package release SHA.
 
 ## Network/security boundary
 
@@ -88,6 +114,6 @@ Do not bypass certificate warnings or school security controls. Do not expose po
 
 ## Closure criteria
 
-C5D implementation is ready when the aggregate verifier is under CI and the operational documentation matches the current four-service school runtime.
+C5D implementation is ready when the aggregate verifier and structured managed-Mac evidence validator are under CI and the operational documentation matches the current four-service school runtime.
 
-C5D execution evidence is closed only after a successful aggregate run is retained from the supported managed school Mac, plus the browser usability observation above.
+C5D execution evidence is closed only after both the successful managed-school-Mac aggregate report and the validated browser-usability observation record are retained for the final release SHA.
