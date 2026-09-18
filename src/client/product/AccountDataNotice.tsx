@@ -29,8 +29,8 @@ export function AccountDataNotice({ compact = false }: Readonly<{ compact?: bool
       </p>
       {!compact && (
         <p>
-          Production account data is stored in the application's Cloudflare D1 database. Do not put private or
-          sensitive information in your display name or user ID.
+          When production account persistence is enabled, account data is stored in the application's Cloudflare
+          D1 database. Do not put private or sensitive information in your display name or user ID.
         </p>
       )}
     </section>
