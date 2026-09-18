@@ -1,6 +1,6 @@
 # CAS Flight Simulator
 
-Browser-based CAS flight-simulator project built on Cesium Earth.
+Browser-based fictional arcade flight-simulator project built on Cesium Earth. The competitive layer uses abstract Heart Point (HP) state and deliberately avoids realistic weapons, ballistics, guidance, physical-damage modeling, or real-aircraft combat-performance simulation.
 
 ## Architecture
 
@@ -9,7 +9,9 @@ Browser-based CAS flight-simulator project built on Cesium Earth.
 - Cloudflare Workers + Static Assets in production
 - Fictional game-oriented flight model (C1, CLOSED)
 - Regional theater contract: 50 km × 50 km (C2, CLOSED)
-- Cloudflare Durable Object + Hibernation WebSocket multiplayer in production (C3)
+- Cloudflare Durable Object + Hibernation WebSocket multiplayer in production (C3, CLOSED / ACCEPTED)
+- Auth, matchmaking, fixed-aircraft assignment, abstract HP competition, rating, leaderboard, reconnect/forfeit/no-contest handling (C4 repository implementation complete)
+- Release hardening, evidence lineage, governed deploy/rollback/restoration, performance/accessibility QA contracts (C5 repository implementation complete; execution evidence pending)
 - dependency-free Node localhost multiplayer relay for the managed school Mac
 
 ## One-time setup
@@ -94,21 +96,19 @@ C3 introduces a bounded private two-player room layer:
 
 Production uses one SQLite-backed Cloudflare Durable Object per room and the Hibernation WebSocket API. School localhost uses a Node relay with the same browser-facing protocol because current `workerd` cannot run on the managed macOS 12.3 device.
 
-C3 is implemented and deployed. Production health, Durable Object binding, two-client presence, and pose relay have passed automated production verification. School-local transport is verified separately through `pnpm verify:school`.
-
-C3 contains networking/presence only. Later competition/scoring behavior remains outside this gate.
+C3 is CLOSED / ACCEPTED. Production health, Durable Object binding, two-client presence, pose relay, peer rendering, and school-local multiplayer verification have been accepted. The later C4 product loop is implemented on top of this foundation.
 
 ## Production mode
 
-Production build/deployment is executed through GitHub Actions using repository secrets for Cloudflare and Cesium credentials. The deployment workflow verifies the production root, C3 health feature, and a real two-client WebSocket pose relay.
+Production build/deployment is executed through manually dispatched GitHub Actions jobs bound to the `production` Environment. The production jobs require exact `main` SHA confirmation, share one non-cancelling production-mutation lock, and use environment secrets for Cloudflare/Cesium credentials. The release path also verifies Worker version-state, endpoint-to-deploy-target identity, multiplayer/rated-product smoke, and run-scoped cleanup.
 
-Current production health endpoint:
+Current pre-release Worker health endpoint:
 
 ```text
 https://cas-flight-simulator.heleshiheiheleshihei.workers.dev/api/health
 ```
 
-The public production hostname remains subject to the school-managed network policy. School development/demo uses `pnpm dev:school` instead of attempting to bypass that policy.
+The Worker hostname remains subject to the school-managed network policy. School development/demo uses `pnpm dev:school` instead of attempting to bypass that policy. The current Worker should not be treated as the final public release until the external repository-protection, production D1, final-device/human evidence, C5F package, and public account-data lifecycle gates are closed.
 
 ## Validate
 
@@ -126,13 +126,27 @@ pnpm dev:school
 pnpm verify:school
 ```
 
-## Project gates
+## Release status
 
 - C0 Foundation — CLOSED
 - C1 Flight — CLOSED / ACCEPTED
 - C2 World / Theater resource gate — CLOSED / ACCEPTED
-- C3 Multiplayer — IMPLEMENTED + DEPLOYED / SCHOOL LOCAL QA PENDING
-- C4 Competition loop — pending
-- C5 Release — pending
+- C3 Multiplayer — CLOSED / ACCEPTED
+- C4 Competition/product loop — REPOSITORY IMPLEMENTATION COMPLETE / PRODUCTION PERSISTENCE EVIDENCE PENDING
+- C5 Release — RELEASE-EVIDENCE PENDING
 
-See `docs/architecture/C0_FOUNDATION.md`, `docs/architecture/C0_STATUS.md`, `docs/architecture/C1_FLIGHT.md`, `docs/architecture/C2_WORLD_THEATER.md`, `docs/architecture/C3_MULTIPLAYER.md`, and `docs/operations/SCHOOL_NETWORK_COMPATIBILITY.md`.
+The remaining path to a public release is tracked in GitHub Issues #34, #48, and #71. The major open items are repository/environment protection, production D1 authorization/provisioning and reviewed binding, final-SHA performance/device/human QA evidence, governed deploy/rollback/restoration evidence, the final C5F evidence package, and an explicit account-data/privacy/deletion lifecycle before unrestricted public registration.
+
+Do not collect final C5B/C5D/C5E evidence until the real D1 binding release change has merged and the final release SHA is frozen; later source changes would invalidate SHA-bound evidence.
+
+See `docs/architecture/C0_FOUNDATION.md`, `docs/architecture/C0_STATUS.md`, `docs/architecture/C1_FLIGHT.md`, `docs/architecture/C2_WORLD_THEATER.md`, `docs/architecture/C3_MULTIPLAYER.md`, and the release runbooks under `docs/operations/`.
+
+## Security and contributions
+
+Before contributing, read [CONTRIBUTING.md](CONTRIBUTING.md). Security-sensitive reports should follow [SECURITY.md](SECURITY.md) rather than being posted with exploit details in a public issue.
+
+Do not commit API tokens, cookies, credentials, local evidence captures, or generated `.c5-evidence/` material.
+
+## License
+
+No open-source license is currently declared for this repository. Public visibility does not by itself grant permission to redistribute, modify, or relicense the project. Licensing remains a maintainer decision.
