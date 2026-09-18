@@ -144,16 +144,27 @@ jobs:
           set -euo pipefail
           RESULT="$(pnpm exec wrangler d1 execute "$DB_NAME" --remote --json --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users','sessions','rated_matches','d1_migrations') ORDER BY name;")"
           printf '%s\n' "$RESULT" | tee "$EVIDENCE_DIR/schema-after.json"
-          RESULT="$RESULT" node <<'NODE' | tee "$EVIDENCE_DIR/schema-verification.txt"
-          const payload = JSON.parse(process.env.RESULT || "[]");
-          const rows = Array.isArray(payload)
+          USER_COLUMNS="$(pnpm exec wrangler d1 execute "$DB_NAME" --remote --json --command "PRAGMA table_info(users);")"
+          printf '%s\n' "$USER_COLUMNS" | tee "$EVIDENCE_DIR/users-schema-after.json"
+          RESULT="$RESULT" USER_COLUMNS="$USER_COLUMNS" node <<'NODE' | tee "$EVIDENCE_DIR/schema-verification.txt"
+          const flattenResults = (payload) => Array.isArray(payload)
             ? payload.flatMap((entry) => entry?.results ?? [])
             : (payload?.results ?? []);
-          const names = new Set(rows.map((row) => row?.name));
+
+          const tableRows = flattenResults(JSON.parse(process.env.RESULT || "[]"));
+          const names = new Set(tableRows.map((row) => row?.name));
           for (const required of ["users", "sessions", "rated_matches", "d1_migrations"]) {
             if (!names.has(required)) throw new Error(`Missing expected D1 table: ${required}`);
           }
+
+          const userColumnRows = flattenResults(JSON.parse(process.env.USER_COLUMNS || "[]"));
+          const userColumns = new Set(userColumnRows.map((row) => row?.name));
+          if (!userColumns.has("deleted_at_ms")) {
+            throw new Error("Missing account-lifecycle column: users.deleted_at_ms");
+          }
+
           console.log("C4D_D1_SCHEMA=PASS");
+          console.log("C4D_ACCOUNT_LIFECYCLE_SCHEMA=PASS");
           NODE
 
       - name: Provisioning summary
@@ -178,6 +189,7 @@ jobs:
             databaseId: process.env.DB_ID,
             d1ReadAuthorization: "PASS",
             schema: "PASS",
+            accountLifecycleSchema: "PASS",
             provisioning: "PASS",
           };
           fs.writeFileSync(`${process.env.EVIDENCE_DIR}/c4d-provision.json`, `${JSON.stringify(value, null, 2)}\n`);
