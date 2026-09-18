@@ -45,6 +45,9 @@ jobs:
       - name: Verify C4D production binding validator
         run: C4D_BINDING_SELF_TEST=1 pnpm verify:c4d:binding
 
+      - name: Verify public account lifecycle contract
+        run: pnpm verify:public:account
+
       - name: Verify C5A hardening contract
         run: pnpm verify:c5a
 
