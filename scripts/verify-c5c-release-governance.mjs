@@ -61,6 +61,7 @@ const checks = [
   ["rollback records immutable production URL", rollback.includes("production_url=$PRODUCTION_URL")],
   ["rollback verifies target becomes 100 percent live", rollback.includes("C5C_VERSION_STATE_MODE: rollback") && rollback.includes("deployments-live.json") && rollback.includes("c5c-rollback-version-state.json")],
   ["all production mutations share one non-cancelling lock", [provision, deploy, rollback].every((workflow) => workflow.includes("group: production-mutation") && workflow.includes("cancel-in-progress: false"))],
+  ["all production mutations bind to production environment", [provision, deploy, rollback].every((workflow) => workflow.includes("environment: production"))],
   ["rollback records before and after Cloudflare state", rollback.includes("deployments-before.json") && rollback.includes("deployments-after.json") && rollback.includes("versions-before.json") && rollback.includes("versions-after.json")],
   ["rollback verifies production after mutation", rollback.includes("health-after.json") && rollback.includes("verify-production-multiplayer.mjs")],
   ["rollback verifies C4D smoke cleanup zero counts", rollback.includes("c4d-cleanup-verification.json") && rollback.includes("users_remaining") && rollback.includes("sessions_remaining") && rollback.includes("rated_matches_remaining") && rollback.includes("C4D_SMOKE_CLEANUP_ZERO_COUNTS=PASS")],

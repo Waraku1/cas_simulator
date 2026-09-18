@@ -27,6 +27,8 @@ A production rollback requires all of the following:
 
 Rollback never selects an implicit previous version. The repository performs its own explicit confirmation before Wrangler is invoked non-interactively with `--yes`. D1 provisioning, deploy, and rollback all share the `production-mutation` concurrency group with `cancel-in-progress: false`. Therefore no remote D1 provisioning/migration can overlap a Worker deploy, rollback, rated smoke, or production cleanup sequence, and no production mutation run is cancelled by a later dispatch.
 
+All three production mutation jobs also reference the GitHub Actions environment `production`. This creates the repository-side attachment point for environment required reviewers, deployment branch policies, prevent-self-review, and environment-scoped secrets. The workflow declaration alone does not prove those external Settings controls are enabled; their active configuration remains a release Gate 0/operator evidence requirement.
+
 ### Rated D1 binding preflight
 
 `pnpm validate:scaffold` routes through `scripts/verify-release-scaffold.mjs`. When `C4D_RATED_PRODUCTION_GATE=enabled`, the release scaffold invokes the production-binding validator with `C4D_BINDING_REQUIRED=1` before the Worker deployment command can run.
