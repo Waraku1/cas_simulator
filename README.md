@@ -108,7 +108,7 @@ Current pre-release Worker health endpoint:
 https://cas-flight-simulator.heleshiheiheleshihei.workers.dev/api/health
 ```
 
-The Worker hostname remains subject to the school-managed network policy. School development/demo uses `pnpm dev:school` instead of attempting to bypass that policy. The current Worker should not be treated as the final public release until the external repository-protection, production D1, final-device/human evidence, and C5F package gates are closed.
+The Worker hostname remains subject to the school-managed network policy. School development/demo uses `pnpm dev:school` instead of attempting to bypass that policy. The current Worker should not be treated as the final public release until the external repository-protection, production D1, final-device/human evidence, C5F package, and public account-data lifecycle gates are closed.
 
 ## Validate
 
@@ -135,7 +135,7 @@ pnpm verify:school
 - C4 Competition/product loop — REPOSITORY IMPLEMENTATION COMPLETE / PRODUCTION PERSISTENCE EVIDENCE PENDING
 - C5 Release — RELEASE-EVIDENCE PENDING
 
-The remaining path to a public release is tracked in GitHub Issues #34 and #48. The major open items are repository/environment protection, production D1 authorization/provisioning and reviewed binding, final-SHA performance/device/human QA evidence, governed deploy/rollback/restoration evidence, and the final C5F evidence package.
+The remaining path to a public release is tracked in GitHub Issues #34, #48, and #71. The major open items are repository/environment protection, production D1 authorization/provisioning and reviewed binding, final-SHA performance/device/human QA evidence, governed deploy/rollback/restoration evidence, the final C5F evidence package, and an explicit account-data/privacy/deletion lifecycle before unrestricted public registration.
 
 Do not collect final C5B/C5D/C5E evidence until the real D1 binding release change has merged and the final release SHA is frozen; later source changes would invalidate SHA-bound evidence.
 
