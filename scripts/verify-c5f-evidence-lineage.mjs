@@ -139,6 +139,7 @@ async function assertDeployEvidence(deployEvidence, releaseSha, purpose) {
   assert(metadata.action === "deploy", `${label} metadata action must be deploy`);
   assert(metadata.deployment_purpose === purpose, `${label} deployment purpose mismatch`);
   assert(metadata.git_sha === releaseSha, `${label} Git SHA does not match releaseSha`);
+  assert(metadata.git_ref === "refs/heads/main", `${label} must come from refs/heads/main`);
   assert(metadata.c4d_rated_production_gate === "enabled", `${label} rated production gate was not enabled`);
   const started = timestamp(metadata.started_at, `${label}.started_at`);
   const finished = timestamp(metadata.finished_at, `${label}.finished_at`);
@@ -205,6 +206,7 @@ async function validateLineage(manifestPathInput, bindingIdOverride = null) {
   const rollbackMetadata = parseKeyValue(await readFile(rollbackMetadataPath, "utf8"));
   assert(rollbackMetadata.action === "rollback", "c5cRollback metadata action must be rollback");
   assert(rollbackMetadata.governance_git_sha === manifest.releaseSha, "c5cRollback governance Git SHA does not match releaseSha");
+  assert(rollbackMetadata.governance_git_ref === "refs/heads/main", "c5cRollback governance evidence must come from refs/heads/main");
   assert(rollbackMetadata.c4d_rated_production_gate === "enabled", "c5cRollback rated production gate was not enabled");
   assert(typeof rollbackMetadata.target_version_id === "string" && rollbackMetadata.target_version_id.trim(), "c5cRollback target_version_id is missing");
   const rollbackStarted = timestamp(rollbackMetadata.started_at, "c5cRollback.started_at");
@@ -285,7 +287,7 @@ function performanceSnapshot(seconds, benchmarkComplete = false) {
 
 async function writeDeployEvidence(directory, releaseSha, purpose, startedAt, finishedAt, cleanup, smoke) {
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, "metadata.txt"), `action=deploy\ndeployment_purpose=${purpose}\ngit_sha=${releaseSha}\nc4d_rated_production_gate=enabled\nstarted_at=${startedAt}\nfinished_at=${finishedAt}\n`, "utf8");
+  await writeFile(join(directory, "metadata.txt"), `action=deploy\ndeployment_purpose=${purpose}\ngit_sha=${releaseSha}\ngit_ref=refs/heads/main\nc4d_rated_production_gate=enabled\nstarted_at=${startedAt}\nfinished_at=${finishedAt}\n`, "utf8");
   await writeFile(join(directory, "c4d-rated-smoke.txt"), smoke, "utf8");
   await writeFile(join(directory, "c4d-cleanup-verification.json"), cleanup, "utf8");
   await writeFile(join(directory, "c4d-cleanup.txt"), "C4D_PRODUCTION_SMOKE_CLEANUP=PASS\n", "utf8");
@@ -316,7 +318,7 @@ async function selfTest() {
     const smokePayload = JSON.stringify({ ok: true, gate: "C4D_PRODUCTION_RATED_PRODUCT_SMOKE" }, null, 2);
     const smoke = `> cas-flight-simulator@0.1.0 verify:production:c4d\n> node scripts/verify-production-rated-product.mjs\n\n${smokePayload}\n`;
     await writeDeployEvidence(join(temp, "deploy-initial"), releaseSha, "initial_release", "2026-01-01T00:00:00Z", "2026-01-01T00:01:00Z", cleanup, smoke);
-    await writeFile(join(temp, "rollback/metadata.txt"), `action=rollback\ngovernance_git_sha=${releaseSha}\ntarget_version_id=version-1\nc4d_rated_production_gate=enabled\nstarted_at=2026-01-01T00:02:00Z\nfinished_at=2026-01-01T00:03:00Z\n`, "utf8");
+    await writeFile(join(temp, "rollback/metadata.txt"), `action=rollback\ngovernance_git_sha=${releaseSha}\ngovernance_git_ref=refs/heads/main\ntarget_version_id=version-1\nc4d_rated_production_gate=enabled\nstarted_at=2026-01-01T00:02:00Z\nfinished_at=2026-01-01T00:03:00Z\n`, "utf8");
     await writeFile(join(temp, "rollback/c4d-rated-smoke.txt"), smoke, "utf8");
     await writeFile(join(temp, "rollback/c4d-cleanup-verification.json"), cleanup, "utf8");
     await writeFile(join(temp, "rollback/c4d-cleanup.txt"), "C4D_ROLLBACK_SMOKE_CLEANUP=PASS\n", "utf8");
@@ -357,6 +359,30 @@ async function selfTest() {
     const manifestPath = join(temp, "manifest.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
     await validateLineage(manifestPath, databaseId);
+
+    await expectFailure("deploy evidence from a non-main ref", async () => {
+      const path = join(temp, "deploy-initial/metadata.txt");
+      const original = await readFile(path, "utf8");
+      await writeFile(path, original.replace("git_ref=refs/heads/main", "git_ref=refs/heads/unreviewed"), "utf8");
+      await validateLineage(manifestPath, databaseId);
+    });
+    {
+      const path = join(temp, "deploy-initial/metadata.txt");
+      const current = await readFile(path, "utf8");
+      await writeFile(path, current.replace("git_ref=refs/heads/unreviewed", "git_ref=refs/heads/main"), "utf8");
+    }
+
+    await expectFailure("rollback evidence from a non-main ref", async () => {
+      const path = join(temp, "rollback/metadata.txt");
+      const original = await readFile(path, "utf8");
+      await writeFile(path, original.replace("governance_git_ref=refs/heads/main", "governance_git_ref=refs/heads/unreviewed"), "utf8");
+      await validateLineage(manifestPath, databaseId);
+    });
+    {
+      const path = join(temp, "rollback/metadata.txt");
+      const current = await readFile(path, "utf8");
+      await writeFile(path, current.replace("governance_git_ref=refs/heads/unreviewed", "governance_git_ref=refs/heads/main"), "utf8");
+    }
 
     await expectFailure("provision evidence from a non-main ref", async () => {
       const provisionPath = join(temp, "provision/c4d-provision.json");

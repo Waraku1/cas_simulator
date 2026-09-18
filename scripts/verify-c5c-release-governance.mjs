@@ -21,7 +21,8 @@ const rollbackMutationIndex = rollback.indexOf('wrangler rollback "$TARGET_VERSI
 
 const checks = [
   ["deploy remains manual-only", deploy.includes("workflow_dispatch:") && !deploy.includes("pull_request:") && !deploy.includes("push:")],
-  ["deploy requires exact SHA confirmation", deploy.includes("confirm_sha:") && deploy.includes('if [ "$CONFIRM_SHA" != "$GITHUB_SHA" ]')],
+  ["deploy requires exact SHA confirmation", deploy.includes("confirm_sha:") && deploy.includes('if ! [[ "$CONFIRM_SHA" =~ ^[0-9a-fA-F]{40}$ ]]') && deploy.includes('if [ "$CONFIRM_SHA" != "$GITHUB_SHA" ]')],
+  ["deploy is restricted to main before mutation", deploy.includes('if [ "$GITHUB_REF" != "refs/heads/main" ]') && deploy.indexOf('if [ "$GITHUB_REF" != "refs/heads/main" ]') < deployMutationIndex],
   ["deploy requires explicit release-state purpose", deploy.includes("deployment_purpose:") && deploy.includes("initial_release") && deploy.includes("restore_after_rollback")],
   ["deploy validates deployment purpose before mutation", deploy.includes('DEPLOYMENT_PURPOSE: ${{ inputs.deployment_purpose }}') && deploy.includes('unsupported deployment_purpose=$DEPLOYMENT_PURPOSE')],
   ["deploy records immutable Git identity, purpose and production URL", deploy.includes("git_sha=$GITHUB_SHA") && deploy.includes("git_ref=$GITHUB_REF") && deploy.includes("deployment_purpose=$DEPLOYMENT_PURPOSE") && deploy.includes("production_url=$PRODUCTION_URL")],
@@ -50,7 +51,8 @@ const checks = [
   ["production-target validator requires retained Wrangler targets", targetBindingValidator.includes("has no Wrangler deploy targets") && targetBindingValidator.includes("productionUrl is not represented by any Wrangler deploy HTTP target")],
   ["production-target validator handles route paths", targetBindingValidator.includes("targetPath") && targetBindingValidator.includes("productionPath.startsWith")],
   ["rollback remains manual-only", rollback.includes("workflow_dispatch:") && !rollback.includes("pull_request:") && !rollback.includes("push:")],
-  ["rollback requires exact SHA confirmation", rollback.includes("confirm_sha:") && rollback.includes('if [ "$CONFIRM_SHA" != "$GITHUB_SHA" ]')],
+  ["rollback requires exact SHA confirmation", rollback.includes("confirm_sha:") && rollback.includes('if ! [[ "$CONFIRM_SHA" =~ ^[0-9a-fA-F]{40}$ ]]') && rollback.includes('if [ "$CONFIRM_SHA" != "$GITHUB_SHA" ]')],
+  ["rollback is restricted to main before mutation", rollback.includes('if [ "$GITHUB_REF" != "refs/heads/main" ]') && rollback.indexOf('if [ "$GITHUB_REF" != "refs/heads/main" ]') < rollbackMutationIndex],
   ["rollback requires explicit version ID", rollback.includes("target_version_id:") && rollback.includes('TARGET_VERSION_ID: ${{ inputs.target_version_id }}')],
   ["rollback requires literal confirmation", rollback.includes("confirmation:") && rollback.includes('if [ "$CONFIRMATION" != "ROLLBACK" ]')],
   ["rollback preflight rejects no-op before Worker mutation", rollbackPreflightIndex >= 0 && rollbackMutationIndex > rollbackPreflightIndex && rollback.includes("c5c-rollback-preflight.json")],

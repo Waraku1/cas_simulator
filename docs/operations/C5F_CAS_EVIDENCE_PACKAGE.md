@@ -53,9 +53,9 @@ Final package generation fails unless all three layers pass.
 
 The all-seven validator requires:
 
-- the final checked-out `releaseSha` to be the **same release SHA** recorded by both production deploy artifacts;
+- the final checked-out `releaseSha` to be the **same release SHA** recorded by both production deploy artifacts, with each deploy metadata record coming from `refs/heads/main`;
 - exactly one `initial_release` deploy artifact and exactly one `restore_after_rollback` deploy artifact;
-- rollback governance to have been executed from that same release SHA;
+- rollback governance to have been executed from that same release SHA and from `refs/heads/main`;
 - the initial deploy to finish before rollback starts;
 - rollback to finish before the restoration deploy starts;
 - the restoration deploy to pass the same rated-product smoke and zero-count cleanup requirements as the initial deploy;
@@ -81,7 +81,7 @@ The Worker version-state lineage layer additionally requires:
 
 The production-target binding layer additionally requires each retained deploy version-state record to contain a non-empty Wrangler `targets` array and the recorded production URL to match at least one HTTP target. Scheme and host must match. If the Worker target uses a non-root route path, the production URL path must equal or fall beneath that route prefix. A terminal `*` is treated as a route wildcard.
 
-Together, these layers prevent a nominally successful but ineffective **no-op rollback**, cross-environment evidence mixing, restoration evidence captured from a different Worker, and a misconfigured production URL whose smoke checks point at an endpoint unrelated to the Worker version being proven.
+Together, these layers prevent a nominally successful but ineffective **no-op rollback**, production mutation evidence captured from a non-main ref, cross-environment evidence mixing, restoration evidence captured from a different Worker, and a misconfigured production URL whose smoke checks point at an endpoint unrelated to the Worker version being proven.
 
 Rollback evidence alone is intentionally insufficient: a successful rollback changes live production to the rollback target. C5F therefore requires a subsequent same release SHA `restore_after_rollback` deployment before final packaging.
 
@@ -179,7 +179,7 @@ C5F_SELF_TEST=1 pnpm verify:c5f
 Project CI separately self-tests C5B, C5D, C5C Worker version-state, and C5C production-target evidence validators. The C5F self-test then exercises four layers:
 
 1. the existing package generator creates temporary PASS-shaped evidence, validates it through the real C5E verifier, copies/indexes/checksums the package, and deletes it;
-2. the all-seven lineage validator accepts a complete synthetic evidence chain and rejects a wrong restoration SHA, restoration before rollback completion, non-zero restoration cleanup, D1 provision/binding mismatch, and C5E evidence from another release;
+2. the all-seven lineage validator accepts a complete synthetic evidence chain and rejects non-main deploy/rollback/provisioning evidence, a wrong restoration SHA, restoration before rollback completion, non-zero restoration cleanup, D1 provision/binding mismatch, and C5E evidence from another release;
 3. the Worker version-state lineage validator accepts a coherent initial/rollback/restoration chain and rejects a no-op rollback, rollback starting from another live version, restoration not starting from the rollback target, Worker identity mismatch, and production URL mismatch;
 4. the production-target binding validator accepts Worker trigger URLs and route prefixes, and rejects a different host, a production path outside the Worker route, or a final manifest whose deploy endpoint is not represented by retained Wrangler targets.
 
@@ -209,7 +209,7 @@ The command first validates release lineage, Worker version-state lineage, and p
 - restoration did not begin from the rollback target or did not replace it with the release version;
 - Worker identity or production URL differs across the three production mutations;
 - a deploy's production URL is not represented by its retained Wrangler HTTP target list;
-- production deploy/rollback/final-main-CI lineage does not match the release SHA;
+- production deploy/rollback/final-main-CI lineage does not match the release SHA or deploy/rollback evidence does not come from `refs/heads/main`;
 - D1 provisioning evidence does not come from `refs/heads/main` with a full Git SHA or does not match the final `ACCOUNTS` binding;
 - rated smoke or zero-count cleanup evidence is invalid;
 - a declared local evidence file/directory does not exist.
