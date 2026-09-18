@@ -13,6 +13,7 @@ import { FlightRuntime } from "../FlightRuntime";
 import { loadLeaderboard, useAccount } from "./useAccount";
 import { useMatchmaking } from "./useMatchmaking";
 import { useRankedMatch } from "./useRankedMatch";
+import { AccountDataDisclosure, AccountDataNotice } from "./AccountDataNotice";
 
 type ProductMatchOutcome = Readonly<{
   result: MatchResult;
@@ -55,6 +56,7 @@ function AuthLive({ account }: Readonly<{ account: ReturnType<typeof useAccount>
         <label className="product-field"><span>USER ID</span><input value={loginId} onChange={(event) => setLoginId(event.target.value)} autoComplete="username" placeholder="pilot-id" /></label>
         {mode === "register" && <label className="product-field"><span>DISPLAY NAME</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="nickname" placeholder="display name" /></label>}
         <label className="product-field"><span>PASSWORD</span><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder="10+ characters" onKeyDown={(event) => { if (event.key === "Enter" && !busy) void submit(); }} /></label>
+        {mode === "register" && <AccountDataDisclosure />}
         <button className="product-primary" disabled={busy} onClick={() => void submit()}>{busy ? "PLEASE WAIT" : mode === "login" ? "LOGIN" : "CREATE ACCOUNT"}</button>
         {account.errorMessage && <p className="preview-note" role="alert">{account.errorMessage}</p>}
       </section>
@@ -70,6 +72,26 @@ function HomeLive({ profile, account, onStart, onLeaderboard }: Readonly<{
 }>) {
   const fixed = profile.fixedAircraftId ? aircraftById(profile.fixedAircraftId) : null;
   const fixable = profile.fixableAircraftId ? aircraftById(profile.fixableAircraftId) : null;
+  const [showAccountData, setShowAccountData] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const deleting = account.status === "submitting";
+
+  const closeAccountData = () => {
+    if (deleting) return;
+    setShowAccountData(false);
+    setDeletePassword("");
+    setDeleteConfirmation("");
+  };
+
+  const deleteAccount = async () => {
+    const deleted = await account.deleteAccount(deletePassword, deleteConfirmation);
+    if (!deleted) return;
+    setDeletePassword("");
+    setDeleteConfirmation("");
+    setShowAccountData(false);
+  };
+
   return (
     <div className="product-screen product-screen--home">
       <div className="product-grid" aria-hidden="true" />
@@ -89,8 +111,29 @@ function HomeLive({ profile, account, onStart, onLeaderboard }: Readonly<{
             {!fixed && fixable && <button className="product-secondary" onClick={() => void account.setFixedAircraft(fixable.aircraftId)}>FIX {fixable.displayName.toUpperCase()}</button>}
           </article>
           <button className="summary-card summary-card--button" onClick={onLeaderboard}><span>LEADERBOARD</span><strong>VIEW</strong><small>RANKINGS & RECORDS</small></button>
+          <button className="summary-card summary-card--button" onClick={() => setShowAccountData(true)}><span>ACCOUNT & PRIVACY</span><strong>MANAGE</strong><small>DATA NOTICE & DELETION</small></button>
         </section>
       </main>
+      {showAccountData && (
+        <div className="account-dialog-backdrop" role="presentation">
+          <section className="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-dialog-title">
+            <div className="account-dialog__header">
+              <div><p className="product-eyebrow">ACCOUNT SETTINGS</p><h2 id="account-dialog-title">Account & privacy</h2></div>
+              <button className="product-secondary" disabled={deleting} onClick={closeAccountData}>CLOSE</button>
+            </div>
+            <AccountDataNotice />
+            <section className="account-delete-panel" aria-labelledby="account-delete-title">
+              <p className="product-eyebrow">PERMANENT ACCOUNT ACTION</p>
+              <h3 id="account-delete-title">Delete account identity</h3>
+              <p>Deletion signs this account out everywhere and cannot restore the login ID, display name, password credentials, or aircraft preferences. Pseudonymous rated-match ledger references remain for match/rating integrity.</p>
+              <label className="product-field"><span>CURRENT PASSWORD</span><input type="password" autoComplete="current-password" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} /></label>
+              <label className="product-field"><span>TYPE DELETE</span><input value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} placeholder="DELETE" /></label>
+              <button className="product-danger" disabled={deleting || deleteConfirmation !== "DELETE" || deletePassword.length === 0} onClick={() => void deleteAccount()}>{deleting ? "DELETING ACCOUNT" : "DELETE ACCOUNT"}</button>
+              {account.errorMessage && <p className="preview-note" role="alert">{account.errorMessage}</p>}
+            </section>
+          </section>
+        </div>
+      )}
       <footer className="product-footer">C4D LIVE ACCOUNT SESSION // RATING LEDGER FOUNDATION</footer>
     </div>
   );
