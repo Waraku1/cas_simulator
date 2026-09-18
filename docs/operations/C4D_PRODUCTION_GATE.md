@@ -8,7 +8,7 @@ Do not bind a placeholder D1 ID and do not enable the rated production gate unti
 
 ## Execution sequence after D1 authorization is available
 
-1. From the main branch, manually dispatch the `C4D provision D1` GitHub Actions workflow.
+1. Read the current full 40-character `main` SHA and manually dispatch the `C4D provision D1` GitHub Actions workflow from `main`, supplying that exact value as `confirm_sha`. The workflow must emit `C4D_PROVISION_SOURCE=PASS`; any non-`refs/heads/main` ref or SHA mismatch fails before Cloudflare access.
 2. Confirm `C4D_D1_READ_AUTHORIZATION=PASS`.
 3. Provision or reuse `cas-simulator-accounts` and record the returned real database ID.
 4. Confirm both migrations apply remotely and the schema contains `users`, `sessions`, `rated_matches`, and `d1_migrations`.
@@ -29,13 +29,13 @@ The provisioning workflow performs no Worker deployment. It validates Cloudflare
 
 The provisioning workflow retains a 30-day artifact named `c4d-d1-provision-<run>-<attempt>`. Successful evidence includes:
 
-- `c4d-provision.json` with gate `C4D_PRODUCTION_D1`, status/provisioning/read-authorization/schema all `PASS`, database name `cas-simulator-accounts`, and the real D1 UUID;
+- `c4d-provision.json` with gate `C4D_PRODUCTION_D1`, status/provisioning/read-authorization/schema all `PASS`, `gitRef=refs/heads/main`, a full provisioning `gitSha`, database name `cas-simulator-accounts`, and the real D1 UUID;
 - `d1-list-before.json` and `d1-list-after.json`;
 - `migrations.txt`;
 - `schema-after.json` and `schema-verification.txt`;
 - run/SHA metadata.
 
-C5F later compares the UUID in `c4d-provision.json` with the final reviewed `ACCOUNTS` binding. The provisioning Git SHA itself need not equal the final release SHA because the binding PR necessarily follows provisioning and changes repository history.
+C5F later requires the provisioning record to come from `refs/heads/main`, requires a full provisioning Git SHA, and compares the UUID in `c4d-provision.json` with the final reviewed `ACCOUNTS` binding. The provisioning Git SHA itself need not equal the final release SHA because the binding PR necessarily follows provisioning and changes repository history.
 
 ## Binding release contract
 

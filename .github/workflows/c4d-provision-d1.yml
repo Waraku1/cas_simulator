@@ -2,6 +2,11 @@ name: C4D provision D1
 
 on:
   workflow_dispatch:
+    inputs:
+      confirm_sha:
+        description: Full 40-character main SHA to authorize for D1 provisioning
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -21,6 +26,28 @@ jobs:
       EVIDENCE_DIR: /tmp/c4d-provision-evidence
 
     steps:
+      - name: Verify governed provisioning source
+        shell: bash
+        env:
+          CONFIRM_SHA: ${{ inputs.confirm_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::C4D D1 provisioning is permitted only from refs/heads/main; got $GITHUB_REF"
+            exit 1
+          fi
+          if ! [[ "$CONFIRM_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::confirm_sha must be a full 40-character Git SHA."
+            exit 1
+          fi
+          if [ "$GITHUB_SHA" != "$CONFIRM_SHA" ]; then
+            echo "::error::confirm_sha does not match the workflow execution SHA."
+            exit 1
+          fi
+          echo "C4D_PROVISION_SOURCE=PASS"
+          echo "C4D_PROVISION_GIT_REF=$GITHUB_REF"
+          echo "C4D_PROVISION_GIT_SHA=$GITHUB_SHA"
+
       - name: Checkout
         uses: actions/checkout@v4
 

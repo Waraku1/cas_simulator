@@ -66,7 +66,7 @@ The all-seven validator requires:
 - the C5E human-QA record `releaseSha` to equal the final release SHA, after which the existing C5E validator still performs the complete C5E-01..16/content validation during package generation;
 - the rated production gate to have been `enabled` for both deploy artifacts and rollback evidence;
 - all three production mutations to retain `C4D_PRODUCTION_RATED_PRODUCT_SMOKE` with `ok=true` and verified zero-count cleanup evidence;
-- `c4d-provision.json` to record successful D1 read authorization, provisioning, and schema verification for `cas-simulator-accounts`;
+- `c4d-provision.json` to record successful D1 read authorization, provisioning, and schema verification for `cas-simulator-accounts`, with a full provisioning Git SHA and `gitRef=refs/heads/main`;
 - the real D1 UUID in `c4d-provision.json` to exactly match the final reviewed `ACCOUNTS` binding in `wrangler.jsonc`.
 
 The Worker version-state lineage layer additionally requires:
@@ -85,7 +85,7 @@ Together, these layers prevent a nominally successful but ineffective **no-op ro
 
 Rollback evidence alone is intentionally insufficient: a successful rollback changes live production to the rollback target. C5F therefore requires a subsequent same release SHA `restore_after_rollback` deployment before final packaging.
 
-The D1 provisioning workflow normally runs before the final binding PR, so its Git SHA is not required to equal the final release SHA. Instead, lineage is closed by the exact provisioned D1 UUID matching the final `ACCOUNTS` binding.
+The D1 provisioning workflow normally runs before the final binding PR, so its Git SHA is not required to equal the final release SHA. It is nevertheless required to execute from `refs/heads/main` with an explicitly confirmed full `main` SHA, and retained provisioning evidence from any other ref is rejected. Lineage is then closed by the exact provisioned D1 UUID matching the final `ACCOUNTS` binding.
 
 Hosted Linux C5D CI evidence remains continuous regression evidence only. It cannot satisfy final C5D closure because the C5D evidence validator requires the retained final automated report platform to be `darwin` and pairs it with the managed-Mac observation record.
 
@@ -210,7 +210,7 @@ The command first validates release lineage, Worker version-state lineage, and p
 - Worker identity or production URL differs across the three production mutations;
 - a deploy's production URL is not represented by its retained Wrangler HTTP target list;
 - production deploy/rollback/final-main-CI lineage does not match the release SHA;
-- D1 provisioning evidence does not match the final `ACCOUNTS` binding;
+- D1 provisioning evidence does not come from `refs/heads/main` with a full Git SHA or does not match the final `ACCOUNTS` binding;
 - rated smoke or zero-count cleanup evidence is invalid;
 - a declared local evidence file/directory does not exist.
 
