@@ -49,7 +49,7 @@ Before the existing package generator copies any evidence, `pnpm verify:c5f` run
 2. the Worker version-state lineage validator;
 3. the production URL / Wrangler deploy target binding validator.
 
-Final package generation fails unless all three layers pass. The committed contract check also requires C4D D1 provisioning, production deploy, and production rollback to share the same non-cancelling `production-mutation` concurrency group, preventing overlapping remote schema/resource and Worker mutations.
+Final package generation fails unless all three layers pass. The committed contract check also requires C4D D1 provisioning, production deploy, and production rollback to share the same non-cancelling `production-mutation` concurrency group, preventing overlapping remote schema/resource and Worker mutations. It additionally requires all three jobs to bind to the GitHub Actions environment `production`. This validates the repository hook only; final release governance still requires separate operator evidence that the environment protection policy and secret scope are actually configured in GitHub Settings.
 
 The all-seven validator requires:
 
