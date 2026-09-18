@@ -183,6 +183,8 @@ async function validateLineage(manifestPathInput, bindingIdOverride = null) {
   assert(provision.d1ReadAuthorization === "PASS", "c4dProduction D1 read authorization is not PASS");
   assert(provision.schema === "PASS", "c4dProduction D1 schema verification is not PASS");
   assert(provision.databaseName === "cas-simulator-accounts", "c4dProduction database name mismatch");
+  assert(/^[0-9a-f]{40}$/i.test(provision.gitSha ?? ""), "c4dProduction provisioning Git SHA must be a full 40-character SHA");
+  assert(provision.gitRef === "refs/heads/main", "c4dProduction provisioning evidence must come from refs/heads/main");
   assert(UUID_PATTERN.test(provision.databaseId ?? ""), "c4dProduction databaseId is not a valid D1 UUID");
   const boundDatabaseId = (bindingIdOverride ?? await currentAccountsDatabaseId()).toLowerCase();
   assert(provision.databaseId.toLowerCase() === boundDatabaseId, "C4D provisioned database ID does not match final ACCOUNTS binding");
@@ -250,6 +252,7 @@ async function validateCommittedContract() {
   const packageJson = await readFile(resolve(root, "package.json"), "utf8");
   const runbook = await readFile(resolve(root, "docs/operations/C5F_CAS_EVIDENCE_PACKAGE.md"), "utf8");
   assert(provisionWorkflow.includes("c4d-provision.json") && provisionWorkflow.includes("c4d-d1-provision-"), "C4D provisioning workflow must retain machine-readable lineage evidence");
+  assert(provisionWorkflow.includes("confirm_sha") && provisionWorkflow.includes("refs/heads/main") && provisionWorkflow.includes("C4D_PROVISION_SOURCE=PASS"), "C4D provisioning workflow must fail closed to an explicitly confirmed main SHA");
   assert(deployWorkflow.includes("deployment_purpose") && deployWorkflow.includes("initial_release") && deployWorkflow.includes("restore_after_rollback"), "Deploy workflow must distinguish initial release and final restoration evidence");
   assert(ciWorkflow.includes("c5-final-ci.json"), "Project CI must retain final-main lineage metadata");
   assert(ciWorkflow.includes("C5B_EVIDENCE_SELF_TEST=1") && ciWorkflow.includes("C5D_EVIDENCE_SELF_TEST=1"), "Project CI must self-test C5B/C5D structured evidence validators");
@@ -296,6 +299,7 @@ async function selfTest() {
     for (const directory of ["provision", "performance", "rollback", "school", "human", "ci"]) await mkdir(join(temp, directory), { recursive: true });
     await writeFile(join(temp, "provision/c4d-provision.json"), JSON.stringify({
       gate: "C4D_PRODUCTION_D1", status: "PASS", provisioning: "PASS", d1ReadAuthorization: "PASS", schema: "PASS",
+      gitSha: releaseSha, gitRef: "refs/heads/main",
       databaseName: "cas-simulator-accounts", databaseId,
     }), "utf8");
 
@@ -353,6 +357,18 @@ async function selfTest() {
     const manifestPath = join(temp, "manifest.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
     await validateLineage(manifestPath, databaseId);
+
+    await expectFailure("provision evidence from a non-main ref", async () => {
+      const provisionPath = join(temp, "provision/c4d-provision.json");
+      const provisionRecord = JSON.parse(await readFile(provisionPath, "utf8"));
+      await writeFile(provisionPath, JSON.stringify({ ...provisionRecord, gitRef: "refs/heads/unreviewed" }), "utf8");
+      await validateLineage(manifestPath, databaseId);
+    });
+    {
+      const provisionPath = join(temp, "provision/c4d-provision.json");
+      const provisionRecord = JSON.parse(await readFile(provisionPath, "utf8"));
+      await writeFile(provisionPath, JSON.stringify({ ...provisionRecord, gitRef: "refs/heads/main" }), "utf8");
+    }
 
     await expectFailure("wrong restoration deploy SHA", async () => {
       await writeDeployEvidence(join(temp, "deploy-restore"), "b".repeat(40), "restore_after_rollback", "2026-01-01T00:04:00Z", "2026-01-01T00:05:00Z", cleanup, smoke);
