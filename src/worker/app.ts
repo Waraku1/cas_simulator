@@ -22,6 +22,7 @@ const accountPaths = new Set<string>([
   ACCOUNT_API.login,
   ACCOUNT_API.session,
   ACCOUNT_API.logout,
+  ACCOUNT_API.deleteAccount,
   ACCOUNT_API.fixedAircraft,
   ACCOUNT_API.leaderboard,
 ]);
