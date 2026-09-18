@@ -6,6 +6,13 @@ Cloudflare identity is valid (`wrangler whoami` passes), but the configured API 
 
 Do not bind a placeholder D1 ID and do not enable the rated production gate until D1 authorization is corrected.
 
+
+## GitHub production environment boundary
+
+The C4D D1 provisioning job is repository-bound to the GitHub Actions environment named `production`. The same environment is referenced by production deploy and rollback. This repository-side binding enables GitHub environment protection rules and environment-scoped secrets to gate all production mutation jobs through one deployment boundary.
+
+This binding does **not** itself prove that required reviewers, branch/tag deployment policies, prevent-self-review, or environment-scoped Cloudflare secrets have been configured in repository Settings. Those remain external operator controls and must be verified before final production execution. Until then, `environment: production` is a required hook, not evidence that the external protection policy is active.
+
 ## Execution sequence after D1 authorization is available
 
 1. Read the current full 40-character `main` SHA and manually dispatch the `C4D provision D1` GitHub Actions workflow from `main`, supplying that exact value as `confirm_sha`. The workflow must emit `C4D_PROVISION_SOURCE=PASS`; any non-`refs/heads/main` ref or SHA mismatch fails before Cloudflare access.
