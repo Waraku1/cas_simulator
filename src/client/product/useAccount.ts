@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ACCOUNT_API,
+  type AuthErrorResponse,
   type AuthResponse,
+  type DeleteAccountResponse,
   type LeaderboardProfile,
   type LeaderboardResponse,
   type PublicUserProfile,
@@ -87,6 +89,33 @@ export function useAccount() {
     }
   }, []);
 
+  const deleteAccount = useCallback(async (password: string, confirmation: string) => {
+    setStatus("submitting");
+    setErrorMessage("");
+    try {
+      const response = await fetch(ACCOUNT_API.deleteAccount, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password, confirmation }),
+      });
+      const result = await response.json() as DeleteAccountResponse | AuthErrorResponse;
+      if (!result.ok) {
+        setStatus("authenticated");
+        setErrorMessage(result.message);
+        return false;
+      }
+      setUser(null);
+      setStatus("anonymous");
+      setErrorMessage("");
+      return true;
+    } catch {
+      setStatus("authenticated");
+      setErrorMessage("ACCOUNT SERVICE UNAVAILABLE");
+      return false;
+    }
+  }, []);
+
   const setFixedAircraft = useCallback(async (aircraftId: string | null) => {
     setErrorMessage("");
     try {
@@ -114,6 +143,7 @@ export function useAccount() {
     register: (loginId: string, displayName: string, password: string) => submit("register", { loginId, displayName, password }),
     logout,
     refresh,
+    deleteAccount,
     setFixedAircraft,
   } as const;
 }

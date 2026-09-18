@@ -120,6 +120,9 @@ export async function handleAccountApi(
   secureCookie: boolean,
 ): Promise<Response | null> {
   const url = new URL(request.url);
+  if (url.pathname !== ACCOUNT_API.leaderboard) {
+    await repository.deleteExpiredSessions(Date.now());
+  }
 
   if (url.pathname === ACCOUNT_API.register && request.method === "POST") {
     const body = await jsonBody(request);
@@ -153,6 +156,7 @@ export async function handleAccountApi(
       fixableAircraftId: null,
       createdAtMs: nowMs,
       updatedAtMs: nowMs,
+      deletedAtMs: null,
     };
     try {
       await repository.createUser(user);
@@ -187,6 +191,37 @@ export async function handleAccountApi(
     const token = cookieValue(request, AUTH_CONTRACT.sessionCookieName);
     if (token) await repository.deleteSession(await hashSessionToken(token));
     return response({ ok: true }, 200, { "set-cookie": clearSessionCookie(secureCookie) });
+  }
+
+  if (url.pathname === ACCOUNT_API.deleteAccount && request.method === "POST") {
+    const user = await authenticatedUser(request, repository);
+    if (!user) return error("NOT_AUTHENTICATED", "Sign in before deleting the account.", 401);
+    const body = await jsonBody(request);
+    if (!body || body.confirmation !== "DELETE" || typeof body.password !== "string") {
+      return error("INVALID_INPUT", "Account deletion requires password confirmation and the exact word DELETE.", 400);
+    }
+    if (!(await verifyPasswordHash(body.password, user.passwordSalt, user.passwordIterations, user.passwordHash))) {
+      return error("INVALID_CREDENTIALS", "Password confirmation failed.", 401);
+    }
+
+    try {
+      await repository.anonymizeUser(user.userId, Date.now());
+    } catch {
+      return error("INTERNAL_ERROR", "Account deletion could not be completed.", 500);
+    }
+
+    return response(
+      {
+        ok: true,
+        deleted: true,
+        retained: {
+          ratedMatchLedger: true,
+          internalUserId: true,
+        },
+      },
+      200,
+      { "set-cookie": clearSessionCookie(secureCookie) },
+    );
   }
 
   if (url.pathname === ACCOUNT_API.leaderboard && request.method === "GET") {

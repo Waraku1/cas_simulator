@@ -143,7 +143,7 @@ See `docs/architecture/C0_FOUNDATION.md`, `docs/architecture/C0_STATUS.md`, `doc
 
 ## Security and contributions
 
-Before contributing, read [CONTRIBUTING.md](CONTRIBUTING.md). Security-sensitive reports should follow [SECURITY.md](SECURITY.md) rather than being posted with exploit details in a public issue.
+Before contributing, read [CONTRIBUTING.md](CONTRIBUTING.md). Account data handling is documented in [PRIVACY.md](PRIVACY.md). Security-sensitive reports should follow [SECURITY.md](SECURITY.md) rather than being posted with exploit details in a public issue.
 
 Do not commit API tokens, cookies, credentials, local evidence captures, or generated `.c5-evidence/` material.
 

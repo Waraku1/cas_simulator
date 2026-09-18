@@ -15,6 +15,7 @@ export type StoredUser = Readonly<{
   fixableAircraftId: string | null;
   createdAtMs: number;
   updatedAtMs: number;
+  deletedAtMs: number | null;
 }>;
 
 export type NewStoredUser = StoredUser;
@@ -36,6 +37,7 @@ export interface AuthRepository {
   deleteExpiredSessions(nowMs: number): Promise<void>;
   updateFixedAircraft(userId: string, aircraftId: string | null, nowMs: number): Promise<void>;
   updateFixableAircraft(userId: string, aircraftId: string, nowMs: number): Promise<void>;
+  anonymizeUser(userId: string, nowMs: number): Promise<void>;
   listLeaderboard(limit: number): Promise<readonly LeaderboardProfile[]>;
 }
 
@@ -71,6 +73,7 @@ type UserRow = Readonly<{
   fixable_aircraft_id: string | null;
   created_at_ms: number;
   updated_at_ms: number;
+  deleted_at_ms: number | null;
 }>;
 
 type LeaderboardRow = Readonly<{
@@ -98,13 +101,14 @@ function toStoredUser(row: UserRow): StoredUser {
     fixableAircraftId: row.fixable_aircraft_id,
     createdAtMs: row.created_at_ms,
     updatedAtMs: row.updated_at_ms,
+    deletedAtMs: row.deleted_at_ms,
   };
 }
 
 const USER_COLUMNS = `
   user_id, login_id, display_name, password_hash, password_salt,
   password_iterations, rating, wins, losses, draws, fixed_aircraft_id,
-  fixable_aircraft_id, created_at_ms, updated_at_ms
+  fixable_aircraft_id, created_at_ms, updated_at_ms, deleted_at_ms
 `;
 
 export class D1AuthRepository implements AuthRepository {
@@ -112,7 +116,7 @@ export class D1AuthRepository implements AuthRepository {
 
   async findUserByLoginId(loginId: string) {
     const row = await this.db
-      .prepare(`SELECT ${USER_COLUMNS} FROM users WHERE login_id = ? LIMIT 1`)
+      .prepare(`SELECT ${USER_COLUMNS} FROM users WHERE login_id = ? AND deleted_at_ms IS NULL LIMIT 1`)
       .bind(loginId)
       .first<UserRow>();
     return row ? toStoredUser(row) : null;
@@ -171,7 +175,7 @@ export class D1AuthRepository implements AuthRepository {
       SELECT ${qualified}
       FROM sessions s
       JOIN users u ON u.user_id = s.user_id
-      WHERE s.session_token_hash = ? AND s.expires_at_ms > ?
+      WHERE s.session_token_hash = ? AND s.expires_at_ms > ? AND u.deleted_at_ms IS NULL
       LIMIT 1
     `).bind(sessionTokenHash, nowMs).first<UserRow>();
     return row ? toStoredUser(row) : null;
@@ -193,22 +197,45 @@ export class D1AuthRepository implements AuthRepository {
 
   async updateFixedAircraft(userId: string, aircraftId: string | null, nowMs: number) {
     const result = await this.db.prepare(`
-      UPDATE users SET fixed_aircraft_id = ?, updated_at_ms = ? WHERE user_id = ?
+      UPDATE users SET fixed_aircraft_id = ?, updated_at_ms = ? WHERE user_id = ? AND deleted_at_ms IS NULL
     `).bind(aircraftId, nowMs, userId).run();
     if (!result.success) throw new Error("D1 fixed-aircraft update failed.");
   }
 
   async updateFixableAircraft(userId: string, aircraftId: string, nowMs: number) {
     const result = await this.db.prepare(`
-      UPDATE users SET fixable_aircraft_id = ?, updated_at_ms = ? WHERE user_id = ?
+      UPDATE users SET fixable_aircraft_id = ?, updated_at_ms = ? WHERE user_id = ? AND deleted_at_ms IS NULL
     `).bind(aircraftId, nowMs, userId).run();
     if (!result.success) throw new Error("D1 fixable-aircraft update failed.");
+  }
+
+  async anonymizeUser(userId: string, nowMs: number) {
+    if (!this.db.batch) throw new Error("D1 batch support is required for account anonymization.");
+    const anonymizedLoginId = `deleted_${userId.replace(/[^a-zA-Z0-9]/g, "")}`;
+    const results = await this.db.batch([
+      this.db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
+      this.db.prepare(`
+        UPDATE users
+        SET login_id = ?,
+            display_name = 'Deleted Pilot',
+            password_hash = '',
+            password_salt = '',
+            password_iterations = 0,
+            fixed_aircraft_id = NULL,
+            fixable_aircraft_id = NULL,
+            updated_at_ms = ?,
+            deleted_at_ms = ?
+        WHERE user_id = ? AND deleted_at_ms IS NULL
+      `).bind(anonymizedLoginId, nowMs, nowMs, userId),
+    ]);
+    if (results.some((result) => !result.success)) throw new Error("D1 account anonymization failed.");
   }
 
   async listLeaderboard(limit: number) {
     const statement = this.db.prepare(`
       SELECT user_id, display_name, rating, wins, losses, draws
       FROM users
+      WHERE deleted_at_ms IS NULL
       ORDER BY rating DESC, wins DESC, user_id ASC
       LIMIT ?
     `).bind(limit);

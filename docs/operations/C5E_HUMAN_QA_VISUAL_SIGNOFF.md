@@ -44,8 +44,8 @@ Without `C5E_EVIDENCE_FILE`, `pnpm verify:c5e` validates only the committed C5E 
 
 ### Product surfaces
 
-- **C5E-01 Auth** — login/register controls are legible, focus is visible, errors are understandable, and no secret value is exposed.
-- **C5E-02 Home** — identity/rating/fixed-aircraft state is readable and START is visually obvious.
+- **C5E-01 Auth** — login/register controls are legible, focus is visible, errors are understandable, no secret value is exposed, and the account-data/privacy notice is reachable and readable before registration.
+- **C5E-02 Home** — identity/rating/fixed-aircraft state is readable, START is visually obvious, and the authenticated Account & Privacy panel is keyboard-accessible with clear deletion consequences and password + exact-`DELETE` confirmation.
 - **C5E-03 Matchmaking** — searching/cancel state is unambiguous and transition timing does not produce overlapping UI.
 - **C5E-04 Aircraft assignment** — assigned aircraft and fixed/random provenance are understandable without implying pay-to-win or superiority.
 - **C5E-05 Countdown** — countdown is readable and transition into ACTIVE is visually stable.

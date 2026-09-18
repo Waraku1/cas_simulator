@@ -13,6 +13,7 @@ export const ACCOUNT_API = Object.freeze({
   login: "/api/auth/login",
   session: "/api/auth/session",
   logout: "/api/auth/logout",
+  deleteAccount: "/api/account/delete",
   fixedAircraft: "/api/account/fixed-aircraft",
   leaderboard: "/api/leaderboard",
 });
@@ -42,6 +43,20 @@ export type LoginRequest = Readonly<{
 
 export type FixedAircraftRequest = Readonly<{
   aircraftId: string | null;
+}>;
+
+export type DeleteAccountRequest = Readonly<{
+  password: string;
+  confirmation: "DELETE";
+}>;
+
+export type DeleteAccountResponse = Readonly<{
+  ok: true;
+  deleted: true;
+  retained: Readonly<{
+    ratedMatchLedger: true;
+    internalUserId: true;
+  }>;
 }>;
 
 export type LeaderboardProfile = Readonly<{

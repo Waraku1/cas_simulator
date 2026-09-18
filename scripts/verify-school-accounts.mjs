@@ -61,11 +61,57 @@ if (afterLogout.response.status !== 401 || afterLogout.body?.code !== "NOT_AUTHE
   throw new Error("Logged-out session remained valid.");
 }
 
+const relogin = await request("/api/auth/login", {
+  method: "POST",
+  body: JSON.stringify({ loginId, password }),
+});
+if (!relogin.response.ok || !relogin.body?.ok) throw new Error("Re-login before deletion failed.");
+const deleteCookie = sessionCookie(relogin.setCookie);
+
+const wrongDelete = await request("/api/account/delete", {
+  method: "POST",
+  body: JSON.stringify({ password: `${password}-wrong`, confirmation: "DELETE" }),
+}, deleteCookie);
+if (wrongDelete.response.status !== 401 || wrongDelete.body?.code !== "INVALID_CREDENTIALS") {
+  throw new Error("Account deletion accepted an invalid password.");
+}
+
+const deletion = await request("/api/account/delete", {
+  method: "POST",
+  body: JSON.stringify({ password, confirmation: "DELETE" }),
+}, deleteCookie);
+if (!deletion.response.ok || deletion.body?.deleted !== true || deletion.body?.retained?.ratedMatchLedger !== true) {
+  throw new Error(`Account deletion failed: ${JSON.stringify(deletion.body)}`);
+}
+
+const afterDeletionSession = await request("/api/auth/session", {}, deleteCookie);
+if (afterDeletionSession.response.status !== 401 || afterDeletionSession.body?.code !== "NOT_AUTHENTICATED") {
+  throw new Error("Deleted-account session remained valid.");
+}
+
+const deletedLogin = await request("/api/auth/login", {
+  method: "POST",
+  body: JSON.stringify({ loginId, password }),
+});
+if (deletedLogin.response.status !== 401 || deletedLogin.body?.code !== "INVALID_CREDENTIALS") {
+  throw new Error("Deleted account remained login-capable.");
+}
+
+const leaderboardAfterDeletion = await request("/api/leaderboard");
+if (leaderboardAfterDeletion.body?.entries?.some((entry) => entry.userId === registration.body.user.userId)) {
+  throw new Error("Deleted account remained visible on leaderboard.");
+}
+
 console.log(JSON.stringify({
   ok: true,
   gate: "C4D_SCHOOL_ACCOUNT_SMOKE",
   registered: loginId,
   initialRating: registration.body.user.rating,
-  leaderboardVisible: true,
+  leaderboardVisibleBeforeDeletion: true,
   logoutInvalidatedSession: true,
+  deletionRequiresPassword: true,
+  deletionRevokedSessions: true,
+  deletionRemovedLogin: true,
+  deletionRemovedLeaderboardEntry: true,
+  ratedLedgerRetentionDeclared: true,
 }, null, 2));

@@ -149,6 +149,22 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (url.pathname === "/api/account/delete" && request.method === "POST") {
+    const body = await readJson(request);
+    const result = store.deleteAccount(request.headers.cookie, body ?? {});
+    if (result.error) {
+      const status = result.error.code === "NOT_AUTHENTICATED" || result.error.code === "INVALID_CREDENTIALS" ? 401 : 400;
+      writeJson(response, status, { ok: false, ...result.error });
+      return;
+    }
+    writeJson(response, 200, {
+      ok: true,
+      deleted: true,
+      retained: { ratedMatchLedger: true, internalUserId: true },
+    }, { "set-cookie": clearCookieHeader() });
+    return;
+  }
+
   if (url.pathname === "/api/account/fixed-aircraft" && request.method === "PUT") {
     const user = store.authenticateCookie(request.headers.cookie);
     if (!user) {
