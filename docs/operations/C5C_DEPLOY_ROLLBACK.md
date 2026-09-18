@@ -25,7 +25,7 @@ A production rollback requires all of the following:
 3. an explicit Cloudflare `target_version_id`;
 4. the literal confirmation value `ROLLBACK`.
 
-Rollback never selects an implicit previous version. The repository performs its own explicit confirmation before Wrangler is invoked non-interactively with `--yes`. Both workflows share the `production-deploy` concurrency group, so deploy and rollback cannot mutate production concurrently.
+Rollback never selects an implicit previous version. The repository performs its own explicit confirmation before Wrangler is invoked non-interactively with `--yes`. D1 provisioning, deploy, and rollback all share the `production-mutation` concurrency group with `cancel-in-progress: false`. Therefore no remote D1 provisioning/migration can overlap a Worker deploy, rollback, rated smoke, or production cleanup sequence, and no production mutation run is cancelled by a later dispatch.
 
 ### Rated D1 binding preflight
 
