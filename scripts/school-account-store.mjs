@@ -62,8 +62,13 @@ export function createSchoolAccountStore() {
     const token = cookieValue(cookieHeader, SESSION_COOKIE);
     if (!token) return null;
     const session = sessions.get(tokenHash(token));
-    if (!session || session.expiresAtMs <= Date.now()) return null;
-    return usersById.get(session.userId) ?? null;
+    if (!session) return null;
+    if (session.expiresAtMs <= Date.now()) {
+      sessions.delete(tokenHash(token));
+      return null;
+    }
+    const user = usersById.get(session.userId) ?? null;
+    return user && user.deletedAtMs === null ? user : null;
   }
 
   function register({ loginId, displayName, password }) {
@@ -91,6 +96,7 @@ export function createSchoolAccountStore() {
       fixableAircraftId: null,
       createdAtMs: nowMs,
       updatedAtMs: nowMs,
+      deletedAtMs: null,
     };
     usersById.set(user.userId, user);
     usersByLogin.set(user.loginId, user);
@@ -99,7 +105,7 @@ export function createSchoolAccountStore() {
 
   function login({ loginId, password }) {
     const user = usersByLogin.get(normalizeLogin(loginId));
-    if (!user || !validPassword(password) || passwordHash(password, user.passwordSalt) !== user.passwordHash) {
+    if (!user || user.deletedAtMs !== null || !validPassword(password) || passwordHash(password, user.passwordSalt) !== user.passwordHash) {
       return { error: { code: "INVALID_CREDENTIALS", message: "User ID or password is incorrect." } };
     }
     return { user, token: createSession(user) };
@@ -111,6 +117,7 @@ export function createSchoolAccountStore() {
   }
 
   function setFixedAircraft(user, aircraftId) {
+    if (user.deletedAtMs !== null) return { error: { code: "NOT_AUTHENTICATED", message: "Account is deleted." } };
     if (aircraftId !== null && (!AIRCRAFT_IDS.has(aircraftId) || user.fixableAircraftId !== aircraftId)) {
       return { error: { code: "AIRCRAFT_NOT_FIXABLE", message: "Only the most recently assigned random aircraft can be fixed." } };
     }
@@ -121,13 +128,38 @@ export function createSchoolAccountStore() {
 
   function setFixableAircraft(userId, aircraftId) {
     const user = usersById.get(userId);
-    if (!user || !AIRCRAFT_IDS.has(aircraftId)) return;
+    if (!user || user.deletedAtMs !== null || !AIRCRAFT_IDS.has(aircraftId)) return;
     user.fixableAircraftId = aircraftId;
     user.updatedAtMs = Date.now();
   }
 
+  function deleteAccount(cookieHeader, { password, confirmation } = {}) {
+    const user = authenticateCookie(cookieHeader);
+    if (!user) return { error: { code: "NOT_AUTHENTICATED", message: "Sign in before deleting the account." } };
+    if (confirmation !== "DELETE" || typeof password !== "string") {
+      return { error: { code: "INVALID_INPUT", message: "Account deletion requires password confirmation and the exact word DELETE." } };
+    }
+    if (!validPassword(password) || passwordHash(password, user.passwordSalt) !== user.passwordHash) {
+      return { error: { code: "INVALID_CREDENTIALS", message: "Password confirmation failed." } };
+    }
+    usersByLogin.delete(user.loginId);
+    for (const [hash, session] of sessions) {
+      if (session.userId === user.userId) sessions.delete(hash);
+    }
+    user.loginId = `deleted_${user.userId.replace(/[^a-zA-Z0-9]/g, "")}`;
+    user.displayName = "Deleted Pilot";
+    user.passwordHash = "";
+    user.passwordSalt = "";
+    user.fixedAircraftId = null;
+    user.fixableAircraftId = null;
+    user.updatedAtMs = Date.now();
+    user.deletedAtMs = user.updatedAtMs;
+    return { ok: true, userId: user.userId };
+  }
+
   function leaderboard(limit = 50) {
     return [...usersById.values()]
+      .filter((user) => user.deletedAtMs === null)
       .sort((a, b) => b.rating - a.rating || b.wins - a.wins || a.userId.localeCompare(b.userId))
       .slice(0, limit)
       .map((user, index) => ({
@@ -169,6 +201,7 @@ export function createSchoolAccountStore() {
     register,
     login,
     logout,
+    deleteAccount,
     authenticateCookie,
     publicProfile,
     setFixedAircraft,
