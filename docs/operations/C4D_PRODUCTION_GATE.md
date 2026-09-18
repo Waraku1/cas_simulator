@@ -23,7 +23,7 @@ Do not bind a placeholder D1 ID and do not enable the rated production gate unti
 13. Require `c4d-cleanup-verification.json` to show zero remaining run-scoped users, sessions, and rated matches.
 14. Require `C4D_PRODUCTION_SMOKE_CLEANUP=PASS`, then close C4D and proceed to final C5 evidence execution.
 
-The provisioning workflow performs no Worker deployment. It validates Cloudflare identity/D1 authorization, creates or reuses the named D1 database, applies migrations, validates the expected schema, and retains the provisioning lineage artifact for the subsequent reviewed binding PR and final C5F package.
+The provisioning workflow performs no Worker deployment. It validates Cloudflare identity/D1 authorization, creates or reuses the named D1 database, applies migrations, validates the expected schema, and retains the provisioning lineage artifact for the subsequent reviewed binding PR and final C5F package. D1 provisioning shares the repository-wide `production-mutation` concurrency group with production deploy and rollback, with cancellation disabled, so schema/resource mutation cannot overlap Worker deployment, rollback, or their production smoke/cleanup sequence.
 
 ## Provisioning evidence contract
 

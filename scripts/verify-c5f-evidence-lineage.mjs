@@ -250,12 +250,14 @@ async function validateLineage(manifestPathInput, bindingIdOverride = null) {
 async function validateCommittedContract() {
   const provisionWorkflow = await readFile(resolve(root, ".github/workflows/c4d-provision-d1.yml"), "utf8");
   const deployWorkflow = await readFile(resolve(root, ".github/workflows/deploy.yml"), "utf8");
+  const rollbackWorkflow = await readFile(resolve(root, ".github/workflows/rollback.yml"), "utf8");
   const ciWorkflow = await readFile(resolve(root, ".github/workflows/ci.yml"), "utf8");
   const packageJson = await readFile(resolve(root, "package.json"), "utf8");
   const runbook = await readFile(resolve(root, "docs/operations/C5F_CAS_EVIDENCE_PACKAGE.md"), "utf8");
   assert(provisionWorkflow.includes("c4d-provision.json") && provisionWorkflow.includes("c4d-d1-provision-"), "C4D provisioning workflow must retain machine-readable lineage evidence");
   assert(provisionWorkflow.includes("confirm_sha") && provisionWorkflow.includes("refs/heads/main") && provisionWorkflow.includes("C4D_PROVISION_SOURCE=PASS"), "C4D provisioning workflow must fail closed to an explicitly confirmed main SHA");
   assert(deployWorkflow.includes("deployment_purpose") && deployWorkflow.includes("initial_release") && deployWorkflow.includes("restore_after_rollback"), "Deploy workflow must distinguish initial release and final restoration evidence");
+  assert([provisionWorkflow, deployWorkflow, rollbackWorkflow].every((workflow) => workflow.includes("group: production-mutation") && workflow.includes("cancel-in-progress: false")), "D1 provisioning, deploy, and rollback must share one non-cancelling production mutation lock");
   assert(ciWorkflow.includes("c5-final-ci.json"), "Project CI must retain final-main lineage metadata");
   assert(ciWorkflow.includes("C5B_EVIDENCE_SELF_TEST=1") && ciWorkflow.includes("C5D_EVIDENCE_SELF_TEST=1"), "Project CI must self-test C5B/C5D structured evidence validators");
   assert(packageJson.includes('"verify:c5b:evidence"') && packageJson.includes('"verify:c5d:evidence"'), "package scripts must expose C5B/C5D evidence validators");
