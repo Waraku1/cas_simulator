@@ -20,6 +20,8 @@ const privacy = read("PRIVACY.md");
 const schoolStore = read("scripts/school-account-store.mjs");
 const schoolBackend = read("scripts/school-account-backend.mjs");
 const schoolVerify = read("scripts/verify-school-accounts.mjs");
+const provisionWorkflow = read(".github/workflows/c4d-provision-d1.yml");
+const c5fLineage = read("scripts/verify-c5f-evidence-lineage.mjs");
 
 const checks = [
   ["shared delete endpoint exists", auth.includes('deleteAccount: "/api/account/delete"')],
@@ -44,6 +46,9 @@ const checks = [
   ["repository privacy notice exists", privacy.includes("# Account Data Handling Notice") && privacy.includes("## Account deletion")],
   ["school parity implements deletion", schoolStore.includes("function deleteAccount") && schoolBackend.includes('"/api/account/delete"')],
   ["school smoke verifies deletion lifecycle", schoolVerify.includes("deletionRevokedSessions") && schoolVerify.includes("deletionRemovedLeaderboardEntry")],
+  ["production provisioning verifies deleted_at_ms", provisionWorkflow.includes("users.deleted_at_ms") && provisionWorkflow.includes("PRAGMA table_info(users)")],
+  ["production provisioning emits account lifecycle schema PASS", provisionWorkflow.includes("C4D_ACCOUNT_LIFECYCLE_SCHEMA=PASS") && provisionWorkflow.includes('accountLifecycleSchema: "PASS"')],
+  ["C5F requires account lifecycle provisioning evidence", c5fLineage.includes('provision.accountLifecycleSchema === "PASS"')],
 ];
 
 for (const [label, passed] of checks) {

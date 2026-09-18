@@ -183,6 +183,7 @@ async function validateLineage(manifestPathInput, bindingIdOverride = null) {
   assert(provision.status === "PASS" && provision.provisioning === "PASS", "c4dProduction provisioning is not PASS");
   assert(provision.d1ReadAuthorization === "PASS", "c4dProduction D1 read authorization is not PASS");
   assert(provision.schema === "PASS", "c4dProduction D1 schema verification is not PASS");
+  assert(provision.accountLifecycleSchema === "PASS", "c4dProduction account-lifecycle schema verification is not PASS");
   assert(provision.databaseName === "cas-simulator-accounts", "c4dProduction database name mismatch");
   assert(/^[0-9a-f]{40}$/i.test(provision.gitSha ?? ""), "c4dProduction provisioning Git SHA must be a full 40-character SHA");
   assert(provision.gitRef === "refs/heads/main", "c4dProduction provisioning evidence must come from refs/heads/main");
@@ -255,6 +256,7 @@ async function validateCommittedContract() {
   const packageJson = await readFile(resolve(root, "package.json"), "utf8");
   const runbook = await readFile(resolve(root, "docs/operations/C5F_CAS_EVIDENCE_PACKAGE.md"), "utf8");
   assert(provisionWorkflow.includes("c4d-provision.json") && provisionWorkflow.includes("c4d-d1-provision-"), "C4D provisioning workflow must retain machine-readable lineage evidence");
+  assert(provisionWorkflow.includes("users.deleted_at_ms") && provisionWorkflow.includes("C4D_ACCOUNT_LIFECYCLE_SCHEMA=PASS") && provisionWorkflow.includes('accountLifecycleSchema: "PASS"'), "C4D provisioning must verify and retain the account-lifecycle schema gate");
   assert(provisionWorkflow.includes("confirm_sha") && provisionWorkflow.includes("refs/heads/main") && provisionWorkflow.includes("C4D_PROVISION_SOURCE=PASS"), "C4D provisioning workflow must fail closed to an explicitly confirmed main SHA");
   assert(deployWorkflow.includes("deployment_purpose") && deployWorkflow.includes("initial_release") && deployWorkflow.includes("restore_after_rollback"), "Deploy workflow must distinguish initial release and final restoration evidence");
   assert([provisionWorkflow, deployWorkflow, rollbackWorkflow].every((workflow) => workflow.includes("group: production-mutation") && workflow.includes("cancel-in-progress: false")), "D1 provisioning, deploy, and rollback must share one non-cancelling production mutation lock");
@@ -303,7 +305,7 @@ async function selfTest() {
   try {
     for (const directory of ["provision", "performance", "rollback", "school", "human", "ci"]) await mkdir(join(temp, directory), { recursive: true });
     await writeFile(join(temp, "provision/c4d-provision.json"), JSON.stringify({
-      gate: "C4D_PRODUCTION_D1", status: "PASS", provisioning: "PASS", d1ReadAuthorization: "PASS", schema: "PASS",
+      gate: "C4D_PRODUCTION_D1", status: "PASS", provisioning: "PASS", d1ReadAuthorization: "PASS", schema: "PASS", accountLifecycleSchema: "PASS",
       gitSha: releaseSha, gitRef: "refs/heads/main",
       databaseName: "cas-simulator-accounts", databaseId,
     }), "utf8");
@@ -385,6 +387,20 @@ async function selfTest() {
       const path = join(temp, "rollback/metadata.txt");
       const current = await readFile(path, "utf8");
       await writeFile(path, current.replace("governance_git_ref=refs/heads/unreviewed", "governance_git_ref=refs/heads/main"), "utf8");
+    }
+
+    await expectFailure("provision evidence missing account-lifecycle schema PASS", async () => {
+      const provisionPath = join(temp, "provision/c4d-provision.json");
+      const provisionRecord = JSON.parse(await readFile(provisionPath, "utf8"));
+      const { accountLifecycleSchema, ...withoutLifecycleSchema } = provisionRecord;
+      void accountLifecycleSchema;
+      await writeFile(provisionPath, JSON.stringify(withoutLifecycleSchema), "utf8");
+      await validateLineage(manifestPath, databaseId);
+    });
+    {
+      const provisionPath = join(temp, "provision/c4d-provision.json");
+      const provisionRecord = JSON.parse(await readFile(provisionPath, "utf8"));
+      await writeFile(provisionPath, JSON.stringify({ ...provisionRecord, accountLifecycleSchema: "PASS" }), "utf8");
     }
 
     await expectFailure("provision evidence from a non-main ref", async () => {

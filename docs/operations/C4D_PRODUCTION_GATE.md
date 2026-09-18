@@ -18,7 +18,7 @@ This binding does **not** itself prove that required reviewers, branch/tag deplo
 1. Read the current full 40-character `main` SHA and manually dispatch the `C4D provision D1` GitHub Actions workflow from `main`, supplying that exact value as `confirm_sha`. The workflow must emit `C4D_PROVISION_SOURCE=PASS`; any non-`refs/heads/main` ref or SHA mismatch fails before Cloudflare access.
 2. Confirm `C4D_D1_READ_AUTHORIZATION=PASS`.
 3. Provision or reuse `cas-simulator-accounts` and record the returned real database ID.
-4. Confirm both migrations apply remotely and the schema contains `users`, `sessions`, `rated_matches`, and `d1_migrations`.
+4. Confirm all committed migrations apply remotely — including `0001_c4a_accounts.sql`, `0002_c4d_rating.sql`, and `0003_account_lifecycle.sql` — and verify the schema contains `users`, `sessions`, `rated_matches`, `d1_migrations`, plus the `users.deleted_at_ms` account-lifecycle column.
 5. Retain the `c4d-d1-provision-<run>-<attempt>` artifact. Its `c4d-provision.json` is the canonical machine-readable record for the provisioned D1 UUID and successful authorization/schema gates.
 6. Add the real `ACCOUNTS` D1 binding to `wrangler.jsonc` in a normal branch/PR. Never use a placeholder ID.
 7. Confirm `pnpm verify:c4d:binding` reports `C4D_PRODUCTION_BINDING=PASS` for that reviewed config.
@@ -36,10 +36,10 @@ The provisioning workflow performs no Worker deployment. It validates Cloudflare
 
 The provisioning workflow retains a 30-day artifact named `c4d-d1-provision-<run>-<attempt>`. Successful evidence includes:
 
-- `c4d-provision.json` with gate `C4D_PRODUCTION_D1`, status/provisioning/read-authorization/schema all `PASS`, `gitRef=refs/heads/main`, a full provisioning `gitSha`, database name `cas-simulator-accounts`, and the real D1 UUID;
+- `c4d-provision.json` with gate `C4D_PRODUCTION_D1`, status/provisioning/read-authorization/schema all `PASS`, `accountLifecycleSchema=PASS`, `gitRef=refs/heads/main`, a full provisioning `gitSha`, database name `cas-simulator-accounts`, and the real D1 UUID;
 - `d1-list-before.json` and `d1-list-after.json`;
 - `migrations.txt`;
-- `schema-after.json` and `schema-verification.txt`;
+- `schema-after.json`, `users-schema-after.json`, and `schema-verification.txt`, with both `C4D_D1_SCHEMA=PASS` and `C4D_ACCOUNT_LIFECYCLE_SCHEMA=PASS`;
 - run/SHA metadata.
 
 C5F later requires the provisioning record to come from `refs/heads/main`, requires a full provisioning Git SHA, and compares the UUID in `c4d-provision.json` with the final reviewed `ACCOUNTS` binding. The provisioning Git SHA itself need not equal the final release SHA because the binding PR necessarily follows provisioning and changes repository history.

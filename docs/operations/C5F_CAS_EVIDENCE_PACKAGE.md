@@ -66,7 +66,7 @@ The all-seven validator requires:
 - the C5E human-QA record `releaseSha` to equal the final release SHA, after which the existing C5E validator still performs the complete C5E-01..16/content validation during package generation;
 - the rated production gate to have been `enabled` for both deploy artifacts and rollback evidence;
 - all three production mutations to retain `C4D_PRODUCTION_RATED_PRODUCT_SMOKE` with `ok=true` and verified zero-count cleanup evidence;
-- `c4d-provision.json` to record successful D1 read authorization, provisioning, and schema verification for `cas-simulator-accounts`, with a full provisioning Git SHA and `gitRef=refs/heads/main`;
+- `c4d-provision.json` to record successful D1 read authorization, provisioning, base schema verification, and `accountLifecycleSchema=PASS` for `cas-simulator-accounts`, with a full provisioning Git SHA and `gitRef=refs/heads/main`;
 - the real D1 UUID in `c4d-provision.json` to exactly match the final reviewed `ACCOUNTS` binding in `wrangler.jsonc`.
 
 The Worker version-state lineage layer additionally requires:
