@@ -13,16 +13,17 @@ Neither workflow runs on push or pull request events. Production mutation theref
 
 ## Safety and authority boundary
 
-A production deploy requires the operator to paste the exact full Git SHA selected in the workflow UI and select one explicit deployment purpose. The workflow rejects the operation unless `confirm_sha` exactly equals `GITHUB_SHA` and `deployment_purpose` is one of:
+A production deploy requires the operator to dispatch from `refs/heads/main`, paste the exact full 40-character Git SHA selected in the workflow UI, and select one explicit deployment purpose. The workflow rejects the operation before Cloudflare mutation unless `GITHUB_REF=refs/heads/main`, `confirm_sha` is a full SHA, `confirm_sha` exactly equals `GITHUB_SHA`, and `deployment_purpose` is one of:
 
 - `initial_release` — the first deployment of the final release SHA before rollback verification;
 - `restore_after_rollback` — the final same-SHA deployment that restores the intended release after rollback verification.
 
 A production rollback requires all of the following:
 
-1. the exact full Git SHA of the governance workflow ref in `confirm_sha`;
-2. an explicit Cloudflare `target_version_id`;
-3. the literal confirmation value `ROLLBACK`.
+1. the workflow is dispatched from `refs/heads/main`;
+2. the exact full 40-character Git SHA of that main governance ref in `confirm_sha`, matching `GITHUB_SHA`;
+3. an explicit Cloudflare `target_version_id`;
+4. the literal confirmation value `ROLLBACK`.
 
 Rollback never selects an implicit previous version. The repository performs its own explicit confirmation before Wrangler is invoked non-interactively with `--yes`. Both workflows share the `production-deploy` concurrency group, so deploy and rollback cannot mutate production concurrently.
 
@@ -97,8 +98,8 @@ The restoration deploy is mandatory. Successful rollback evidence by itself leav
 ## Initial deploy procedure
 
 1. Confirm the intended final release commit has passed Project CI.
-2. Open **Deploy production** and select the exact release ref.
-3. Paste the full SHA into `confirm_sha`.
+2. Open **Deploy production** and select `main` / `refs/heads/main` at the exact final release SHA.
+3. Paste that full 40-character SHA into `confirm_sha`.
 4. Select `initial_release` as `deployment_purpose`.
 5. Dispatch the workflow.
 6. Require `C4D_PRODUCTION_BINDING=PASS` when the rated gate is enabled.
@@ -112,8 +113,8 @@ The restoration deploy is mandatory. Successful rollback evidence by itself leav
 
 1. Identify a known-good Worker version ID from retained deployment evidence or Cloudflare version history.
 2. Verify compatibility with the current Durable Object/resource topology.
-3. Open **Rollback production** on the same release governance ref.
-4. Provide the exact SHA, explicit `target_version_id`, and literal `ROLLBACK` confirmation.
+3. Open **Rollback production** on `main` at the same release governance SHA used for deployment.
+4. Provide that exact full SHA, explicit `target_version_id`, and literal `ROLLBACK` confirmation.
 5. Require `c5c-rollback-preflight.json` PASS. If the target equals the current sole 100% live version, stop: this is a no-op rollback and is not valid evidence.
 6. Execute the rollback and retain `c5-production-rollback-<run>-<attempt>`.
 7. Require `c5c-rollback-version-state.json` PASS with `beforeLiveVersionId != targetVersionId` and `afterLiveVersionId == targetVersionId`.
@@ -121,7 +122,7 @@ The restoration deploy is mandatory. Successful rollback evidence by itself leav
 
 ## Final restoration procedure
 
-1. Re-open **Deploy production** on the exact same final release SHA used for the initial deploy.
+1. Re-open **Deploy production** on `main` at the exact same final release SHA used for the initial deploy.
 2. Paste that same SHA into `confirm_sha`.
 3. Select `restore_after_rollback` as `deployment_purpose`.
 4. Dispatch the workflow.
@@ -144,7 +145,7 @@ C5F machine-checks chronology, Worker version continuity, and endpoint identity.
 - initial deploy, rollback, and restoration use the same production URL;
 - each deploy's production URL is represented by that deploy's retained Wrangler HTTP target list.
 
-Both deployment artifacts and the rollback artifact must identify the same release SHA/governance SHA.
+Both deployment artifacts and the rollback artifact must identify the same release SHA/governance SHA and must record `refs/heads/main` as the production mutation ref. C5F rejects retained deploy or rollback evidence from any other ref.
 
 `wrangler deploy` includes deployment purpose, Git SHA, and Actions run identity in its Cloudflare version message, while structured output preserves the generated version ID, Worker identity, and HTTP deploy targets for machine verification.
 
