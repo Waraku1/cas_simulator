@@ -49,7 +49,7 @@ Before the existing package generator copies any evidence, `pnpm verify:c5f` run
 2. the Worker version-state lineage validator;
 3. the production URL / Wrangler deploy target binding validator.
 
-Final package generation fails unless all three layers pass.
+Final package generation fails unless all three layers pass. The committed contract check also requires C4D D1 provisioning, production deploy, and production rollback to share the same non-cancelling `production-mutation` concurrency group, preventing overlapping remote schema/resource and Worker mutations.
 
 The all-seven validator requires:
 
