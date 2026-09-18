@@ -20,6 +20,7 @@
     "verify:production:c4d": "node scripts/verify-production-rated-product.mjs",
     "verify:c4c:runtime": "node scripts/verify-c4c-runtime.mjs",
     "verify:c4d:binding": "node scripts/verify-c4d-production-binding.mjs",
+    "verify:public:account": "node scripts/verify-public-account-lifecycle.mjs",
     "verify:c5a": "node scripts/verify-c5a-hardening.mjs",
     "verify:c5b": "node scripts/verify-c5b-performance.mjs",
     "verify:c5b:evidence": "node scripts/verify-c5b-evidence.mjs",
