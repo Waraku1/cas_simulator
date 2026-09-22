@@ -54,10 +54,11 @@ Implementation contract:
 - per-user cryptographically random salt;
 - PBKDF2-HMAC-SHA-256 through Web Crypto;
 - iteration count stored per user to permit future upgrades;
-- the production iteration count must be selected by bounded Worker CPU benchmarking before public release rather than copied from an arbitrary constant;
-- successful login may re-hash with a newer work factor when policy changes.
+- production uses 100,000 iterations because the Cloudflare Workers PBKDF2 runtime rejects higher iteration counts;
+- school-local account hashing uses the same work factor for behavioral parity;
+- successful login may re-hash with a newer work factor or stronger KDF when the production runtime contract changes.
 
-Cloudflare Workers currently supports Web Crypto PBKDF2. The implementation must use constant-shape error responses and avoid exposing stored hash/salt data to the browser.
+Cloudflare Workers supports Web Crypto PBKDF2 but currently enforces a 100,000-iteration ceiling. Values above that ceiling fail at runtime rather than providing additional password-hardening. Authentication code must fail closed at or below that ceiling, contain KDF exceptions as application errors, use constant-shape credential failures, and never expose stored hash/salt data to the browser. A future stronger password KDF requires an explicit reviewed migration rather than silently exceeding the platform PBKDF2 limit.
 
 ## 4. Session storage
 
