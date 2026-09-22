@@ -24,6 +24,13 @@
       }
     ]
   },
+  "d1_databases": [
+    {
+      "binding": "ACCOUNTS",
+      "database_name": "cas-simulator-accounts",
+      "database_id": "45fbd662-f371-49fc-bafb-1402ebd1bb32"
+    }
+  ],
   "migrations": [
     {
       "tag": "c3-v1",
