@@ -129,22 +129,45 @@ jobs:
             exit 1
           fi
 
+          TEMP_WRANGLER_CONFIG="$GITHUB_WORKSPACE/.c4d-provision-wrangler.jsonc"
+          DB_ID="$DB_ID" DB_NAME="$DB_NAME" TEMP_WRANGLER_CONFIG="$TEMP_WRANGLER_CONFIG" node <<'NODE'
+          const fs = require("node:fs");
+          const config = {
+            name: "cas-flight-simulator-c4d-provision",
+            compatibility_date: "2026-09-14",
+            d1_databases: [
+              {
+                binding: "ACCOUNTS",
+                database_name: process.env.DB_NAME,
+                database_id: process.env.DB_ID,
+                migrations_dir: "migrations",
+              },
+            ],
+          };
+          fs.writeFileSync(process.env.TEMP_WRANGLER_CONFIG, `${JSON.stringify(config, null, 2)}\n`);
+          NODE
+
           echo "database_id=$DB_ID" >> "$GITHUB_OUTPUT"
+          echo "config_path=$TEMP_WRANGLER_CONFIG" >> "$GITHUB_OUTPUT"
           echo "C4D_D1_DATABASE_ID=$DB_ID"
 
       - name: Apply D1 migrations
         shell: bash
+        env:
+          TEMP_WRANGLER_CONFIG: ${{ steps.d1.outputs.config_path }}
         run: |
           set -euo pipefail
-          pnpm exec wrangler d1 migrations apply "$DB_NAME" --remote | tee "$EVIDENCE_DIR/migrations.txt"
+          pnpm exec wrangler d1 migrations apply "$DB_NAME" --remote --config "$TEMP_WRANGLER_CONFIG" | tee "$EVIDENCE_DIR/migrations.txt"
 
       - name: Verify D1 schema
         shell: bash
+        env:
+          TEMP_WRANGLER_CONFIG: ${{ steps.d1.outputs.config_path }}
         run: |
           set -euo pipefail
-          RESULT="$(pnpm exec wrangler d1 execute "$DB_NAME" --remote --json --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users','sessions','rated_matches','d1_migrations') ORDER BY name;")"
+          RESULT="$(pnpm exec wrangler d1 execute "$DB_NAME" --remote --config "$TEMP_WRANGLER_CONFIG" --json --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users','sessions','rated_matches','d1_migrations') ORDER BY name;")"
           printf '%s\n' "$RESULT" | tee "$EVIDENCE_DIR/schema-after.json"
-          USER_COLUMNS="$(pnpm exec wrangler d1 execute "$DB_NAME" --remote --json --command "PRAGMA table_info(users);")"
+          USER_COLUMNS="$(pnpm exec wrangler d1 execute "$DB_NAME" --remote --config "$TEMP_WRANGLER_CONFIG" --json --command "PRAGMA table_info(users);")"
           printf '%s\n' "$USER_COLUMNS" | tee "$EVIDENCE_DIR/users-schema-after.json"
           RESULT="$RESULT" USER_COLUMNS="$USER_COLUMNS" node <<'NODE' | tee "$EVIDENCE_DIR/schema-verification.txt"
           const flattenResults = (payload) => Array.isArray(payload)
