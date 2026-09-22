@@ -2,9 +2,9 @@
 
 ## Current blocker
 
-Cloudflare identity is valid (`wrangler whoami` passes), but the configured API token is not authorized for D1 database listing. `wrangler d1 list --json` fails with Cloudflare authentication error code `10000`.
+Gate 1 attempt 2 confirmed D1 authorization is now valid and created the real `cas-simulator-accounts` database. The run then exposed a provisioning-workflow defect: before the reviewed production binding exists, Wrangler cannot resolve the database name for `d1 migrations apply` from the repository's production `wrangler.jsonc`.
 
-Do not bind a placeholder D1 ID and do not enable the rated production gate until D1 authorization is corrected.
+The workflow therefore creates a runner-local temporary Wrangler config after resolving the real D1 UUID. That temporary config contains only the provisioning-time `ACCOUNTS` binding plus `migrations_dir`, and is passed explicitly to both migration and schema-verification commands. It is not committed, deployed, or treated as the final production Worker binding. The reviewed `wrangler.jsonc` binding remains a later release PR step.
 
 
 ## GitHub production environment boundary
@@ -17,8 +17,8 @@ This binding does **not** itself prove that required reviewers, branch/tag deplo
 
 1. Read the current full 40-character `main` SHA and manually dispatch the `C4D provision D1` GitHub Actions workflow from `main`, supplying that exact value as `confirm_sha`. The workflow must emit `C4D_PROVISION_SOURCE=PASS`; any non-`refs/heads/main` ref or SHA mismatch fails before Cloudflare access.
 2. Confirm `C4D_D1_READ_AUTHORIZATION=PASS`.
-3. Provision or reuse `cas-simulator-accounts` and record the returned real database ID.
-4. Confirm all committed migrations apply remotely — including `0001_c4a_accounts.sql`, `0002_c4d_rating.sql`, and `0003_account_lifecycle.sql` — and verify the schema contains `users`, `sessions`, `rated_matches`, `d1_migrations`, plus the `users.deleted_at_ms` account-lifecycle column.
+3. Provision or reuse `cas-simulator-accounts` and record the returned real database ID. Generate a runner-local temporary Wrangler config binding `ACCOUNTS` to that exact UUID for provisioning-time migration/schema commands only.
+4. Confirm all committed migrations apply remotely through that temporary config — including `0001_c4a_accounts.sql`, `0002_c4d_rating.sql`, and `0003_account_lifecycle.sql` — and verify the schema contains `users`, `sessions`, `rated_matches`, `d1_migrations`, plus the `users.deleted_at_ms` account-lifecycle column.
 5. Retain the `c4d-d1-provision-<run>-<attempt>` artifact. Its `c4d-provision.json` is the canonical machine-readable record for the provisioned D1 UUID and successful authorization/schema gates.
 6. Add the real `ACCOUNTS` D1 binding to `wrangler.jsonc` in a normal branch/PR. Never use a placeholder ID.
 7. Confirm `pnpm verify:c4d:binding` reports `C4D_PRODUCTION_BINDING=PASS` for that reviewed config.

@@ -258,6 +258,14 @@ async function validateCommittedContract() {
   assert(provisionWorkflow.includes("c4d-provision.json") && provisionWorkflow.includes("c4d-d1-provision-"), "C4D provisioning workflow must retain machine-readable lineage evidence");
   assert(provisionWorkflow.includes("users.deleted_at_ms") && provisionWorkflow.includes("C4D_ACCOUNT_LIFECYCLE_SCHEMA=PASS") && provisionWorkflow.includes('accountLifecycleSchema: "PASS"'), "C4D provisioning must verify and retain the account-lifecycle schema gate");
   assert(provisionWorkflow.includes("confirm_sha") && provisionWorkflow.includes("refs/heads/main") && provisionWorkflow.includes("C4D_PROVISION_SOURCE=PASS"), "C4D provisioning workflow must fail closed to an explicitly confirmed main SHA");
+  assert(
+    provisionWorkflow.includes("TEMP_WRANGLER_CONFIG")
+      && provisionWorkflow.includes('binding: "ACCOUNTS"')
+      && provisionWorkflow.includes('database_id: process.env.DB_ID')
+      && provisionWorkflow.includes('migrations_dir: "migrations"')
+      && provisionWorkflow.includes('--config "$TEMP_WRANGLER_CONFIG"'),
+    "C4D provisioning must resolve the newly provisioned D1 database through a runner-local Wrangler config before migrations/schema verification",
+  );
   assert(deployWorkflow.includes("deployment_purpose") && deployWorkflow.includes("initial_release") && deployWorkflow.includes("restore_after_rollback"), "Deploy workflow must distinguish initial release and final restoration evidence");
   assert([provisionWorkflow, deployWorkflow, rollbackWorkflow].every((workflow) => workflow.includes("group: production-mutation") && workflow.includes("cancel-in-progress: false")), "D1 provisioning, deploy, and rollback must share one non-cancelling production mutation lock");
   assert([provisionWorkflow, deployWorkflow, rollbackWorkflow].every((workflow) => workflow.includes("environment: production")), "D1 provisioning, deploy, and rollback must bind to the production GitHub Environment");
