@@ -10,6 +10,9 @@ const accessibility = read("src/client/product/AccessibilityHardening.tsx");
 const accessibilityCss = read("src/client/a11y.css");
 const workerApp = read("src/worker/app.ts");
 const workerSecurity = read("src/worker/security.ts");
+const authCrypto = read("src/worker/auth/crypto.ts");
+const authService = read("src/worker/auth/service.ts");
+const schoolStore = read("scripts/school-account-store.mjs");
 const staticHeaders = read("public/_headers");
 const audit = read("docs/operations/C5A_SECURITY_ACCESSIBILITY.md");
 
@@ -26,6 +29,9 @@ const checks = [
   ["Worker applies response hardening", workerApp.includes("withSecurityHeaders")],
   ["Worker sets nosniff", workerSecurity.includes('"x-content-type-options": "nosniff"')],
   ["Worker preserves WebSocket upgrades", workerSecurity.includes("response.status === 101")],
+  ["production PBKDF2 work factor stays within Workers runtime ceiling", authCrypto.includes("PASSWORD_KDF_ITERATIONS = 100_000") && authCrypto.includes("iterations > PASSWORD_KDF_ITERATIONS")],
+  ["school-local password work factor matches production", schoolStore.includes("PASSWORD_ITERATIONS = 100_000")],
+  ["credential KDF failures are contained as application errors", authService.includes('"Credential derivation failed."') && authService.includes('"Credential verification failed."')],
   ["static headers disable framing", staticHeaders.includes("X-Frame-Options: DENY")],
   ["static headers define Permissions-Policy", staticHeaders.includes("Permissions-Policy:")],
   ["audit documents external rate limiting", audit.includes("shared edge/infrastructure mechanism")],

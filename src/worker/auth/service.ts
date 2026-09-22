@@ -17,11 +17,11 @@ import {
   createSessionToken,
   derivePasswordHash,
   hashSessionToken,
+  PASSWORD_KDF_ITERATIONS,
   verifyPasswordHash,
 } from "./crypto";
 import type { AuthRepository, StoredUser } from "./repository";
 
-const PASSWORD_KDF_ITERATIONS = 600_000;
 const SESSION_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
 
 function profile(user: StoredUser): PublicUserProfile {
@@ -140,7 +140,12 @@ export async function handleAccountApi(
 
     const nowMs = Date.now();
     const passwordSalt = createPasswordSalt();
-    const passwordHash = await derivePasswordHash(body.password, passwordSalt, PASSWORD_KDF_ITERATIONS);
+    let passwordHash: string;
+    try {
+      passwordHash = await derivePasswordHash(body.password, passwordSalt, PASSWORD_KDF_ITERATIONS);
+    } catch {
+      return error("INTERNAL_ERROR", "Credential derivation failed.", 500);
+    }
     const user: StoredUser = {
       userId: crypto.randomUUID(),
       loginId,
@@ -175,7 +180,21 @@ export async function handleAccountApi(
       return error("INVALID_INPUT", "Login payload is invalid.", 400);
     }
     const user = await repository.findUserByLoginId(normalizeLoginId(body.loginId));
-    if (!user || !(await verifyPasswordHash(body.password, user.passwordSalt, user.passwordIterations, user.passwordHash))) {
+    if (!user) {
+      return error("INVALID_CREDENTIALS", "User ID or password is incorrect.", 401);
+    }
+    let passwordMatches: boolean;
+    try {
+      passwordMatches = await verifyPasswordHash(
+        body.password,
+        user.passwordSalt,
+        user.passwordIterations,
+        user.passwordHash,
+      );
+    } catch {
+      return error("INTERNAL_ERROR", "Credential verification failed.", 500);
+    }
+    if (!passwordMatches) {
       return error("INVALID_CREDENTIALS", "User ID or password is incorrect.", 401);
     }
     return issueSession(user, repository, secureCookie);
@@ -200,7 +219,18 @@ export async function handleAccountApi(
     if (!body || body.confirmation !== "DELETE" || typeof body.password !== "string") {
       return error("INVALID_INPUT", "Account deletion requires password confirmation and the exact word DELETE.", 400);
     }
-    if (!(await verifyPasswordHash(body.password, user.passwordSalt, user.passwordIterations, user.passwordHash))) {
+    let passwordMatches: boolean;
+    try {
+      passwordMatches = await verifyPasswordHash(
+        body.password,
+        user.passwordSalt,
+        user.passwordIterations,
+        user.passwordHash,
+      );
+    } catch {
+      return error("INTERNAL_ERROR", "Credential verification failed.", 500);
+    }
+    if (!passwordMatches) {
       return error("INVALID_CREDENTIALS", "Password confirmation failed.", 401);
     }
 
