@@ -34,9 +34,24 @@ async function jsonRequest(path, { method = "GET", body, cookie } = {}) {
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  const responseText = await response.text();
   let value = null;
-  try { value = await response.json(); } catch { value = null; }
-  return { response, value };
+  try { value = responseText ? JSON.parse(responseText) : null; } catch { value = null; }
+  return { response, value, responseText };
+}
+
+function responseFailureDetail(response, value, responseText) {
+  const cfErrorType = response.headers.get("cf-error-type") ?? "none";
+  const contentType = response.headers.get("content-type") ?? "none";
+  const bodyPreview = value !== null
+    ? JSON.stringify(value)
+    : String(responseText ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
+  return [
+    `HTTP ${response.status}`,
+    `cf-error-type=${cfErrorType}`,
+    `content-type=${contentType}`,
+    `body=${bodyPreview || "<empty>"}`,
+  ].join(" ");
 }
 
 function sessionCookie(setCookie) {
@@ -223,11 +238,14 @@ function connectWebSocket(path, cookie) {
 }
 
 async function register(loginId, label) {
-  const { response, value } = await jsonRequest("/api/auth/register", {
+  const { response, value, responseText } = await jsonRequest("/api/auth/register", {
     method: "POST",
     body: { loginId, displayName: `Prod Smoke ${label}`, password: PASSWORD },
   });
-  assert(response.ok && value?.ok, `${label} registration failed: HTTP ${response.status}`);
+  assert(
+    response.ok && value?.ok,
+    `${label} registration failed: ${responseFailureDetail(response, value, responseText)}`,
+  );
   assert(value.user.rating === 1200, `${label} initial rating is not 1200`);
   return { cookie: sessionCookie(response.headers.get("set-cookie")), user: value.user };
 }
