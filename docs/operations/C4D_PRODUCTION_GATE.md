@@ -2,9 +2,9 @@
 
 ## Current blocker
 
-Gate 1 attempt 2 confirmed D1 authorization is now valid and created the real `cas-simulator-accounts` database. The run then exposed a provisioning-workflow defect: before the reviewed production binding exists, Wrangler cannot resolve the database name for `d1 migrations apply` from the repository's production `wrangler.jsonc`.
+Gate 1 is complete. Run `35727235576` attempt `1` on `main` @ `5e8da64b5cdcc326c94b58d9352af38a90257643` reused `cas-simulator-accounts`, applied migrations 0001/0002/0003 remotely, verified the base and account-lifecycle schema, and retained the completed provisioning artifact. The canonical production D1 UUID is `45fbd662-f371-49fc-bafb-1402ebd1bb32`.
 
-The workflow therefore creates a runner-local temporary Wrangler config after resolving the real D1 UUID. That temporary config contains only the provisioning-time `ACCOUNTS` binding plus `migrations_dir`, and is passed explicitly to both migration and schema-verification commands. It is not committed, deployed, or treated as the final production Worker binding. The reviewed `wrangler.jsonc` binding remains a later release PR step.
+The next release step is the reviewed `ACCOUNTS` binding change in `wrangler.jsonc`, followed by enabling the repository variable `C4D_RATED_PRODUCTION_GATE=enabled` for the final immutable-SHA production release path. No Worker deployment has occurred yet.
 
 
 ## GitHub production environment boundary
