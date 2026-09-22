@@ -28,7 +28,7 @@ const checks = [
   ["worker routes delete as account mutation", app.includes("ACCOUNT_API.deleteAccount")],
   ["deletion requires authenticated account", service.includes('Sign in before deleting the account.')],
   ["deletion requires exact confirmation", service.includes('body.confirmation !== "DELETE"')],
-  ["deletion re-verifies password", service.includes("verifyPasswordHash(body.password")],
+  ["deletion re-verifies password", service.includes("verifyPasswordHash(") && service.includes('"Password confirmation failed."') && service.includes('"Credential verification failed."')],
   ["deletion clears session cookie", service.includes('"set-cookie": clearSessionCookie(secureCookie)')],
   ["expired sessions are cleaned on account activity", service.includes("deleteExpiredSessions(Date.now())")],
   ["schema records deletion timestamp", migration.includes("deleted_at_ms")],
