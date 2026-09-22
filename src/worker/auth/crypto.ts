@@ -1,5 +1,7 @@
 const encoder = new TextEncoder();
 
+export const PASSWORD_KDF_ITERATIONS = 100_000;
+
 function toBase64Url(bytes: Uint8Array) {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -36,6 +38,9 @@ export async function derivePasswordHash(
 ) {
   if (!Number.isSafeInteger(iterations) || iterations <= 0) {
     throw new Error("Password iteration count must be a positive safe integer.");
+  }
+  if (iterations > PASSWORD_KDF_ITERATIONS) {
+    throw new Error("Password iteration count exceeds the Cloudflare Workers PBKDF2 runtime limit.");
   }
 
   const passwordKey = await crypto.subtle.importKey(
