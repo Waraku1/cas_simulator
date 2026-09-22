@@ -167,7 +167,40 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          DEPLOYED_VERSION_ID="$(node -e 'const fs=require("node:fs"); const s=JSON.parse(fs.readFileSync(process.env.EVIDENCE_DIR + "/c5c-deploy-version-state.json","utf8")); if (!s.deployedVersionId) process.exit(1); process.stdout.write(s.deployedVersionId)')"
+          RAW_TAIL="/tmp/c4d-worker-tail-raw.jsonl"
+          SAFE_TAIL="$EVIDENCE_DIR/c4d-worker-error-tail.jsonl"
+          TAIL_STDERR="$EVIDENCE_DIR/c4d-worker-tail.stderr.txt"
+          : > "$RAW_TAIL"
+          : > "$TAIL_STDERR"
+
+          set +e
+          timeout 45s pnpm exec wrangler tail cas-flight-simulator \
+            --format json \
+            --status error \
+            --version-id "$DEPLOYED_VERSION_ID" \
+            > "$RAW_TAIL" 2> "$TAIL_STDERR" &
+          TAIL_PID=$!
+          set -e
+
+          # Give Wrangler time to establish the tail before the deterministic smoke request.
+          sleep 5
+
+          set +e
           pnpm verify:production:c4d | tee "$EVIDENCE_DIR/c4d-rated-smoke.txt"
+          SMOKE_STATUS=${PIPESTATUS[0]}
+          set -e
+
+          # Allow the exception event to arrive, then stop the bounded tail session.
+          sleep 3
+          kill "$TAIL_PID" 2>/dev/null || true
+          wait "$TAIL_PID" 2>/dev/null || true
+
+          node scripts/sanitize-worker-tail.mjs "$RAW_TAIL" "$SAFE_TAIL"
+          rm -f "$RAW_TAIL"
+
+          exit "$SMOKE_STATUS"
 
       - name: Cleanup and verify C4D production smoke accounts
         if: ${{ always() && env.C4D_RATED_PRODUCTION_GATE == 'enabled' && steps.deploy.outcome == 'success' }}
