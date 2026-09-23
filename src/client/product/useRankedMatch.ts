@@ -209,7 +209,16 @@ export function useRankedMatch(assignment: MatchFoundAssignment): RankedMatchCon
 
   const fireWeapon = useCallback((weaponId: WeaponId) => {
     const socket = socketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN || matchStateRef.current?.result) return false;
+    const state = matchStateRef.current;
+    const formalWeaponAuthority = state?.participants.every(
+      (participant) => participant.weaponReadyAtMs !== undefined,
+    ) ?? false;
+    if (
+      !socket
+      || socket.readyState !== WebSocket.OPEN
+      || state?.result
+      || !formalWeaponAuthority
+    ) return false;
     socket.send(JSON.stringify({
       type: "action",
       clientTimeMs: performance.now(),
