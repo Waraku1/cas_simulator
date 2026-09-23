@@ -9,7 +9,7 @@ export default function App() {
   const devFlight = params.get("devFlight") === "1";
   const staticPreview = params.get("staticPreview") === "1";
 
-  if (devFlight) return <FlightRuntime />;
+  if (devFlight) return <FlightRuntime localAircraftId="orbit-a1" />;
 
   return (
     <Fragment>
