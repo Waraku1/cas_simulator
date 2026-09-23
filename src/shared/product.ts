@@ -44,6 +44,19 @@ export type PlayerProfile = Readonly<{
   fixedAircraftId: string | null;
 }>;
 
+/**
+ * Deprecated compatibility contract for the pre-weapon rollout.
+ * Runtime combat no longer resolves these modules.
+ */
+export type ActionModuleSpec = Readonly<{
+  actionModuleId: string;
+  displayName: string;
+  heartPointEffect: number;
+  cooldownMs: number;
+  activationRadiusM: number;
+  activationProfile: "close" | "balanced" | "precision";
+}>;
+
 export type WeaponId = "missile" | "gun";
 
 export type WeaponSpec = Readonly<{
