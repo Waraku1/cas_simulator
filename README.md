@@ -65,7 +65,25 @@ pnpm dev
 
 Use client-only mode only when multiplayer/backend behavior is intentionally unnecessary.
 
-Two independent browser contexts on the same Mac can use the local room backend. Separate school-managed devices are not assumed to reach a laptop-hosted service across the managed Wi-Fi. Do not bypass TLS warnings or school filtering controls, and do not expose the development server on the managed LAN without explicit authorization.
+Two independent browser contexts on the same Mac can use the local room backend. Do not bypass TLS warnings or school filtering controls, and do not expose the development server on the managed LAN without explicit authorization.
+
+### Multi-device school mode
+
+Separate managed Macs use the Render school gateway rather than connecting to a laptop-hosted LAN service. The gateway serves the normal Vite/Cesium client from one HTTPS origin and proxies only `/api/*` HTTP/WebSocket traffic to the existing Cloudflare production Worker. D1, matchmaking, ranked-match authority, rating, and account persistence therefore remain on the existing production backend.
+
+Repository deployment contract:
+
+```bash
+pnpm verify:render:school
+pnpm build:render
+pnpm start:render
+```
+
+Render uses `render.yaml`. Supply a Render-scoped `VITE_CESIUM_ION_TOKEN` during build, then verify `/gateway-health` and perform the two-Mac Auth -> Matchmaking -> Ranked Match -> Result/Leaderboard path on the school LAN.
+
+The localhost stack remains the single-Mac fallback. The Render gateway is the supported multi-device school path; ports 5173/8787/8788/8789 are not exposed directly to the school LAN.
+
+See `docs/operations/RENDER_SCHOOL_GATEWAY.md` for the gateway security and deployment contract.
 
 ## Flight controls
 

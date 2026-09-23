@@ -78,6 +78,12 @@ jobs:
       - name: Production build
         run: pnpm build
 
+      - name: Verify Render school gateway contract
+        run: pnpm verify:render:school
+
+      - name: Build Render school client
+        run: pnpm build:render
+
       - name: Verify school full-stack localhost mode
         run: |
           set -euo pipefail

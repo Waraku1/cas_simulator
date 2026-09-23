@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: cas-simulator-school
+    runtime: node
+    plan: free
+    buildCommand: corepack enable && corepack prepare pnpm@10.32.1 --activate && pnpm install --frozen-lockfile && pnpm build:render
+    startCommand: pnpm start:render
+    healthCheckPath: /gateway-health
+    envVars:
+      - key: CAS_UPSTREAM_ORIGIN
+        value: https://cas-flight-simulator.heleshiheiheleshihei.workers.dev
+      - key: VITE_CESIUM_ION_TOKEN
+        sync: false

@@ -47,6 +47,10 @@ const required = [
   "src/shared/competition.ts",
   "src/shared/matchmaking.ts",
   "scripts/dev-school.mjs",
+  "scripts/render-school-gateway.mjs",
+  "scripts/verify-render-school-gateway.mjs",
+  "render.yaml",
+  "docs/operations/RENDER_SCHOOL_GATEWAY.md",
   "scripts/school-local-backend.mjs",
   "scripts/school-account-backend.mjs",
   "scripts/school-account-store.mjs",
@@ -88,6 +92,9 @@ if (!pkg.scripts?.["verify:school:c4c"] || !pkg.scripts?.["verify:c4c:runtime"])
 }
 if (!pkg.scripts?.["verify:school:c4d"] || !pkg.scripts?.["verify:school:c4d:ranked"]) {
   throw new Error("Missing C4D school account/rated-product verification scripts");
+}
+if (!pkg.scripts?.["build:render"] || !pkg.scripts?.["start:render"] || !pkg.scripts?.["verify:render:school"]) {
+  throw new Error("Missing Render multi-device school gateway scripts");
 }
 if (!pkg.scripts?.["verify:production:c4d"]?.includes("verify-production-rated-product.mjs")) {
   throw new Error("Missing C4D production rated-product verification command");
