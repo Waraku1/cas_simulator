@@ -8,7 +8,11 @@
     "rollAccelerationDegS2": 88,
     "visualScale": 1,
     "appearanceKey": "bell-x1",
-    "actionModuleId": "vector-link"
+    "actionModuleId": "vector-link",
+    "weaponIds": [
+      "missile",
+      "gun"
+    ]
   },
   {
     "aircraftId": "strata-b2",
@@ -19,7 +23,11 @@
     "rollAccelerationDegS2": 72,
     "visualScale": 1.08,
     "appearanceKey": "strata-b2",
-    "actionModuleId": "tempo-link"
+    "actionModuleId": "tempo-link",
+    "weaponIds": [
+      "missile",
+      "gun"
+    ]
   },
   {
     "aircraftId": "kite-c3",
@@ -30,6 +38,10 @@
     "rollAccelerationDegS2": 108,
     "visualScale": 0.88,
     "appearanceKey": "kite-c3",
-    "actionModuleId": "focus-link"
+    "actionModuleId": "focus-link",
+    "weaponIds": [
+      "missile",
+      "gun"
+    ]
   }
 ]
