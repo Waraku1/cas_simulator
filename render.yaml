@@ -11,5 +11,7 @@ services:
         value: 22.16.0
       - key: CAS_UPSTREAM_ORIGIN
         value: https://cas-flight-simulator.heleshiheiheleshihei.workers.dev
+      - key: CAS_PUBLIC_ORIGIN
+        value: https://cas-simulator-school.onrender.com
       - key: VITE_CESIUM_ION_TOKEN
         sync: false
