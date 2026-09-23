@@ -47,6 +47,8 @@ for (const token of [
   "pnpm start:render",
   "healthCheckPath: /gateway-health",
   "CAS_UPSTREAM_ORIGIN",
+  "CAS_PUBLIC_ORIGIN",
+  "https://cas-simulator-school.onrender.com",
   "VITE_CESIUM_ION_TOKEN",
   "sync: false",
 ]) {
