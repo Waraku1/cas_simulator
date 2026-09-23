@@ -4,6 +4,7 @@ import {
   Color,
   ConstantPositionProperty,
   ConstantProperty,
+  Entity,
   Ion,
   Matrix3,
   Matrix4,
@@ -368,7 +369,7 @@ export function EarthScene({
       const remoteOrientationProperty = new ConstantProperty(remoteInitialOrientation);
       const remoteMaterial = Color.fromCssColorString("#ffd48a").withAlpha(0.9);
       const remoteAccent = Color.fromCssColorString("#ff9f43").withAlpha(0.9);
-      const remoteEntities = [];
+      const remoteEntities: Entity[] = [];
 
       if (peerVisual) {
         remoteEntities.push(viewer.entities.add({
