@@ -380,6 +380,8 @@ export function EarthScene({
             scale: localVisual.scale * (localAircraft?.visualScale ?? 1),
             minimumPixelSize: localVisual.minimumPixelSize,
             maximumScale: localVisual.maximumScale,
+            silhouetteColor: aircraftAccent,
+            silhouetteSize: 1.5,
           },
         });
       } else {
@@ -437,6 +439,8 @@ export function EarthScene({
             scale: peerVisual.scale * (peerAircraft?.visualScale ?? 1),
             minimumPixelSize: peerVisual.minimumPixelSize,
             maximumScale: peerVisual.maximumScale,
+            silhouetteColor: remoteAccent,
+            silhouetteSize: 2.5,
           },
         }));
       } else {

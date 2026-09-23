@@ -150,6 +150,9 @@ for (const token of [
   "REMOTE_EXTRAPOLATION_LIMIT_MS = 180",
   "REMOTE_SMOOTHING_TIME_CONSTANT_MS = 65",
   "predictRemotePose",
+  "silhouetteColor: aircraftAccent",
+  "silhouetteColor: remoteAccent",
+  "silhouetteSize: 2.5",
 ]) {
   if (!earthScene.includes(token)) throw new Error(`EarthScene aircraft/network presentation contract missing: ${token}`);
 }
@@ -158,8 +161,12 @@ const appShell = await readFile(join(root, "src/client/App.tsx"), "utf8");
 if (!appShell.includes('const devFlight = params.get("devFlight") === "1";')) {
   throw new Error("Raw flight development UI must require explicit ?devFlight=1 opt-in");
 }
-if (!appShell.includes('if (devFlight) return <FlightRuntime') || !appShell.includes('localAircraftId="orbit-a1"')) {
-  throw new Error("Explicit devFlight route must render FlightRuntime with the reviewed Bell X-1 test aircraft");
+if (
+  !appShell.includes('if (devFlight) return <FlightRuntime')
+  || !appShell.includes('localAircraftId="orbit-a1"')
+  || !appShell.includes('peerAircraftId="orbit-a1"')
+) {
+  throw new Error("Explicit devFlight route must render reviewed Bell X-1 models for both local and peer QA");
 }
 if (!appShell.includes("{staticPreview ? <ProductPreview /> : <ProductLive />}")) {
   throw new Error("Normal application entrypoint must default to ProductLive");
