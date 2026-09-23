@@ -321,6 +321,10 @@ for (const evidence of [
   "duplicateResultIgnored",
   "activeMatchLockReleased",
   "fixedAircraftRematchPersisted",
+  "missileCooldownRejected",
+  "gunAcceptedDuringMissileCooldown",
+  "gunCooldownRejected",
+  "independentWeaponCooldowns",
   "C4D_PRODUCTION_RATED_PRODUCT_SMOKE",
 ]) {
   if (!productionRatedSmoke.includes(evidence)) {
