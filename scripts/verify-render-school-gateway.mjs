@@ -30,10 +30,12 @@ for (const token of [
   "tls.connect",
   'pathname.startsWith("/api/")',
   "GATEWAY_ORIGIN_REJECTED",
+  '"referrer-policy": "strict-origin-when-cross-origin"',
 ]) {
   assert(gateway.includes(token), `Render school gateway missing security/runtime contract: ${token}`);
 }
 
+assert(!gateway.includes('"referrer-policy": "no-referrer"'), "Render document must preserve an origin Referer for Cesium ion Allowed URLs");
 assert(!gateway.includes("request.headers.cookie") || !gateway.includes("console.log(request.headers.cookie)"), "Gateway must not log Cookie headers");
 assert(!gateway.includes("console.log(request.url"), "Gateway must not log request URLs because ranked join tokens can appear in query strings");
 

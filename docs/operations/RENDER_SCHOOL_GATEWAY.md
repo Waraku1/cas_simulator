@@ -36,7 +36,8 @@ The gateway:
 - forwards cookies and `Set-Cookie` without logging them;
 - does not log request URLs because ranked join tokens appear in WebSocket query strings;
 - supports HTTP and WebSocket proxying through the same public Render port;
-- serves the built Vite/Cesium client for non-API routes.
+- serves the built Vite/Cesium client for non-API routes;
+- uses `Referrer-Policy: strict-origin-when-cross-origin` so Cesium ion Allowed URL checks receive the Render origin without exposing path/query data cross-origin.
 
 Do not turn this into a general-purpose proxy and do not add arbitrary target URLs supplied by the client.
 
