@@ -1,5 +1,6 @@
 import { isAircraftId } from "./aircraft";
-import type { MatchResultReason } from "./product";
+import type { MatchResultReason, WeaponId } from "./product";
+import { isWeaponId } from "./weapons";
 
 export const COMPETITION_MESSAGE_MAX_BYTES = 1_024;
 export const COMPETITION_POSE_FRESHNESS_MS = 1_500;
@@ -28,7 +29,12 @@ export type CompetitionParticipantSnapshot = Readonly<{
   aircraftId: string;
   heartPoints: number;
   connected: boolean;
+  /**
+   * Legacy shared-action cooldown retained during protocol migration.
+   * New clients should prefer weaponReadyAtMs when present.
+   */
   nextActionAtMs: number;
+  weaponReadyAtMs?: Readonly<Record<WeaponId, number>>;
   disconnectDeadlineMs: number | null;
 }>;
 
@@ -52,6 +58,7 @@ export type ClientCompetitionMessage =
   | Readonly<{
       type: "action";
       clientTimeMs: number;
+      weaponId?: WeaponId;
     }>
   | Readonly<{
       type: "leave_match";
@@ -63,7 +70,8 @@ export type CompetitionActionFeedbackCode =
   | "cooldown"
   | "peer_unavailable"
   | "pose_stale"
-  | "outside_interaction";
+  | "outside_interaction"
+  | "invalid_weapon";
 
 export type ServerCompetitionMessage =
   | Readonly<{
@@ -75,6 +83,7 @@ export type ServerCompetitionMessage =
       accepted: boolean;
       code: CompetitionActionFeedbackCode;
       nextActionAtMs: number;
+      weaponId?: WeaponId;
     }>;
 
 export type CompetitionPosition = Readonly<{
@@ -104,6 +113,7 @@ const ACTION_FEEDBACK_CODES = new Set<CompetitionActionFeedbackCode>([
   "peer_unavailable",
   "pose_stale",
   "outside_interaction",
+  "invalid_weapon",
 ]);
 
 const RESULT_REASONS = new Set<MatchResultReason>([
@@ -119,6 +129,13 @@ function byteLength(text: string) {
   return new TextEncoder().encode(text).byteLength;
 }
 
+function validWeaponReadyAt(value: unknown) {
+  if (!record(value)) return false;
+  return (["missile", "gun"] as const).every(
+    (weaponId) => finite(value[weaponId]) && value[weaponId] >= 0,
+  );
+}
+
 function validParticipant(value: unknown): value is CompetitionParticipantSnapshot {
   if (!record(value)) return false;
   return (value.slot === 1 || value.slot === 2)
@@ -129,6 +146,7 @@ function validParticipant(value: unknown): value is CompetitionParticipantSnapsh
     && typeof value.connected === "boolean"
     && finite(value.nextActionAtMs)
     && value.nextActionAtMs >= 0
+    && (value.weaponReadyAtMs === undefined || validWeaponReadyAt(value.weaponReadyAtMs))
     && (value.disconnectDeadlineMs === null
       || (finite(value.disconnectDeadlineMs) && value.disconnectDeadlineMs >= 0));
 }
@@ -140,7 +158,12 @@ export function parseClientCompetitionMessage(text: string): ClientCompetitionMe
     if (!record(value) || typeof value.type !== "string") return null;
     if (value.type === "leave_match") return { type: "leave_match" };
     if (value.type === "action" && finite(value.clientTimeMs) && value.clientTimeMs >= 0) {
-      return { type: "action", clientTimeMs: value.clientTimeMs };
+      if (value.weaponId !== undefined && !isWeaponId(value.weaponId)) return null;
+      return {
+        type: "action",
+        clientTimeMs: value.clientTimeMs,
+        ...(value.weaponId !== undefined ? { weaponId: value.weaponId as WeaponId } : {}),
+      };
     }
     return null;
   } catch {
@@ -161,6 +184,7 @@ export function parseServerCompetitionMessage(text: string): ServerCompetitionMe
         || !ACTION_FEEDBACK_CODES.has(value.code as CompetitionActionFeedbackCode)
         || !finite(value.nextActionAtMs)
         || value.nextActionAtMs < 0
+        || (value.weaponId !== undefined && !isWeaponId(value.weaponId))
       ) {
         return null;
       }
