@@ -133,9 +133,25 @@ for (const token of ["Bell X-1", "/aircraft/bell-x1.glb", "Smithsonian Instituti
   if (!aircraftVisuals.includes(token)) throw new Error(`Bell X-1 visual metadata missing: ${token}`);
 }
 
+const multiplayerContract = await readFile(join(root, "src/shared/multiplayer.ts"), "utf8");
+if (!multiplayerContract.includes("SNAPSHOT_INTERVAL_MS = 100")) {
+  throw new Error("Multiplayer pose cadence must remain at the reviewed 10 Hz");
+}
+
 const earthScene = await readFile(join(root, "src/client/components/EarthScene.tsx"), "utf8");
-for (const token of ["aircraftVisualForSpec", "localAircraftId", "peerAircraftId", "modelOrientationFromFrame", "model: {"]) {
-  if (!earthScene.includes(token)) throw new Error(`EarthScene aircraft model integration missing: ${token}`);
+for (const token of [
+  "aircraftVisualForSpec",
+  "localAircraftId",
+  "peerAircraftId",
+  "modelOrientationFromFrame",
+  "model: {",
+  "stabilizedCameraUp",
+  "CAMERA_ROLL_FOLLOW = 0.2",
+  "REMOTE_EXTRAPOLATION_LIMIT_MS = 180",
+  "REMOTE_SMOOTHING_TIME_CONSTANT_MS = 65",
+  "predictRemotePose",
+]) {
+  if (!earthScene.includes(token)) throw new Error(`EarthScene aircraft/network presentation contract missing: ${token}`);
 }
 
 const appShell = await readFile(join(root, "src/client/App.tsx"), "utf8");
