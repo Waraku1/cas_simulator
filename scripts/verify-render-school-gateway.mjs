@@ -6,18 +6,21 @@ const root = new URL("..", import.meta.url).pathname;
 const gatewayPath = resolve(root, "scripts/render-school-gateway.mjs");
 const renderPath = resolve(root, "render.yaml");
 const packagePath = resolve(root, "package.json");
+const cesiumPreflightPath = resolve(root, "scripts/verify-render-cesium-token.mjs");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-const [gateway, renderYaml, packageText] = await Promise.all([
+const [gateway, renderYaml, packageText, cesiumPreflight] = await Promise.all([
   readFile(gatewayPath, "utf8"),
   readFile(renderPath, "utf8"),
   readFile(packagePath, "utf8"),
+  readFile(cesiumPreflightPath, "utf8"),
 ]);
 
 execFileSync(process.execPath, ["--check", gatewayPath], { cwd: root, stdio: "inherit" });
+execFileSync(process.execPath, ["--check", cesiumPreflightPath], { cwd: root, stdio: "inherit" });
 
 for (const token of [
   'const HOST = "0.0.0.0"',
@@ -61,9 +64,27 @@ assert(!renderYaml.includes("corepack prepare"), "Render build must not depend o
 
 const pkg = JSON.parse(packageText);
 assert(pkg.engines?.node === ">=22.12.0 <23", "Node engine range must stay bounded to Node 22 for Render/Corepack reproducibility");
+assert(pkg.scripts?.["build:render"]?.includes("pnpm verify:render:cesium"), "Render build must gate on live Cesium token preflight");
 assert(pkg.scripts?.["build:render"]?.includes("vite build --config vite.client.config.ts"), "Missing client-only Render build script");
+assert(pkg.scripts?.["verify:render:cesium"] === "node scripts/verify-render-cesium-token.mjs", "Missing Render Cesium token verifier script");
 assert(pkg.scripts?.["start:render"] === "node scripts/render-school-gateway.mjs", "Missing Render gateway start script");
 assert(pkg.scripts?.["verify:render:school"] === "node scripts/verify-render-school-gateway.mjs", "Missing Render gateway verifier script");
+
+for (const token of [
+  'process.env.RENDER === "true"',
+  "VITE_CESIUM_ION_TOKEN",
+  "CAS_PUBLIC_ORIGIN",
+  "https://api.cesium.com/v1/assets/",
+  'Referer: referer',
+  "requiredAssets",
+  'id: 1',
+  'id: 2',
+  "CESIUM_RENDER_TOKEN_PREFLIGHT PASS",
+]) {
+  assert(cesiumPreflight.includes(token), `Cesium Render preflight missing contract: ${token}`);
+}
+assert(!cesiumPreflight.includes("console.log(token"), "Cesium Render preflight must never log the token");
+assert(!cesiumPreflight.includes("console.log(endpoint"), "Cesium Render preflight must never log the endpoint URL containing the token");
 
 console.log(JSON.stringify({
   ok: true,

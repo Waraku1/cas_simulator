@@ -10,7 +10,7 @@
     "dev": "vite dev --config vite.client.config.ts",
     "dev:cloudflare": "vite dev",
     "dev:school": "pnpm sync:cesium && node scripts/dev-school.mjs",
-    "build:render": "pnpm sync:cesium && tsc -b && vite build --config vite.client.config.ts",
+    "build:render": "pnpm verify:render:cesium && pnpm sync:cesium && tsc -b && vite build --config vite.client.config.ts",
     "start:render": "node scripts/render-school-gateway.mjs",
     "verify:render:school": "node scripts/verify-render-school-gateway.mjs",
     "verify:school": "SCHOOL_URL=http://127.0.0.1:5173 node scripts/verify-production-multiplayer.mjs",
@@ -38,7 +38,8 @@
     "deploy": "pnpm build && wrangler deploy",
     "cf:typegen": "wrangler types",
     "check": "tsc -b",
-    "validate:scaffold": "node scripts/verify-release-scaffold.mjs"
+    "validate:scaffold": "node scripts/verify-release-scaffold.mjs",
+    "verify:render:cesium": "node scripts/verify-render-cesium-token.mjs"
   },
   "dependencies": {
     "cesium": "1.145.0",
