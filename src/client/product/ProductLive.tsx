@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { actionModuleById } from "../../shared/action-modules";
 import { aircraftById } from "../../shared/aircraft";
+import { aircraftVisualForSpec } from "../../shared/aircraft-visuals";
 import type { LeaderboardProfile, PublicUserProfile } from "../../shared/auth";
 import type { MatchFoundAssignment } from "../../shared/matchmaking";
 import {
@@ -72,6 +73,8 @@ function HomeLive({ profile, account, onStart, onLeaderboard }: Readonly<{
 }>) {
   const fixed = profile.fixedAircraftId ? aircraftById(profile.fixedAircraftId) : null;
   const fixable = profile.fixableAircraftId ? aircraftById(profile.fixableAircraftId) : null;
+  const fixedVisual = aircraftVisualForSpec(fixed);
+  const fixableVisual = aircraftVisualForSpec(fixable);
   const [showAccountData, setShowAccountData] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
@@ -106,9 +109,9 @@ function HomeLive({ profile, account, onStart, onLeaderboard }: Readonly<{
         <section className="home-cards" aria-label="Pilot summary">
           <article className="summary-card summary-card--rating"><span>RATING</span><strong>{profile.rating}</strong><small>{profile.wins}W / {profile.losses}L / {profile.draws}D</small></article>
           <article className="summary-card">
-            <span>FIXED AIRCRAFT</span><strong>{fixed?.displayName ?? "RANDOM"}</strong><small>{fixed ? "PERSISTENT" : "ASSIGNED EACH MATCH"}</small>
+            <span>FIXED AIRCRAFT</span><strong>{fixedVisual?.realAircraftName ?? fixed?.displayName ?? "RANDOM"}</strong><small>{fixed ? `${fixed.displayName} · ${fixedVisual?.handlingProfileLabel ?? "CAS HANDLING"}` : "ASSIGNED EACH MATCH"}</small>
             {fixed && <button className="product-secondary" onClick={() => void account.setFixedAircraft(null)}>RETURN TO RANDOM</button>}
-            {!fixed && fixable && <button className="product-secondary" onClick={() => void account.setFixedAircraft(fixable.aircraftId)}>FIX {fixable.displayName.toUpperCase()}</button>}
+            {!fixed && fixable && <button className="product-secondary" onClick={() => void account.setFixedAircraft(fixable.aircraftId)}>FIX {(fixableVisual?.realAircraftName ?? fixable.displayName).toUpperCase()}</button>}
           </article>
           <button className="summary-card summary-card--button" onClick={onLeaderboard}><span>LEADERBOARD</span><strong>VIEW</strong><small>RANKINGS & RECORDS</small></button>
           <button className="summary-card summary-card--button" onClick={() => setShowAccountData(true)}><span>ACCOUNT & PRIVACY</span><strong>MANAGE</strong><small>DATA NOTICE & DELETION</small></button>
@@ -164,9 +167,12 @@ function MatchmakingLive({ fixedAircraftId, onMatched, onCancel }: Readonly<{
 }
 
 function AssignmentLive({ assignment, onCountdown }: Readonly<{ assignment: MatchFoundAssignment; onCountdown: () => void }>) {
-  const aircraft = aircraftById(assignment.aircraftId); const peerAircraft = aircraftById(assignment.peerAircraftId);
+  const aircraft = aircraftById(assignment.aircraftId);
+  const peerAircraft = aircraftById(assignment.peerAircraftId);
+  const aircraftVisual = aircraftVisualForSpec(aircraft);
+  const peerVisual = aircraftVisualForSpec(peerAircraft);
   useEffect(() => { const timer = window.setTimeout(onCountdown, Math.max(0, assignment.assignmentEndsAtMs - Date.now())); return () => window.clearTimeout(timer); }, [assignment.assignmentEndsAtMs, onCountdown]);
-  return <div className="product-screen product-screen--assignment"><div className="product-grid" aria-hidden="true" /><Brand /><section className="assignment-card"><p className="product-eyebrow">MATCH FOUND // AIRCRAFT ASSIGNMENT</p><div className="aircraft-silhouette" aria-hidden="true"><span /></div><h1>{aircraft?.displayName ?? assignment.aircraftId}</h1><p className="product-copy">Opponent profile: {peerAircraft?.displayName ?? assignment.peerAircraftId}. Spawn side: {assignment.spawnSide.toUpperCase()}.</p><dl className="spec-strip"><div><dt>SPEED</dt><dd>{aircraft ? `${aircraft.minimumSpeedMps}–${aircraft.maximumSpeedMps}` : "—"}</dd></div><div><dt>PITCH</dt><dd>{aircraft?.pitchAccelerationDegS2 ?? "—"}</dd></div><div><dt>ROLL</dt><dd>{aircraft?.rollAccelerationDegS2 ?? "—"}</dd></div><div><dt>ACTION</dt><dd>{aircraft?.actionModuleId.toUpperCase() ?? "—"}</dd></div></dl></section></div>;
+  return <div className="product-screen product-screen--assignment"><div className="product-grid" aria-hidden="true" /><Brand /><section className="assignment-card"><p className="product-eyebrow">MATCH FOUND // AIRCRAFT ASSIGNMENT</p><div className="aircraft-silhouette" aria-hidden="true"><span /></div><h1>{aircraftVisual?.realAircraftName ?? aircraft?.displayName ?? assignment.aircraftId}</h1><p className="product-copy">{aircraft ? `${aircraft.displayName} · ${aircraftVisual?.handlingProfileLabel ?? "CAS HANDLING"}` : "CAS AIRCRAFT PROFILE"} // Opponent: {peerVisual?.realAircraftName ?? peerAircraft?.displayName ?? assignment.peerAircraftId}. Spawn side: {assignment.spawnSide.toUpperCase()}.</p><dl className="spec-strip"><div><dt>SPEED</dt><dd>{aircraft ? `${aircraft.minimumSpeedMps}–${aircraft.maximumSpeedMps}` : "—"}</dd></div><div><dt>PITCH</dt><dd>{aircraft?.pitchAccelerationDegS2 ?? "—"}</dd></div><div><dt>ROLL</dt><dd>{aircraft?.rollAccelerationDegS2 ?? "—"}</dd></div><div><dt>ACTION</dt><dd>{aircraft?.actionModuleId.toUpperCase() ?? "—"}</dd></div></dl></section></div>;
 }
 
 function CountdownLive({ assignment, onActive }: Readonly<{ assignment: MatchFoundAssignment; onActive: () => void }>) {
@@ -196,7 +202,7 @@ function actionFeedbackLabel(code: string | undefined) {
 }
 
 function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFoundAssignment; onResolved: (outcome: ProductMatchOutcome) => void }>) {
-  const ranked = useRankedMatch(assignment); const aircraft = aircraftById(assignment.aircraftId); const actionModule = aircraft ? actionModuleById(aircraft.actionModuleId) : null;
+  const ranked = useRankedMatch(assignment); const aircraft = aircraftById(assignment.aircraftId); const peerAircraft = aircraftById(assignment.peerAircraftId); const aircraftVisual = aircraftVisualForSpec(aircraft); const peerVisual = aircraftVisualForSpec(peerAircraft); const actionModule = aircraft ? actionModuleById(aircraft.actionModuleId) : null;
   const [clockNowMs, setClockNowMs] = useState(Date.now()); const resolvedRef = useRef(false);
   useEffect(() => { const timer = window.setInterval(() => setClockNowMs(Date.now()), 100); return () => window.clearInterval(timer); }, []);
   useEffect(() => {
@@ -208,7 +214,7 @@ function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFound
   useEffect(() => { if (!state?.result || !ranked.slot || resolvedRef.current) return; resolvedRef.current = true; onResolved({ result: resultFromWinner(ranked.slot, state.result.winnerSlot, state.result.reason), reason: state.result.reason, localHeartPoints: localHp, peerHeartPoints: peerHp }); }, [state?.result, ranked.slot, localHp, peerHp, onResolved]);
   const phase = state?.phase ?? "countdown"; const remaining = state ? phase === "overtime" ? state.overtimeEndsAtMs - serverNow : phase === "active" ? state.regulationEndsAtMs - serverNow : Math.max(0, state.activeAtMs - serverNow) : MATCH_RULES.regulationSeconds * 1_000;
   const cooldown = local ? Math.max(0, local.nextActionAtMs - serverNow) : 0; const actionReady = (phase === "active" || phase === "overtime") && cooldown === 0 && ranked.peerConnected; const actionStatus = actionReady ? "READY" : cooldown > 0 ? `${(cooldown / 1_000).toFixed(1)}S` : ranked.status === "connecting" ? "SYNCING" : "STANDBY"; const stagingSlot = assignment.spawnSide === "left" ? 1 : 2;
-  return <div className="product-match-shell"><FlightRuntime showDevelopmentPanels={false} externalNetworkController={ranked} stagingSlot={stagingSlot} /><div className="c4-match-hud"><div className="match-hud__top"><div className="hp-block hp-block--local"><span>YOU // {aircraft?.displayName ?? assignment.aircraftId}</span><strong>{localHp}</strong><div><i style={{ width: `${localHp}%` }} /></div></div><div className="match-clock"><span>{phase === "overtime" ? "OVERTIME" : phase === "active" ? "REGULATION" : "SYNCING"}</span><strong>{formatClock(remaining)}</strong><small>{assignment.roomCode}</small></div><div className="hp-block hp-block--peer"><span>PEER</span><strong>{peerHp}</strong><div><i style={{ width: `${peerHp}%` }} /></div></div></div><div className="match-action-state"><span>ACTION // {actionModule?.displayName ?? "ABSTRACT MODULE"}</span><strong>{actionStatus}</strong><small>{actionFeedbackLabel(ranked.lastActionFeedback?.code)}</small></div><button className="match-exit-preview" onClick={ranked.leaveMatch} disabled={Boolean(state?.result)}>FORFEIT MATCH</button></div></div>;
+  return <div className="product-match-shell"><FlightRuntime showDevelopmentPanels={false} externalNetworkController={ranked} stagingSlot={stagingSlot} localAircraftId={assignment.aircraftId} peerAircraftId={assignment.peerAircraftId} /><div className="c4-match-hud"><div className="match-hud__top"><div className="hp-block hp-block--local"><span>YOU // {aircraftVisual?.realAircraftName ?? aircraft?.displayName ?? assignment.aircraftId}</span><strong>{localHp}</strong><div><i style={{ width: `${localHp}%` }} /></div></div><div className="match-clock"><span>{phase === "overtime" ? "OVERTIME" : phase === "active" ? "REGULATION" : "SYNCING"}</span><strong>{formatClock(remaining)}</strong><small>{assignment.roomCode}</small></div><div className="hp-block hp-block--peer"><span>PEER // {peerVisual?.realAircraftName ?? peerAircraft?.displayName ?? assignment.peerAircraftId}</span><strong>{peerHp}</strong><div><i style={{ width: `${peerHp}%` }} /></div></div></div><div className="match-action-state"><span>ACTION // {actionModule?.displayName ?? "ABSTRACT MODULE"}</span><strong>{actionStatus}</strong><small>{actionFeedbackLabel(ranked.lastActionFeedback?.code)}</small></div><button className="match-exit-preview" onClick={ranked.leaveMatch} disabled={Boolean(state?.result)}>FORFEIT MATCH</button></div></div>;
 }
 
 function ResultLive({ outcome, onHome }: Readonly<{ outcome: ProductMatchOutcome; onHome: () => void }>) {
