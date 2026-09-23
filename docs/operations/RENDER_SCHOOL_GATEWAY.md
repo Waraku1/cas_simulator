@@ -47,7 +47,7 @@ The repository Blueprint is `render.yaml`.
 Build:
 
 ```text
-corepack enable && corepack prepare pnpm@10.32.1 --activate && pnpm install --frozen-lockfile && pnpm build:render
+corepack enable && pnpm install --frozen-lockfile && pnpm build:render
 ```
 
 Start:
@@ -65,11 +65,8 @@ Health check:
 Required environment:
 
 - `CAS_UPSTREAM_ORIGIN`: fixed production Worker HTTPS origin. The Blueprint contains the reviewed production value.
+- `CAS_PUBLIC_ORIGIN`: exact public Render origin. The reviewed Blueprint pins this to `https://cas-simulator-school.onrender.com`.
 - `VITE_CESIUM_ION_TOKEN`: Render secret/environment value available during build. Use a token scoped to required Cesium assets and permit the Render school origin.
-
-Optional:
-
-- `CAS_PUBLIC_ORIGIN`: exact HTTPS Render/custom origin. When omitted, the gateway derives the public origin from the Render forwarded protocol/host. Set this after the permanent school URL is known for the strictest explicit origin pinning.
 
 ## Deployment
 
@@ -77,7 +74,7 @@ Optional:
 2. Use the reviewed branch/commit intended for school deployment.
 3. Supply `VITE_CESIUM_ION_TOKEN` without printing it in logs or chat.
 4. Deploy.
-5. Confirm `https://<service>.onrender.com/gateway-health` returns `ok: true`.
+5. Confirm `https://cas-simulator-school.onrender.com/gateway-health` returns `ok: true`.
 6. Open the Render origin from two separate managed Macs.
 7. Verify Register/Login -> Home -> Matchmaking -> Assignment -> Countdown -> Active -> Result -> Rating/Leaderboard.
 8. Verify peer rendering and reconnect behavior across the two physical Macs.
