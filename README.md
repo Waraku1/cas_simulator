@@ -95,6 +95,12 @@ There is no direct-yaw keyboard control in the release path. Heading changes are
 
 The aircraft is fictional and uses game-oriented kinematics rather than real-aircraft performance data.
 
+
+Ranked weapon controls:
+- `Left Arrow / Right Arrow`: cycle the selected weapon between MISSILE and GUN.
+- `Space`: fire the selected weapon.
+- Weapon selection is client-side presentation state; hit/effect, distance, pose freshness, cooldown and HP changes remain server-authoritative.
+
 ## C2 theater and resource gate
 
 C2 adds a visible 50 km × 50 km theater boundary, a 5 km edge-warning band, and browser-side performance/resource evidence.
