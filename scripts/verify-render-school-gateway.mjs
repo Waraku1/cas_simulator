@@ -40,6 +40,9 @@ assert(!gateway.includes("console.log(request.url"), "Gateway must not log reque
 for (const token of [
   "type: web",
   "runtime: node",
+  "NODE_VERSION",
+  "22.16.0",
+  "corepack enable",
   "pnpm build:render",
   "pnpm start:render",
   "healthCheckPath: /gateway-health",
@@ -50,7 +53,10 @@ for (const token of [
   assert(renderYaml.includes(token), `render.yaml missing required school gateway contract: ${token}`);
 }
 
+assert(!renderYaml.includes("corepack prepare"), "Render build must not depend on the deprecated corepack prepare flow");
+
 const pkg = JSON.parse(packageText);
+assert(pkg.engines?.node === ">=22.12.0 <23", "Node engine range must stay bounded to Node 22 for Render/Corepack reproducibility");
 assert(pkg.scripts?.["build:render"]?.includes("vite build --config vite.client.config.ts"), "Missing client-only Render build script");
 assert(pkg.scripts?.["start:render"] === "node scripts/render-school-gateway.mjs", "Missing Render gateway start script");
 assert(pkg.scripts?.["verify:render:school"] === "node scripts/verify-render-school-gateway.mjs", "Missing Render gateway verifier script");
