@@ -117,6 +117,17 @@ if (!aircraftCatalog.includes('"aircraftId": "orbit-a1"') || !aircraftCatalog.in
   throw new Error("orbit-a1 must retain the reviewed Bell X-1 visual identity");
 }
 
+const aircraftSync = await readFile(join(root, "scripts/sync-aircraft-assets.mjs"), "utf8");
+for (const token of [
+  "normalizeGlbToLongestDimension",
+  "targetLongestDimensionM: 9.373",
+  "sourceBounds",
+  "normalizationScale",
+  "normalizedBoundsM",
+]) {
+  if (!aircraftSync.includes(token)) throw new Error(`Aircraft physical-scale normalization missing: ${token}`);
+}
+
 const aircraftVisuals = await readFile(join(root, "src/shared/aircraft-visuals.ts"), "utf8");
 for (const token of ["Bell X-1", "/aircraft/bell-x1.glb", "Smithsonian Institution", 'license: "CC0"']) {
   if (!aircraftVisuals.includes(token)) throw new Error(`Bell X-1 visual metadata missing: ${token}`);
