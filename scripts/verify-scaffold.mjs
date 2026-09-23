@@ -54,6 +54,7 @@ const required = [
   "scripts/verify-render-cesium-token.mjs",
   "render.yaml",
   "docs/operations/RENDER_SCHOOL_GATEWAY.md",
+  "docs/assets/AIRCRAFT_VISUAL_ASSETS.md",
   "scripts/school-local-backend.mjs",
   "scripts/school-account-backend.mjs",
   "scripts/school-account-store.mjs",
@@ -109,6 +110,21 @@ if (!pkg.scripts?.["build:render"] || !pkg.scripts?.["start:render"] || !pkg.scr
 }
 if (!pkg.scripts?.["verify:production:c4d"]?.includes("verify-production-rated-product.mjs")) {
   throw new Error("Missing C4D production rated-product verification command");
+}
+
+const aircraftCatalog = await readFile(join(root, "src/shared/aircraft-catalog.json"), "utf8");
+if (!aircraftCatalog.includes('"aircraftId": "orbit-a1"') || !aircraftCatalog.includes('"appearanceKey": "bell-x1"')) {
+  throw new Error("orbit-a1 must retain the reviewed Bell X-1 visual identity");
+}
+
+const aircraftVisuals = await readFile(join(root, "src/shared/aircraft-visuals.ts"), "utf8");
+for (const token of ["Bell X-1", "/aircraft/bell-x1.glb", "Smithsonian Institution", 'license: "CC0"']) {
+  if (!aircraftVisuals.includes(token)) throw new Error(`Bell X-1 visual metadata missing: ${token}`);
+}
+
+const earthScene = await readFile(join(root, "src/client/components/EarthScene.tsx"), "utf8");
+for (const token of ["aircraftVisualForSpec", "localAircraftId", "peerAircraftId", "modelOrientationFromFrame", "model: {"]) {
+  if (!earthScene.includes(token)) throw new Error(`EarthScene aircraft model integration missing: ${token}`);
 }
 
 const appShell = await readFile(join(root, "src/client/App.tsx"), "utf8");
