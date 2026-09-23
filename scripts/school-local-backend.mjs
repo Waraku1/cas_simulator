@@ -287,6 +287,7 @@ function handleRankedTextMessage(client, payload) {
       peer?.latestPose && peer.latestPoseReceivedAtMs !== null
         ? { pose: peer.latestPose, receivedAtMs: peer.latestPoseReceivedAtMs }
         : null,
+      value.weaponId ?? "missile",
     );
     updateRankedState(match, resolution.state, nowMs);
     sendJson(client, {
@@ -294,6 +295,7 @@ function handleRankedTextMessage(client, payload) {
       accepted: resolution.accepted,
       code: resolution.code,
       nextActionAtMs: resolution.nextActionAtMs,
+      weaponId: resolution.weaponId,
     });
     return;
   }

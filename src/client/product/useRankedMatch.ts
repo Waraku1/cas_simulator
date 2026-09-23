@@ -9,7 +9,7 @@ import {
   type AircraftPose,
   type PoseSnapshot,
 } from "../../shared/multiplayer";
-import { MATCH_RULES } from "../../shared/product";
+import { MATCH_RULES, type WeaponId } from "../../shared/product";
 import type {
   MultiplayerStatus,
   RemotePoseBuffer,
@@ -21,6 +21,7 @@ export type RankedActionFeedback = Readonly<{
   accepted: boolean;
   code: CompetitionActionFeedbackCode;
   nextActionAtMs: number;
+  weaponId: WeaponId | null;
   receivedAtMs: number;
 }>;
 
@@ -36,7 +37,7 @@ export type RankedMatchController = Readonly<{
   serverTimeOffsetMs: number;
   lastActionFeedback: RankedActionFeedback | null;
   publishLocalPose: (pose: AircraftPose) => void;
-  activateAction: () => boolean;
+  fireWeapon: (weaponId: WeaponId) => boolean;
   leaveMatch: () => void;
 }>;
 
@@ -144,6 +145,7 @@ export function useRankedMatch(assignment: MatchFoundAssignment): RankedMatchCon
           accepted: message.accepted,
           code: message.code,
           nextActionAtMs: message.nextActionAtMs,
+          weaponId: message.weaponId ?? null,
           receivedAtMs: performance.now(),
         });
         return;
@@ -205,10 +207,23 @@ export function useRankedMatch(assignment: MatchFoundAssignment): RankedMatchCon
     socket.send(JSON.stringify({ type: "pose", pose: snapshot }));
   }, []);
 
-  const activateAction = useCallback(() => {
+  const fireWeapon = useCallback((weaponId: WeaponId) => {
     const socket = socketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN || matchStateRef.current?.result) return false;
-    socket.send(JSON.stringify({ type: "action", clientTimeMs: performance.now() }));
+    const state = matchStateRef.current;
+    const formalWeaponAuthority = state?.participants.every(
+      (participant) => participant.weaponReadyAtMs !== undefined,
+    ) ?? false;
+    if (
+      !socket
+      || socket.readyState !== WebSocket.OPEN
+      || state?.result
+      || !formalWeaponAuthority
+    ) return false;
+    socket.send(JSON.stringify({
+      type: "action",
+      clientTimeMs: performance.now(),
+      weaponId,
+    }));
     return true;
   }, []);
 
@@ -268,7 +283,7 @@ export function useRankedMatch(assignment: MatchFoundAssignment): RankedMatchCon
     serverTimeOffsetMs,
     lastActionFeedback,
     publishLocalPose,
-    activateAction,
+    fireWeapon,
     leaveMatch,
   };
 }

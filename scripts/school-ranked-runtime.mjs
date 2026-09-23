@@ -1,5 +1,5 @@
 import aircraftCatalog from "../src/shared/aircraft-catalog.json" with { type: "json" };
-import actionModuleCatalog from "../src/shared/action-module-catalog.json" with { type: "json" };
+import weaponCatalog from "../src/shared/weapon-catalog.json" with { type: "json" };
 
 const STARTING_HP = 100;
 const REGULATION_MS = 4 * 60 * 1_000;
@@ -8,7 +8,8 @@ const DISCONNECT_GRACE_MS = 20 * 1_000;
 const POSE_FRESHNESS_MS = 1_500;
 
 const aircraftById = new Map(aircraftCatalog.map((aircraft) => [aircraft.aircraftId, aircraft]));
-const moduleById = new Map(actionModuleCatalog.map((module) => [module.actionModuleId, module]));
+const weaponById = new Map(weaponCatalog.map((weapon) => [weapon.weaponId, weapon]));
+const DEFAULT_WEAPONS = ["missile", "gun"];
 
 function peerSlot(slot) {
   return slot === 1 ? 2 : 1;
@@ -19,6 +20,13 @@ function completed(state, winnerSlot, reason) {
     ...state,
     phase: reason === "infrastructure-failure" ? "no-contest" : "completed",
     result: { winnerSlot, reason },
+  };
+}
+
+function weaponReadiness(participant) {
+  return {
+    missile: participant.weaponReadyAtMs?.missile ?? participant.nextActionAtMs,
+    gun: participant.weaponReadyAtMs?.gun ?? participant.nextActionAtMs,
   };
 }
 
@@ -35,6 +43,10 @@ export function createSchoolRankedRuntime(init) {
       heartPoints: STARTING_HP,
       connected: false,
       nextActionAtMs: init.activeAtMs,
+      weaponReadyAtMs: {
+        missile: init.activeAtMs,
+        gun: init.activeAtMs,
+      },
       disconnectDeadlineMs: init.activeAtMs + DISCONNECT_GRACE_MS,
     })),
     result: null,
@@ -127,20 +139,34 @@ function distanceM(a, b) {
   return Math.hypot(surfaceM, b.altitudeM - a.altitudeM);
 }
 
-export function resolveSchoolRankedAction(state, slot, nowMs, localPose, peerPose) {
+export function resolveSchoolRankedAction(
+  state,
+  slot,
+  nowMs,
+  localPose,
+  peerPose,
+  requestedWeaponId = "missile",
+) {
   let advanced = advanceSchoolRankedRuntime(state, nowMs);
   const local = advanced.participants[slot - 1];
   const peer = advanced.participants[peerSlot(slot) - 1];
+  const aircraft = aircraftById.get(local.aircraftId);
+  const loadout = aircraft?.weaponIds ?? DEFAULT_WEAPONS;
+  const weapon = loadout.includes(requestedWeaponId) ? weaponById.get(requestedWeaponId) : null;
+  const currentReadyAt = weaponReadiness(local)[requestedWeaponId] ?? local.nextActionAtMs;
+
   const reject = (code) => ({
     state: advanced,
     accepted: false,
     code,
-    nextActionAtMs: local.nextActionAtMs,
+    weaponId: requestedWeaponId,
+    nextActionAtMs: currentReadyAt,
   });
 
+  if (!weapon) return reject("invalid_weapon");
   if (advanced.phase !== "active" && advanced.phase !== "overtime") return reject("not_active");
   if (!local.connected || !peer.connected) return reject("peer_unavailable");
-  if (nowMs < local.nextActionAtMs) return reject("cooldown");
+  if (nowMs < currentReadyAt) return reject("cooldown");
   if (
     !localPose || !peerPose
     || nowMs - localPose.receivedAtMs > POSE_FRESHNESS_MS
@@ -149,21 +175,31 @@ export function resolveSchoolRankedAction(state, slot, nowMs, localPose, peerPos
     return reject("pose_stale");
   }
 
-  const aircraft = aircraftById.get(local.aircraftId);
-  const module = aircraft ? moduleById.get(aircraft.actionModuleId) : null;
-  if (!module) return reject("not_active");
-  if (distanceM(localPose.pose, peerPose.pose) > module.activationRadiusM) return reject("outside_interaction");
+  if (distanceM(localPose.pose, peerPose.pose) > weapon.activationRadiusM) {
+    return reject("outside_interaction");
+  }
 
+  const nextReadyAt = nowMs + weapon.cooldownMs;
   advanced = {
     ...advanced,
     participants: advanced.participants.map((participant) => {
       if (participant.slot === local.slot) {
-        return { ...participant, nextActionAtMs: nowMs + module.cooldownMs };
+        return {
+          ...participant,
+          nextActionAtMs: nextReadyAt,
+          weaponReadyAtMs: {
+            ...weaponReadiness(participant),
+            [requestedWeaponId]: nextReadyAt,
+          },
+        };
       }
       if (participant.slot === peer.slot) {
         return {
           ...participant,
-          heartPoints: Math.max(0, Math.min(STARTING_HP, Math.round(participant.heartPoints - module.heartPointEffect))),
+          heartPoints: Math.max(
+            0,
+            Math.min(STARTING_HP, Math.round(participant.heartPoints - weapon.heartPointEffect)),
+          ),
         };
       }
       return participant;
@@ -174,7 +210,8 @@ export function resolveSchoolRankedAction(state, slot, nowMs, localPose, peerPos
     state: advanced,
     accepted: true,
     code: "accepted",
-    nextActionAtMs: advanced.participants[slot - 1].nextActionAtMs,
+    weaponId: requestedWeaponId,
+    nextActionAtMs: weaponReadiness(advanced.participants[slot - 1])[requestedWeaponId],
   };
 }
 
@@ -193,6 +230,7 @@ export function schoolRankedSnapshot(state, nowMs) {
       heartPoints: participant.heartPoints,
       connected: participant.connected,
       nextActionAtMs: participant.nextActionAtMs,
+      weaponReadyAtMs: weaponReadiness(participant),
       disconnectDeadlineMs: participant.disconnectDeadlineMs,
     })),
     result: advanced.result,

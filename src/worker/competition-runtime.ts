@@ -1,4 +1,3 @@
-import { actionModuleById } from "../shared/action-modules";
 import { aircraftById } from "../shared/aircraft";
 import {
   COMPETITION_POSE_FRESHNESS_MS,
@@ -9,7 +8,13 @@ import {
   type CompetitionStateSnapshot,
 } from "../shared/competition";
 import type { AircraftPose } from "../shared/multiplayer";
-import { clampHeartPoints, MATCH_RULES, type MatchResultReason } from "../shared/product";
+import {
+  clampHeartPoints,
+  MATCH_RULES,
+  type MatchResultReason,
+  type WeaponId,
+} from "../shared/product";
+import { DEFAULT_WEAPON_LOADOUT, weaponById, weaponReadyAt } from "../shared/weapons";
 
 export type StoredCompetitionParticipant = {
   slot: CompetitionSlot;
@@ -20,7 +25,9 @@ export type StoredCompetitionParticipant = {
   randomAssignment: boolean;
   heartPoints: number;
   connected: boolean;
+  /** Legacy single-action readiness retained for rolling compatibility. */
   nextActionAtMs: number;
+  weaponReadyAtMs?: Record<WeaponId, number>;
   disconnectDeadlineMs: number | null;
 };
 
@@ -47,6 +54,7 @@ export type ActionResolution = Readonly<{
   state: StoredCompetitionRuntime;
   accepted: boolean;
   code: CompetitionActionFeedbackCode;
+  weaponId: WeaponId;
   nextActionAtMs: number;
 }>;
 
@@ -60,6 +68,15 @@ function participantBySlot(state: StoredCompetitionRuntime, slot: CompetitionSlo
 
 function peerSlot(slot: CompetitionSlot): CompetitionSlot {
   return slot === 1 ? 2 : 1;
+}
+
+function weaponReadiness(
+  participant: StoredCompetitionParticipant,
+): Record<WeaponId, number> {
+  return {
+    missile: weaponReadyAt(participant.weaponReadyAtMs, "missile", participant.nextActionAtMs),
+    gun: weaponReadyAt(participant.weaponReadyAtMs, "gun", participant.nextActionAtMs),
+  };
 }
 
 function completed(
@@ -92,6 +109,10 @@ export function createCompetitionRuntime(init: CompetitionRoomInit): StoredCompe
       heartPoints: MATCH_RULES.startingHeartPoints,
       connected: false,
       nextActionAtMs: init.activeAtMs,
+      weaponReadyAtMs: {
+        missile: init.activeAtMs,
+        gun: init.activeAtMs,
+      },
       disconnectDeadlineMs: init.activeAtMs + disconnectGraceMs,
     })) as [StoredCompetitionParticipant, StoredCompetitionParticipant],
     result: null,
@@ -214,21 +235,34 @@ export function resolveCompetitionAction(
   nowMs: number,
   localPose: ServerPoseSample | null,
   peerPose: ServerPoseSample | null,
+  requestedWeaponId: WeaponId = "missile",
 ): ActionResolution {
   let advanced = advanceCompetitionRuntime(state, nowMs);
   const local = participantBySlot(advanced, slot);
   const peer = participantBySlot(advanced, peerSlot(slot));
+  const aircraft = aircraftById(local.aircraftId);
+  const loadout = aircraft?.weaponIds ?? DEFAULT_WEAPON_LOADOUT;
+  const weapon = loadout.includes(requestedWeaponId)
+    ? weaponById(requestedWeaponId)
+    : null;
+  const currentReadyAt = weaponReadyAt(
+    local.weaponReadyAtMs,
+    requestedWeaponId,
+    local.nextActionAtMs,
+  );
 
   const reject = (code: CompetitionActionFeedbackCode): ActionResolution => ({
     state: advanced,
     accepted: false,
     code,
-    nextActionAtMs: local.nextActionAtMs,
+    weaponId: requestedWeaponId,
+    nextActionAtMs: currentReadyAt,
   });
 
+  if (!weapon) return reject("invalid_weapon");
   if (advanced.phase !== "active" && advanced.phase !== "overtime") return reject("not_active");
   if (!local.connected || !peer.connected) return reject("peer_unavailable");
-  if (nowMs < local.nextActionAtMs) return reject("cooldown");
+  if (nowMs < currentReadyAt) return reject("cooldown");
   if (
     !localPose
     || !peerPose
@@ -238,22 +272,26 @@ export function resolveCompetitionAction(
     return reject("pose_stale");
   }
 
-  const aircraft = aircraftById(local.aircraftId);
-  const module = aircraft ? actionModuleById(aircraft.actionModuleId) : null;
-  if (!module) return reject("not_active");
-
-  if (competitionDistanceM(localPose.pose, peerPose.pose) > module.activationRadiusM) {
+  if (competitionDistanceM(localPose.pose, peerPose.pose) > weapon.activationRadiusM) {
     return reject("outside_interaction");
   }
 
+  const nextReadyAt = nowMs + weapon.cooldownMs;
   const participants = advanced.participants.map((participant) => {
     if (participant.slot === local.slot) {
-      return { ...participant, nextActionAtMs: nowMs + module.cooldownMs };
+      return {
+        ...participant,
+        nextActionAtMs: nextReadyAt,
+        weaponReadyAtMs: {
+          ...weaponReadiness(participant),
+          [requestedWeaponId]: nextReadyAt,
+        },
+      };
     }
     if (participant.slot === peer.slot) {
       return {
         ...participant,
-        heartPoints: clampHeartPoints(participant.heartPoints - module.heartPointEffect),
+        heartPoints: clampHeartPoints(participant.heartPoints - weapon.heartPointEffect),
       };
     }
     return participant;
@@ -264,7 +302,12 @@ export function resolveCompetitionAction(
     state: advanced,
     accepted: true,
     code: "accepted",
-    nextActionAtMs: participantBySlot(advanced, slot).nextActionAtMs,
+    weaponId: requestedWeaponId,
+    nextActionAtMs: weaponReadyAt(
+      participantBySlot(advanced, slot).weaponReadyAtMs,
+      requestedWeaponId,
+      nextReadyAt,
+    ),
   };
 }
 
@@ -286,6 +329,7 @@ export function competitionSnapshot(
       heartPoints: participant.heartPoints,
       connected: participant.connected,
       nextActionAtMs: participant.nextActionAtMs,
+      weaponReadyAtMs: weaponReadiness(participant),
       disconnectDeadlineMs: participant.disconnectDeadlineMs,
     })) as CompetitionStateSnapshot["participants"],
     result: advanced.result,

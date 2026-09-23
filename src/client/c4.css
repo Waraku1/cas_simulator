@@ -530,13 +530,18 @@
   display: grid;
   justify-items: center;
   gap: 2px;
-  min-width: 154px;
+  min-width: 220px;
   padding: 10px 18px;
   transform: translateX(-50%);
   border-radius: 999px;
 }
 
 .match-action-state strong { color: #86edff; font-size: 14px; letter-spacing: 0.08em; }
+.match-action-state[data-weapon="missile"] {
+  border-color: rgba(255, 177, 107, 0.34);
+}
+.match-action-state[data-weapon="missile"] strong { color: #ffc078; }
+.match-action-state[data-weapon="gun"] strong { color: #86edff; }
 
 .match-exit-preview {
   position: absolute;
