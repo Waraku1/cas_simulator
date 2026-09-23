@@ -369,6 +369,101 @@ const [welcomeA, welcomeB] = await Promise.all([
 assert(welcomeA.slot !== welcomeB.slot, "Ranked participants did not receive distinct slots");
 await rankedB.waitFor((message) => message.type === "presence" && message.peerConnected === true, "peer linked");
 
+const waitUntilActiveMs = Math.max(0, a.activeAtMs - Date.now() + 150);
+if (waitUntilActiveMs > 0) await new Promise((resolve) => setTimeout(resolve, waitUntilActiveMs));
+
+await Promise.all([
+  rankedA.waitFor(
+    (message) => message.type === "match_state" && (message.state?.phase === "active" || message.state?.phase === "overtime"),
+    "ranked A active state",
+    4_000,
+  ),
+  rankedB.waitFor(
+    (message) => message.type === "match_state" && (message.state?.phase === "active" || message.state?.phase === "overtime"),
+    "ranked B active state",
+    4_000,
+  ),
+]);
+
+const smokePose = {
+  latitudeDeg: 34.4,
+  longitudeDeg: 132.45,
+  altitudeM: 2_000,
+  orientation: { w: 1, x: 0, y: 0, z: 0 },
+};
+rankedA.send({
+  type: "pose",
+  pose: { ...smokePose, sequence: 0, clientTimeMs: performance.now() },
+});
+rankedB.send({
+  type: "pose",
+  pose: { ...smokePose, sequence: 0, clientTimeMs: performance.now() },
+});
+await new Promise((resolve) => setTimeout(resolve, 150));
+
+rankedA.send({ type: "action", weaponId: "missile", clientTimeMs: performance.now() });
+const missileAccepted = await rankedA.waitFor(
+  (message) => message.type === "action_feedback"
+    && message.code === "accepted"
+    && message.weaponId === "missile",
+  "accepted missile",
+  4_000,
+);
+assert(missileAccepted.accepted === true, "MISSILE request was not accepted");
+
+const targetSlot = welcomeB.slot;
+const afterMissileState = await rankedB.waitFor(
+  (message) => message.type === "match_state"
+    && message.state?.participants?.some(
+      (participant) => participant.slot === targetSlot && participant.heartPoints === 80,
+    ),
+  "MISSILE 20 HP effect",
+  4_000,
+);
+const afterMissile = afterMissileState.state.participants.find((participant) => participant.slot === targetSlot);
+assert(afterMissile?.heartPoints === 80, "MISSILE did not apply the expected 20 HP effect");
+
+rankedA.send({ type: "action", weaponId: "missile", clientTimeMs: performance.now() });
+const missileCooldown = await rankedA.waitFor(
+  (message) => message.type === "action_feedback"
+    && message.code === "cooldown"
+    && message.weaponId === "missile",
+  "MISSILE cooldown rejection",
+  4_000,
+);
+assert(missileCooldown.accepted === false, "MISSILE cooldown was bypassed");
+
+rankedA.send({ type: "action", weaponId: "gun", clientTimeMs: performance.now() });
+const gunAccepted = await rankedA.waitFor(
+  (message) => message.type === "action_feedback"
+    && message.code === "accepted"
+    && message.weaponId === "gun",
+  "accepted GUN",
+  4_000,
+);
+assert(gunAccepted.accepted === true, "GUN was not independently ready while MISSILE was cooling down");
+
+const afterGunState = await rankedB.waitFor(
+  (message) => message.type === "match_state"
+    && message.state?.participants?.some(
+      (participant) => participant.slot === targetSlot && participant.heartPoints === 76,
+    ),
+  "GUN 4 HP effect",
+  4_000,
+);
+const afterGun = afterGunState.state.participants.find((participant) => participant.slot === targetSlot);
+assert(afterGun?.heartPoints === 76, "GUN did not apply the expected 4 HP effect");
+
+rankedA.send({ type: "action", weaponId: "gun", clientTimeMs: performance.now() });
+const gunCooldown = await rankedA.waitFor(
+  (message) => message.type === "action_feedback"
+    && message.code === "cooldown"
+    && message.weaponId === "gun",
+  "GUN cooldown rejection",
+  4_000,
+);
+assert(gunCooldown.accepted === false, "GUN cooldown was bypassed");
+
 rankedA.send({ type: "leave_match" });
 const resolved = await rankedB.waitFor(
   (message) => message.type === "match_state" && message.state?.result?.reason === "forfeit",
@@ -436,4 +531,11 @@ console.log(JSON.stringify({
   fixableAssignmentPersistedAfterResult: true,
   fixedAircraftRematchPersisted: true,
   duplicateResultIgnored: true,
+  missileAccepted: true,
+  missileHpEffect: 20,
+  missileCooldownRejected: true,
+  gunAcceptedDuringMissileCooldown: true,
+  gunHpEffect: 4,
+  gunCooldownRejected: true,
+  independentWeaponCooldowns: true,
 }, null, 2));
