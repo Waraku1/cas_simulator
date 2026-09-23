@@ -93,6 +93,20 @@ if (!pkg.scripts?.["verify:production:c4d"]?.includes("verify-production-rated-p
   throw new Error("Missing C4D production rated-product verification command");
 }
 
+const appShell = await readFile(join(root, "src/client/App.tsx"), "utf8");
+if (!appShell.includes('const devFlight = params.get("devFlight") === "1";')) {
+  throw new Error("Raw flight development UI must require explicit ?devFlight=1 opt-in");
+}
+if (!appShell.includes("if (devFlight) return <FlightRuntime />;")) {
+  throw new Error("Explicit devFlight route must render the raw FlightRuntime");
+}
+if (!appShell.includes("{staticPreview ? <ProductPreview /> : <ProductLive />}")) {
+  throw new Error("Normal application entrypoint must default to ProductLive");
+}
+if (appShell.includes('const productPreview = params.get("productPreview") === "1";')) {
+  throw new Error("ProductLive must not remain hidden behind the legacy productPreview query gate");
+}
+
 const schoolConfig = await readFile(join(root, "vite.school.config.ts"), "utf8");
 if (!schoolConfig.includes('target: "http://127.0.0.1:8787"') || !schoolConfig.includes("ws: true")) {
   throw new Error("School Vite config must retain the C3/C4C legacy relay path");
