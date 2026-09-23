@@ -52,8 +52,11 @@ const keyAxis = (keys: Set<string>, positive: string, negative: string) =>
   (keys.has(positive) ? 1 : 0) - (keys.has(negative) ? 1 : 0);
 
 const CAMERA_BACK_M = 108;
-const CAMERA_UP_M = 16;
+const CAMERA_UP_M = 12;
 const CAMERA_LOOK_AHEAD_M = 72;
+const CAMERA_ROLL_FOLLOW = 0.2;
+const REMOTE_EXTRAPOLATION_LIMIT_MS = 180;
+const REMOTE_SMOOTHING_TIME_CONSTANT_MS = 65;
 const NOSE_OFFSET_M = 11;
 const MULTIPLAYER_STAGING_LONGITUDE_OFFSET_DEG = 0.00055;
 const SIMULATION_FRAME_INTERVAL_MS = 1_000 / C2_RESOURCE_BUDGET.runtimeFrameCapFps;
@@ -185,6 +188,57 @@ function offsetFrom(position: Cartesian3, direction: Cartesian3, distanceM: numb
   return Cartesian3.add(position, offset, offset);
 }
 
+function geodeticUpAt(position: Cartesian3) {
+  const enu = Transforms.eastNorthUpToFixedFrame(position);
+  const up = Matrix4.multiplyByPointAsVector(
+    enu,
+    new Cartesian3(0, 0, 1),
+    new Cartesian3(),
+  );
+  return Cartesian3.normalize(up, up);
+}
+
+function stabilizedCameraUp(position: Cartesian3, frame: FlightFrame) {
+  const worldUp = geodeticUpAt(position);
+  const blended = Cartesian3.lerp(
+    worldUp,
+    frame.up,
+    CAMERA_ROLL_FOLLOW,
+    new Cartesian3(),
+  );
+  return Cartesian3.normalize(blended, blended);
+}
+
+function clampRemoteSegmentDuration(buffer: RemotePoseBuffer) {
+  const duration = buffer.to.clientTimeMs - buffer.from.clientTimeMs;
+  if (!Number.isFinite(duration) || duration <= 0) return SNAPSHOT_INTERVAL_MS;
+  return Math.min(250, Math.max(50, duration));
+}
+
+function predictRemotePose(buffer: RemotePoseBuffer, now: number) {
+  const segmentDurationMs = clampRemoteSegmentDuration(buffer);
+  const extrapolationMs = Math.min(
+    REMOTE_EXTRAPOLATION_LIMIT_MS,
+    Math.max(0, now - buffer.receivedAtMs),
+  );
+  const factor = 1 + extrapolationMs / segmentDurationMs;
+  const orientationFactor = Math.min(1.35, factor);
+
+  return {
+    latitudeDeg: buffer.from.latitudeDeg
+      + (buffer.to.latitudeDeg - buffer.from.latitudeDeg) * factor,
+    longitudeDeg: buffer.from.longitudeDeg
+      + (buffer.to.longitudeDeg - buffer.from.longitudeDeg) * factor,
+    altitudeM: buffer.from.altitudeM
+      + (buffer.to.altitudeM - buffer.from.altitudeM) * factor,
+    orientation: interpolateNetworkOrientation(
+      buffer.from.orientation,
+      buffer.to.orientation,
+      orientationFactor,
+    ),
+  };
+}
+
 function stagedFlightState(slot: 1 | 2): FlightState {
   const initial = createInitialFlightState();
   return {
@@ -248,6 +302,7 @@ export function EarthScene({
     let lastNetworkSnapshotTime = 0;
     let appliedMultiplayerSlot: 1 | 2 | null = null;
     let flightState = createInitialFlightState();
+    let renderedRemotePose: AircraftPose | null = null;
     const pressedKeys = new Set<string>();
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -447,15 +502,26 @@ export function EarthScene({
 
       const updateCamera = (position: Cartesian3, frame: FlightFrame) => {
         if (!viewer) return;
+        const cameraReferenceUp = stabilizedCameraUp(position, frame);
         const cameraPosition = offsetFrom(position, frame.forward, -CAMERA_BACK_M);
-        const cameraLift = Cartesian3.multiplyByScalar(frame.up, CAMERA_UP_M, new Cartesian3());
+        const cameraLift = Cartesian3.multiplyByScalar(
+          cameraReferenceUp,
+          CAMERA_UP_M,
+          new Cartesian3(),
+        );
         Cartesian3.add(cameraPosition, cameraLift, cameraPosition);
 
         const lookTarget = offsetFrom(position, frame.forward, CAMERA_LOOK_AHEAD_M);
         const direction = Cartesian3.subtract(lookTarget, cameraPosition, new Cartesian3());
         Cartesian3.normalize(direction, direction);
-        const right = Cartesian3.cross(direction, frame.up, new Cartesian3());
-        Cartesian3.normalize(right, right);
+
+        const right = Cartesian3.cross(direction, cameraReferenceUp, new Cartesian3());
+        if (Cartesian3.magnitudeSquared(right) < 1e-8) {
+          Cartesian3.clone(frame.left, right);
+          Cartesian3.negate(right, right);
+        } else {
+          Cartesian3.normalize(right, right);
+        }
         const cameraUp = Cartesian3.cross(right, direction, new Cartesian3());
         Cartesian3.normalize(cameraUp, cameraUp);
 
@@ -465,25 +531,42 @@ export function EarthScene({
         });
       };
 
-      const updateRemoteAircraft = (now: number) => {
+      const updateRemoteAircraft = (now: number, frameDeltaMs = SIMULATION_FRAME_INTERVAL_MS) => {
         const buffer = remotePoseRef.current;
         for (const entity of remoteEntities) entity.show = buffer !== null;
-        if (!buffer) return;
+        if (!buffer) {
+          renderedRemotePose = null;
+          return;
+        }
 
-        const alpha = Math.min(1, Math.max(0, (now - buffer.receivedAtMs) / SNAPSHOT_INTERVAL_MS));
-        const latitudeDeg = buffer.from.latitudeDeg
-          + (buffer.to.latitudeDeg - buffer.from.latitudeDeg) * alpha;
-        const longitudeDeg = buffer.from.longitudeDeg
-          + (buffer.to.longitudeDeg - buffer.from.longitudeDeg) * alpha;
-        const altitudeM = buffer.from.altitudeM
-          + (buffer.to.altitudeM - buffer.from.altitudeM) * alpha;
-        const orientation = interpolateNetworkOrientation(
-          buffer.from.orientation,
-          buffer.to.orientation,
-          alpha,
+        const predicted = predictRemotePose(buffer, now);
+        if (!renderedRemotePose) {
+          renderedRemotePose = predicted;
+        } else {
+          const smoothingAmount = 1 - Math.exp(
+            -Math.max(0, frameDeltaMs) / REMOTE_SMOOTHING_TIME_CONSTANT_MS,
+          );
+          renderedRemotePose = {
+            latitudeDeg: renderedRemotePose.latitudeDeg
+              + (predicted.latitudeDeg - renderedRemotePose.latitudeDeg) * smoothingAmount,
+            longitudeDeg: renderedRemotePose.longitudeDeg
+              + (predicted.longitudeDeg - renderedRemotePose.longitudeDeg) * smoothingAmount,
+            altitudeM: renderedRemotePose.altitudeM
+              + (predicted.altitudeM - renderedRemotePose.altitudeM) * smoothingAmount,
+            orientation: interpolateNetworkOrientation(
+              renderedRemotePose.orientation,
+              predicted.orientation,
+              smoothingAmount,
+            ),
+          };
+        }
+
+        const position = Cartesian3.fromDegrees(
+          renderedRemotePose.longitudeDeg,
+          renderedRemotePose.latitudeDeg,
+          renderedRemotePose.altitudeM,
         );
-        const position = Cartesian3.fromDegrees(longitudeDeg, latitudeDeg, altitudeM);
-        const frame = computeNetworkFlightFrame(position, orientation);
+        const frame = computeNetworkFlightFrame(position, renderedRemotePose.orientation);
         remotePositionProperty.setValue(position);
         remoteNosePositionProperty.setValue(offsetFrom(position, frame.forward, NOSE_OFFSET_M));
         remoteOrientationProperty.setValue(
@@ -554,7 +637,7 @@ export function EarthScene({
           localVisual ? modelOrientationFromFrame(flightFrame) : orientationFromFrame(flightFrame),
         );
         updateCamera(position, flightFrame);
-        updateRemoteAircraft(now);
+        updateRemoteAircraft(now, elapsedMs);
 
         if (now - lastTelemetryTime >= 90) {
           lastTelemetryTime = now;

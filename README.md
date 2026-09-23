@@ -108,9 +108,9 @@ C3 introduces a bounded private two-player room layer:
 - 6-character room codes;
 - maximum 2 connected clients;
 - local flight simulation remains authoritative for the local aircraft;
-- local pose snapshots publish at approximately 5 Hz;
+- local pose snapshots publish at approximately 10 Hz;
 - the room validates and relays snapshots without running a server simulation tick;
-- the receiving client interpolates the peer aircraft locally.
+- the receiving client applies bounded short-horizon dead-reckoning plus local smoothing so ordinary network jitter does not produce visible stop-and-jump peer motion.
 
 Production uses one SQLite-backed Cloudflare Durable Object per room and the Hibernation WebSocket API. School localhost uses a Node relay with the same browser-facing protocol because current `workerd` cannot run on the managed macOS 12.3 device.
 

@@ -9,7 +9,7 @@ export const ROOM_CODE_LENGTH = 6;
 export const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 export const ROOM_CODE_PATTERN = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/;
 export const MAX_ROOM_PLAYERS = 2;
-export const SNAPSHOT_INTERVAL_MS = 200;
+export const SNAPSHOT_INTERVAL_MS = 100;
 export const MAX_ROOM_MESSAGE_BYTES = 2_048;
 
 export type NetworkQuaternion = Readonly<{
