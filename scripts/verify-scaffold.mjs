@@ -43,6 +43,8 @@ const required = [
   "src/shared/aircraft.ts",
   "src/shared/aircraft-catalog.json",
   "src/shared/aircraft-visuals.ts",
+  "src/shared/weapons.ts",
+  "src/shared/weapon-catalog.json",
   "src/shared/action-modules.ts",
   "src/shared/action-module-catalog.json",
   "src/shared/competition.ts",
@@ -128,6 +130,25 @@ for (const token of [
   if (!aircraftSync.includes(token)) throw new Error(`Aircraft physical-scale normalization missing: ${token}`);
 }
 
+const weaponCatalog = await readFile(join(root, "src/shared/weapon-catalog.json"), "utf8");
+for (const token of [
+  '"weaponId": "missile"',
+  '"heartPointEffect": 20',
+  '"cooldownMs": 5000',
+  '"activationRadiusM": 600',
+  '"weaponId": "gun"',
+  '"heartPointEffect": 4',
+  '"cooldownMs": 400',
+  '"activationRadiusM": 180',
+]) {
+  if (!weaponCatalog.includes(token)) throw new Error(`Formal weapon catalog missing: ${token}`);
+}
+
+const weaponHelpers = await readFile(join(root, "src/shared/weapons.ts"), "utf8");
+for (const token of ["DEFAULT_WEAPON_LOADOUT", "weaponById", "weaponReadyAt"]) {
+  if (!weaponHelpers.includes(token)) throw new Error(`Formal weapon helper missing: ${token}`);
+}
+
 const aircraftVisuals = await readFile(join(root, "src/shared/aircraft-visuals.ts"), "utf8");
 for (const token of ["Bell X-1", "/aircraft/bell-x1.glb", "Smithsonian Institution", 'license: "CC0"']) {
   if (!aircraftVisuals.includes(token)) throw new Error(`Bell X-1 visual metadata missing: ${token}`);
@@ -200,6 +221,22 @@ if (!wrangler.includes('"name": "MATCHES"') || !wrangler.includes('"new_sqlite_c
 
 const rankedClient = await readFile(join(root, "src/client/product/useRankedMatch.ts"), "utf8");
 if (!rankedClient.includes("/api/matches/") || !rankedClient.includes("joinToken")) throw new Error("C4C product client must use tokenized RankedMatch transport");
+for (const token of ['fireWeapon: (weaponId: WeaponId)', 'weaponId,', 'type: "action"']) {
+  if (!rankedClient.includes(token)) throw new Error(`Ranked client weapon transport missing: ${token}`);
+}
+
+const productLive = await readFile(join(root, "src/client/product/ProductLive.tsx"), "utf8");
+for (const token of [
+  'event.code === "ArrowLeft"',
+  'event.code === "ArrowRight"',
+  'event.code === "Space"',
+  'WEAPON //',
+  'MISSILE',
+  'GUN',
+  'weaponReadyAtMs',
+]) {
+  if (!productLive.includes(token)) throw new Error(`Product weapon control/HUD missing: ${token}`);
+}
 
 const accountClient = await readFile(join(root, "src/client/product/useAccount.ts"), "utf8");
 if (!accountClient.includes("/api/auth") && !accountClient.includes("ACCOUNT_API")) throw new Error("C4D product client must use live account APIs");
@@ -256,10 +293,23 @@ if (snapshotSource.includes("accountUserId") || snapshotSource.includes("randomA
 if (!competitionRuntime.includes("disconnectDeadlineMs: init.activeAtMs + disconnectGraceMs")) {
   throw new Error("C4D production runtime must bound the initial participant connection window");
 }
+for (const token of [
+  "weaponReadyAtMs",
+  "requestedWeaponId",
+  "weapon.activationRadiusM",
+  "weapon.heartPointEffect",
+  "weapon.cooldownMs",
+  'return reject("invalid_weapon")',
+]) {
+  if (!competitionRuntime.includes(token)) throw new Error(`Production weapon authority missing: ${token}`);
+}
 
 const schoolRuntime = await readFile(join(root, "scripts/school-ranked-runtime.mjs"), "utf8");
 if (!schoolRuntime.includes("disconnectDeadlineMs: init.activeAtMs + DISCONNECT_GRACE_MS")) {
   throw new Error("C4D school runtime must mirror the production initial connection grace");
+}
+for (const token of ["weaponReadyAtMs", "requestedWeaponId", "weapon.activationRadiusM", "weapon.heartPointEffect"]) {
+  if (!schoolRuntime.includes(token)) throw new Error(`School weapon authority missing: ${token}`);
 }
 
 const productionRatedSmoke = await readFile(join(root, "scripts/verify-production-rated-product.mjs"), "utf8");
