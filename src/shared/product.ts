@@ -44,13 +44,15 @@ export type PlayerProfile = Readonly<{
   fixedAircraftId: string | null;
 }>;
 
-export type ActionModuleSpec = Readonly<{
-  actionModuleId: string;
+export type WeaponId = "missile" | "gun";
+
+export type WeaponSpec = Readonly<{
+  weaponId: WeaponId;
   displayName: string;
   heartPointEffect: number;
   cooldownMs: number;
   activationRadiusM: number;
-  activationProfile: "close" | "balanced" | "precision";
+  fireProfile: "single" | "rapid";
 }>;
 
 export type AircraftSpec = Readonly<{
@@ -62,6 +64,11 @@ export type AircraftSpec = Readonly<{
   rollAccelerationDegS2: number;
   visualScale: number;
   appearanceKey: string;
+  weaponIds: readonly WeaponId[];
+  /**
+   * Legacy compatibility field retained until the production Worker and all
+   * clients have migrated to the formal weapon protocol.
+   */
   actionModuleId: string;
 }>;
 
