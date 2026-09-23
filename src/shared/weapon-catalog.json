@@ -1,0 +1,18 @@
+[
+  {
+    "weaponId": "missile",
+    "displayName": "MISSILE",
+    "heartPointEffect": 20,
+    "cooldownMs": 5000,
+    "activationRadiusM": 600,
+    "fireProfile": "single"
+  },
+  {
+    "weaponId": "gun",
+    "displayName": "GUN",
+    "heartPointEffect": 4,
+    "cooldownMs": 400,
+    "activationRadiusM": 180,
+    "fireProfile": "rapid"
+  }
+]
