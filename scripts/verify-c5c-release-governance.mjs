@@ -24,7 +24,7 @@ const checks = [
   ["deploy remains manual-only", deploy.includes("workflow_dispatch:") && !deploy.includes("pull_request:") && !deploy.includes("push:")],
   ["deploy requires exact SHA confirmation", deploy.includes("confirm_sha:") && deploy.includes('if ! [[ "$CONFIRM_SHA" =~ ^[0-9a-fA-F]{40}$ ]]') && deploy.includes('if [ "$CONFIRM_SHA" != "$GITHUB_SHA" ]')],
   ["deploy is restricted to main before mutation", deploy.includes('if [ "$GITHUB_REF" != "refs/heads/main" ]') && deploy.indexOf('if [ "$GITHUB_REF" != "refs/heads/main" ]') < deployMutationIndex],
-  ["deploy requires explicit release-state purpose", deploy.includes("deployment_purpose:") && deploy.includes("initial_release") && deploy.includes("restore_after_rollback")],
+  ["deploy requires explicit release-state purpose", deploy.includes("deployment_purpose:") && deploy.includes("initial_release") && deploy.includes("restore_after_rollback") && deploy.includes("post_release_update")],
   ["deploy validates deployment purpose before mutation", deploy.includes('DEPLOYMENT_PURPOSE: ${{ inputs.deployment_purpose }}') && deploy.includes('unsupported deployment_purpose=$DEPLOYMENT_PURPOSE')],
   ["deploy records immutable Git identity, purpose and production URL", deploy.includes("git_sha=$GITHUB_SHA") && deploy.includes("git_ref=$GITHUB_REF") && deploy.includes("deployment_purpose=$DEPLOYMENT_PURPOSE") && deploy.includes("production_url=$PRODUCTION_URL")],
   ["deploy records Cloudflare state before mutation", deploy.includes("deployments-before.json") && deploy.includes("versions-before.json")],
