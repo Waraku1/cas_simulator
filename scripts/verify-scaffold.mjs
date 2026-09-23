@@ -222,7 +222,7 @@ if (!wrangler.includes('"name": "MATCHES"') || !wrangler.includes('"new_sqlite_c
 
 const rankedClient = await readFile(join(root, "src/client/product/useRankedMatch.ts"), "utf8");
 if (!rankedClient.includes("/api/matches/") || !rankedClient.includes("joinToken")) throw new Error("C4C product client must use tokenized RankedMatch transport");
-for (const token of ['fireWeapon: (weaponId: WeaponId)', 'weaponId,', 'type: "action"']) {
+for (const token of ['fireWeapon: (weaponId: WeaponId)', 'weaponId,', 'type: "action"', 'formalWeaponAuthority']) {
   if (!rankedClient.includes(token)) throw new Error(`Ranked client weapon transport missing: ${token}`);
 }
 
@@ -235,6 +235,7 @@ for (const token of [
   'weaponById',
   'selectedWeaponId',
   'weaponReadyAtMs',
+  'FORMAL WEAPON AUTHORITY PENDING',
 ]) {
   if (!productLive.includes(token)) throw new Error(`Product weapon control/HUD missing: ${token}`);
 }
