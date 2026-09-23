@@ -8,12 +8,13 @@ on:
         required: true
         type: string
       deployment_purpose:
-        description: Select whether this is the initial release deploy or the post-rollback restoration deploy
+        description: Select the governed production deployment purpose
         required: true
         type: choice
         options:
           - initial_release
           - restore_after_rollback
+          - post_release_update
 
 permissions:
   contents: read
@@ -61,7 +62,7 @@ jobs:
             echo "received=$CONFIRM_SHA"
             exit 1
           fi
-          if [ "$DEPLOYMENT_PURPOSE" != "initial_release" ] && [ "$DEPLOYMENT_PURPOSE" != "restore_after_rollback" ]; then
+          if [ "$DEPLOYMENT_PURPOSE" != "initial_release" ] && [ "$DEPLOYMENT_PURPOSE" != "restore_after_rollback" ] && [ "$DEPLOYMENT_PURPOSE" != "post_release_update" ]; then
             echo "Refusing production deploy: unsupported deployment_purpose=$DEPLOYMENT_PURPOSE"
             exit 1
           fi
