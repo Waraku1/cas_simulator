@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { actionModuleById } from "../../shared/action-modules";
+import { weaponById } from "../../shared/weapons";
 import { aircraftById } from "../../shared/aircraft";
 import type { MatchFoundAssignment } from "../../shared/matchmaking";
 import {
@@ -237,7 +237,7 @@ function AircraftAssignmentPreview({
           <div><dt>SPEED</dt><dd>{aircraft ? `${aircraft.minimumSpeedMps}–${aircraft.maximumSpeedMps}` : "—"}</dd></div>
           <div><dt>PITCH</dt><dd>{aircraft?.pitchAccelerationDegS2 ?? "—"}</dd></div>
           <div><dt>ROLL</dt><dd>{aircraft?.rollAccelerationDegS2 ?? "—"}</dd></div>
-          <div><dt>ACTION</dt><dd>{aircraft?.actionModuleId.toUpperCase() ?? "—"}</dd></div>
+          <div><dt>ACTION</dt><dd>{aircraft?.weaponIds.map((weaponId) => weaponById(weaponId)?.displayName ?? weaponId.toUpperCase()).join(" / ") ?? "—"}</dd></div>
         </dl>
         <p className="preview-note">Assignment reveal advances automatically into the synchronized countdown.</p>
       </section>
@@ -292,27 +292,25 @@ function resultFromWinner(localSlot: 1 | 2, winnerSlot: 1 | 2 | null, reason: Ma
   return winnerSlot === localSlot ? "win" : "loss";
 }
 
-function actionFeedbackLabel(code: string | undefined) {
-  if (!code) return "SPACE TO ACTIVATE";
-  if (code === "accepted") return "ACTION ACCEPTED";
-  if (code === "cooldown") return "COOLDOWN ACTIVE";
-  if (code === "outside_interaction") return "OUTSIDE INTERACTION RANGE";
+function weaponFeedbackLabel(code: string | undefined, weaponName: string) {
+  if (!code) return "← / → SWITCH · SPACE FIRE";
+  if (code === "accepted") return `${weaponName} FIRED`;
+  if (code === "cooldown") return "WEAPON COOLDOWN";
+  if (code === "outside_interaction") return "TARGET OUT OF RANGE";
   if (code === "pose_stale") return "POSITION SYNCING";
   if (code === "peer_unavailable") return "PEER UNAVAILABLE";
   if (code === "not_active") return "MATCH NOT ACTIVE";
+  if (code === "invalid_weapon") return "WEAPON UNAVAILABLE";
   return code.toUpperCase();
 }
 
-function MatchPreview({
-  assignment,
-  onResolved,
-}: Readonly<{
-  assignment: MatchFoundAssignment;
-  onResolved: (outcome: ProductMatchOutcome) => void;
-}>) {
+function MatchPreview({ assignment, onResolved }: Readonly<{ assignment: MatchFoundAssignment; onResolved: (outcome: ProductMatchOutcome) => void }>) {
   const ranked = useRankedMatch(assignment);
   const aircraft = aircraftById(assignment.aircraftId);
-  const actionModule = aircraft ? actionModuleById(aircraft.actionModuleId) : null;
+  const peerAircraft = aircraftById(assignment.peerAircraftId);
+  const weaponIds: readonly WeaponId[] = aircraft?.weaponIds?.length ? aircraft.weaponIds : ["missile", "gun"];
+  const [selectedWeaponId, setSelectedWeaponId] = useState<WeaponId>(weaponIds[0] ?? "missile");
+  const selectedWeapon = weaponById(selectedWeaponId);
   const [clockNowMs, setClockNowMs] = useState(Date.now());
   const resolvedRef = useRef(false);
 
@@ -323,129 +321,66 @@ function MatchPreview({
 
   useEffect(() => {
     const handleActionKey = (event: KeyboardEvent) => {
-      if (event.code !== "Space" || event.repeat) return;
+      if (event.repeat) return;
       const target = event.target;
-      if (
-        target instanceof HTMLInputElement
-        || target instanceof HTMLButtonElement
-        || target instanceof HTMLTextAreaElement
-        || (target instanceof HTMLElement && target.isContentEditable)
-      ) {
+      if (target instanceof HTMLInputElement || target instanceof HTMLButtonElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)) return;
+      if (event.code === "ArrowLeft" || event.code === "ArrowRight") {
+        event.preventDefault();
+        setSelectedWeaponId((current) => {
+          const currentIndex = Math.max(0, weaponIds.indexOf(current));
+          const delta = event.code === "ArrowRight" ? 1 : -1;
+          return weaponIds[(currentIndex + delta + weaponIds.length) % weaponIds.length] ?? current;
+        });
         return;
       }
-      event.preventDefault();
-      ranked.activateAction();
+      if (event.code === "Space") {
+        event.preventDefault();
+        ranked.fireWeapon(selectedWeaponId);
+      }
     };
     window.addEventListener("keydown", handleActionKey, { passive: false });
     return () => window.removeEventListener("keydown", handleActionKey);
-  }, [ranked.activateAction]);
+  }, [ranked.fireWeapon, selectedWeaponId, weaponIds]);
 
   const state = ranked.matchState;
   const localParticipant = ranked.slot && state ? state.participants[ranked.slot - 1] : null;
   const peerParticipant = ranked.slot && state ? state.participants[ranked.slot === 1 ? 1 : 0] : null;
-  const localHeartPoints = localParticipant?.heartPoints ?? MATCH_RULES.startingHeartPoints;
-  const peerHeartPoints = peerParticipant?.heartPoints ?? MATCH_RULES.startingHeartPoints;
+  const localHp = localParticipant?.heartPoints ?? MATCH_RULES.startingHeartPoints;
+  const peerHp = peerParticipant?.heartPoints ?? MATCH_RULES.startingHeartPoints;
   const serverNowMs = clockNowMs + ranked.serverTimeOffsetMs;
 
   useEffect(() => {
     if (!state?.result || !ranked.slot || resolvedRef.current) return;
     resolvedRef.current = true;
-    onResolved({
-      result: resultFromWinner(ranked.slot, state.result.winnerSlot, state.result.reason),
-      reason: state.result.reason,
-      localHeartPoints,
-      peerHeartPoints,
-    });
-  }, [state?.result, ranked.slot, localHeartPoints, peerHeartPoints, onResolved]);
+    const result = state.result.winnerSlot === null ? "draw" : state.result.winnerSlot === ranked.slot ? "win" : "loss";
+    onResolved({ result, reason: state.result.reason, localHeartPoints: localHp, peerHeartPoints: peerHp });
+  }, [state?.result, ranked.slot, localHp, peerHp, onResolved]);
 
   const phase = state?.phase ?? "countdown";
-  const phaseLabel = phase === "overtime"
-    ? "OVERTIME"
-    : phase === "active"
-      ? "REGULATION"
-      : phase === "completed" || phase === "no-contest"
-        ? "COMPLETE"
-        : "SYNCING";
   const remainingMs = state
     ? phase === "overtime"
       ? state.overtimeEndsAtMs - serverNowMs
       : phase === "active"
         ? state.regulationEndsAtMs - serverNowMs
-        : phase === "countdown"
-          ? state.activeAtMs - serverNowMs
-          : 0
+        : Math.max(0, state.activeAtMs - serverNowMs)
     : MATCH_RULES.regulationSeconds * 1_000;
-  const cooldownRemainingMs = localParticipant
-    ? Math.max(0, localParticipant.nextActionAtMs - serverNowMs)
-    : 0;
-  const actionReady = (phase === "active" || phase === "overtime")
-    && cooldownRemainingMs === 0
-    && ranked.peerConnected;
-  const actionStatus = actionReady
-    ? "READY"
-    : cooldownRemainingMs > 0
-      ? `${(cooldownRemainingMs / 1_000).toFixed(1)}S`
-      : ranked.status === "connecting"
-        ? "SYNCING"
-        : "STANDBY";
-  const stagingSlot = assignment.spawnSide === "left" ? 1 : 2;
+  const readyAt = localParticipant?.weaponReadyAtMs?.[selectedWeaponId] ?? localParticipant?.nextActionAtMs ?? 0;
+  const cooldownRemainingMs = Math.max(0, readyAt - serverNowMs);
+  const weaponName = selectedWeapon?.displayName ?? selectedWeaponId.toUpperCase();
+  const weaponReady = (phase === "active" || phase === "overtime") && cooldownRemainingMs === 0 && ranked.peerConnected;
+  const weaponStatus = weaponReady ? "READY" : cooldownRemainingMs > 0 ? `${(cooldownRemainingMs / 1000).toFixed(1)}S` : "STANDBY";
 
-  return (
-    <div className="product-match-shell">
-      <FlightRuntime
-        showDevelopmentPanels={false}
-        externalNetworkController={ranked}
-        stagingSlot={stagingSlot}
-      />
-      <div className="c4-match-hud" aria-label="C4 authoritative match HUD">
-        <div className="match-hud__top">
-          <div className="hp-block hp-block--local">
-            <span>YOU // {aircraft?.displayName ?? assignment.aircraftId}</span>
-            <strong>{localHeartPoints}</strong>
-            <div><i style={{ width: `${localHeartPoints}%` }} /></div>
-          </div>
-          <div className="match-clock">
-            <span>{phaseLabel}</span>
-            <strong>{formatClock(remainingMs)}</strong>
-            <small>{assignment.roomCode}</small>
-          </div>
-          <div className="hp-block hp-block--peer">
-            <span>PEER</span>
-            <strong>{peerHeartPoints}</strong>
-            <div><i style={{ width: `${peerHeartPoints}%` }} /></div>
-          </div>
-        </div>
-        <div className="match-action-state" aria-live="polite">
-          <span>ACTION // {actionModule?.displayName ?? "ABSTRACT MODULE"}</span>
-          <strong>{actionStatus}</strong>
-          <small>{actionFeedbackLabel(ranked.lastActionFeedback?.code)}</small>
-        </div>
-        <button
-          className="match-exit-preview"
-          onClick={ranked.leaveMatch}
-          disabled={Boolean(state?.result)}
-        >
-          FORFEIT MATCH
-        </button>
+  return <div className="product-match-shell">
+    <FlightRuntime showDevelopmentPanels={false} externalNetworkController={ranked} stagingSlot={assignment.spawnSide === "left" ? 1 : 2} localAircraftId={assignment.aircraftId} peerAircraftId={assignment.peerAircraftId} />
+    <div className="c4-match-hud">
+      <div className="match-hud__top">
+        <div className="hp-block hp-block--local"><span>YOU // {aircraft?.displayName ?? assignment.aircraftId}</span><strong>{localHp}</strong><div><i style={{ width: `${localHp}%` }} /></div></div>
+        <div className="match-clock"><span>{phase.toUpperCase()}</span><strong>{formatClock(remainingMs)}</strong><small>{assignment.roomCode}</small></div>
+        <div className="hp-block hp-block--peer"><span>PEER // {peerAircraft?.displayName ?? assignment.peerAircraftId}</span><strong>{peerHp}</strong><div><i style={{ width: `${peerHp}%` }} /></div></div>
       </div>
+      <div className="match-action-state" data-weapon={selectedWeaponId}><span>WEAPON // {weaponName}</span><strong>{weaponStatus}</strong><small>{weaponFeedbackLabel(ranked.lastActionFeedback?.code, weaponName)}</small></div>
     </div>
-  );
-}
-
-function resultTitle(result: MatchResult) {
-  if (result === "win") return "WIN";
-  if (result === "loss") return "LOSS";
-  if (result === "draw") return "DRAW";
-  return "NO CONTEST";
-}
-
-function resultReasonLabel(reason: MatchResultReason) {
-  if (reason === "heart-points-depleted") return "HEART POINTS REACHED ZERO";
-  if (reason === "regulation-heart-points") return "REGULATION HP RESULT";
-  if (reason === "overtime-heart-points") return "OVERTIME HP RESULT";
-  if (reason === "overtime-draw") return "OVERTIME ENDED LEVEL";
-  if (reason === "forfeit") return "FORFEIT";
-  return "INFRASTRUCTURE FAILURE";
+  </div>;
 }
 
 function ResultPreview({
