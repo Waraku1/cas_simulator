@@ -6,7 +6,7 @@ C5C establishes a reproducible production deployment, rollback, and final-releas
 
 The implementation consists of two manual GitHub Actions workflows:
 
-- `.github/workflows/deploy.yml` — deploy an exact selected Git commit to production, explicitly labeled as either `initial_release` or `restore_after_rollback`;
+- `.github/workflows/deploy.yml` — deploy an exact selected Git commit to production with an explicit purpose: `initial_release`, `restore_after_rollback`, or `post_release_update`;
 - `.github/workflows/rollback.yml` — restore one explicit existing Cloudflare Worker version.
 
 Neither workflow runs on push or pull request events. Production mutation therefore requires an explicit manual dispatch.
@@ -16,7 +16,8 @@ Neither workflow runs on push or pull request events. Production mutation theref
 A production deploy requires the operator to dispatch from `refs/heads/main`, paste the exact full 40-character Git SHA selected in the workflow UI, and select one explicit deployment purpose. The workflow rejects the operation before Cloudflare mutation unless `GITHUB_REF=refs/heads/main`, `confirm_sha` is a full SHA, `confirm_sha` exactly equals `GITHUB_SHA`, and `deployment_purpose` is one of:
 
 - `initial_release` — the first deployment of the final release SHA before rollback verification;
-- `restore_after_rollback` — the final same-SHA deployment that restores the intended release after rollback verification.
+- `restore_after_rollback` — the final same-SHA deployment that restores the intended release after rollback verification;
+- `post_release_update` — a governed production deployment of a later `main` SHA after the release baseline has already been frozen. It uses the same exact-SHA, environment, concurrency, binding, version-state, target-binding, smoke, cleanup, and artifact controls, but it is **not** part of the frozen C5F initial/rollback/restoration lineage.
 
 A production rollback requires all of the following:
 
@@ -168,3 +169,19 @@ Final C5 closure requires all three production mutations above only after the C4
 C5C implementation is ready when Project CI validates the manual-only workflows, immutable SHA confirmation, explicit deployment purpose, explicit rollback target/confirmation, fail-closed real D1 binding, Wrangler structured deployment identity, production URL / Wrangler deploy target binding, no-op rollback rejection, before/after 100% live Worker version checks, production smoke, and zero-count cleanup without changing C1-C4 semantics.
 
 C5C execution evidence is closed only after the `initial_release` deploy, rollback proof, and same release SHA `restore_after_rollback` deployment have all completed successfully, their artifacts are retained, and C5F verifies chronology plus Worker version-state and endpoint lineage. The restoration deploy, not the rollback target, is the required final production state.
+
+
+## Post-release update procedure
+
+Use this path only after the original C5 release-preparation baseline has already been frozen.
+
+1. Merge the reviewed post-release source change through the normal protected `main` PR path.
+2. Require Project CI PASS on the exact resulting `main` SHA.
+3. Open **Deploy production** from `main` at that exact SHA.
+4. Paste the same full 40-character SHA into `confirm_sha`.
+5. Select `post_release_update` as `deployment_purpose`.
+6. Dispatch the workflow and require the same D1 binding preflight, build, version-state, production URL target binding, root/health/multiplayer/rated-product smoke, and zero-count cleanup used by the release deployment path.
+7. Retain the resulting `c5-production-deploy-post_release_update-<run>-<attempt>` artifact as post-release deployment evidence.
+8. Do not use a `post_release_update` artifact to satisfy or rewrite frozen C5F `initial_release` / `restore_after_rollback` evidence.
+
+A post-release update does not require repeating the original release rollback proof unless a separate change-management decision explicitly requires a new rollback exercise.
