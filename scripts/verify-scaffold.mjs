@@ -131,8 +131,8 @@ const appShell = await readFile(join(root, "src/client/App.tsx"), "utf8");
 if (!appShell.includes('const devFlight = params.get("devFlight") === "1";')) {
   throw new Error("Raw flight development UI must require explicit ?devFlight=1 opt-in");
 }
-if (!appShell.includes("if (devFlight) return <FlightRuntime />;")) {
-  throw new Error("Explicit devFlight route must render the raw FlightRuntime");
+if (!appShell.includes('if (devFlight) return <FlightRuntime') || !appShell.includes('localAircraftId="orbit-a1"')) {
+  throw new Error("Explicit devFlight route must render FlightRuntime with the reviewed Bell X-1 test aircraft");
 }
 if (!appShell.includes("{staticPreview ? <ProductPreview /> : <ProductLive />}")) {
   throw new Error("Normal application entrypoint must default to ProductLive");
