@@ -37,6 +37,8 @@ type FlightRuntimeProps = Readonly<{
   autoRoomCode?: string | null;
   externalNetworkController?: FlightNetworkController | null;
   stagingSlot?: 1 | 2 | null;
+  localAircraftId?: string | null;
+  peerAircraftId?: string | null;
   onMultiplayerState?: (state: FlightRuntimeMultiplayerState) => void;
 }>;
 
@@ -53,6 +55,8 @@ export function FlightRuntime({
   autoRoomCode = null,
   externalNetworkController = null,
   stagingSlot = null,
+  localAircraftId = null,
+  peerAircraftId = null,
   onMultiplayerState,
 }: FlightRuntimeProps) {
   const [telemetry, setTelemetry] = useState(INITIAL_FLIGHT_TELEMETRY);
@@ -86,6 +90,8 @@ export function FlightRuntime({
         onTheaterStatus={setTheaterStatus}
         remotePose={multiplayer.remotePose}
         localSlot={stagingSlot ?? multiplayer.slot}
+        localAircraftId={localAircraftId}
+        peerAircraftId={peerAircraftId}
       />
       <FlightHud telemetry={telemetry} />
       <TheaterStatusPanel status={theaterStatus} />
