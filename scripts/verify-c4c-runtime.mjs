@@ -3,6 +3,7 @@ import {
   createSchoolRankedRuntime,
   markSchoolRankedConnected,
   markSchoolRankedDisconnected,
+  resolveSchoolRankedAction,
 } from "./school-ranked-runtime.mjs";
 
 function baseState(activeAtMs = 10_000) {
@@ -21,6 +22,62 @@ let state = baseState();
 state = markSchoolRankedConnected(state, 1, 10_001);
 state = markSchoolRankedConnected(state, 2, 10_001);
 if (advanceSchoolRankedRuntime(state, 10_001).phase !== "active") throw new Error("ACTIVE transition failed");
+
+const poseSample = {
+  pose: {
+    latitudeDeg: 34.4,
+    longitudeDeg: 132.45,
+    altitudeM: 2_000,
+    orientation: { w: 1, x: 0, y: 0, z: 0 },
+  },
+  receivedAtMs: 10_001,
+};
+let weaponState = state;
+const missile = resolveSchoolRankedAction(
+  weaponState,
+  1,
+  10_001,
+  poseSample,
+  poseSample,
+  "missile",
+);
+if (!missile.accepted || missile.weaponId !== "missile" || missile.state.participants[1].heartPoints !== 80) {
+  throw new Error("MISSILE contract failed");
+}
+weaponState = missile.state;
+const missileCooldown = resolveSchoolRankedAction(
+  weaponState,
+  1,
+  10_002,
+  { ...poseSample, receivedAtMs: 10_002 },
+  { ...poseSample, receivedAtMs: 10_002 },
+  "missile",
+);
+if (missileCooldown.accepted || missileCooldown.code !== "cooldown") {
+  throw new Error("MISSILE cooldown was not enforced");
+}
+const gun = resolveSchoolRankedAction(
+  weaponState,
+  1,
+  10_002,
+  { ...poseSample, receivedAtMs: 10_002 },
+  { ...poseSample, receivedAtMs: 10_002 },
+  "gun",
+);
+if (!gun.accepted || gun.weaponId !== "gun" || gun.state.participants[1].heartPoints !== 76) {
+  throw new Error("GUN independent cooldown/effect contract failed");
+}
+const gunCooldown = resolveSchoolRankedAction(
+  gun.state,
+  1,
+  10_003,
+  { ...poseSample, receivedAtMs: 10_003 },
+  { ...poseSample, receivedAtMs: 10_003 },
+  "gun",
+);
+if (gunCooldown.accepted || gunCooldown.code !== "cooldown") {
+  throw new Error("GUN cooldown was not enforced");
+}
 
 const regulationEnd = state.regulationEndsAtMs;
 state = {
@@ -104,4 +161,6 @@ console.log(JSON.stringify({
   disconnectGrace20s: "PASS",
   initialConnectionGrace20s: "PASS",
   dualInitialAbsenceNoContest: "PASS",
+  missileGunWeaponContract: "PASS",
+  independentWeaponCooldowns: "PASS",
 }, null, 2));
