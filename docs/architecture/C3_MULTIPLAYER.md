@@ -45,7 +45,7 @@ Protocol guards include a 2048-byte text-message limit, finite/range checks, qua
 
 ## Client architecture
 
-Local aircraft simulation remains at the C2-governed 60 FPS cap. When connected, `EarthScene` publishes local pose at approximately 5 Hz (200 ms). The receiving client interpolates peer latitude/longitude/altitude linearly and orientation with quaternion spherical interpolation. Peer aircraft use a distinct visual material.
+Local aircraft simulation remains at the C2-governed 60 FPS cap. When connected, `EarthScene` publishes local pose at approximately 10 Hz (100 ms). The receiving client estimates short-horizon peer motion from the latest sender snapshots, caps dead-reckoning at 180 ms, and exponentially smooths both position and quaternion orientation toward the predicted pose. This presentation-layer prediction is visual only; the room/worker continues to validate and relay client pose snapshots without becoming a flight-simulation authority. Peer aircraft retain a distinct visual marker/material treatment.
 
 The compact room UI exposes create, join, leave, room code, connection state, and peer presence. Form controls are guarded so room-code input does not trigger flight controls.
 
