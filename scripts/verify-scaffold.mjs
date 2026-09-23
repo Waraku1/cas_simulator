@@ -49,6 +49,7 @@ const required = [
   "scripts/dev-school.mjs",
   "scripts/render-school-gateway.mjs",
   "scripts/verify-render-school-gateway.mjs",
+  "scripts/verify-render-cesium-token.mjs",
   "render.yaml",
   "docs/operations/RENDER_SCHOOL_GATEWAY.md",
   "scripts/school-local-backend.mjs",
