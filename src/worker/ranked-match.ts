@@ -428,6 +428,7 @@ export class RankedMatch {
       nowMs,
       this.poseForSlot(sender.slot),
       this.poseForSlot(sender.slot === 1 ? 2 : 1),
+      parsed.weaponId ?? "missile",
     );
     state = await this.persist(resolution.state, nowMs);
     this.send(socket, {
@@ -435,6 +436,7 @@ export class RankedMatch {
       accepted: resolution.accepted,
       code: resolution.code,
       nextActionAtMs: resolution.nextActionAtMs,
+      weaponId: resolution.weaponId,
     });
   }
 
