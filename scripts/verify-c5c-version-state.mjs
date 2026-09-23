@@ -60,7 +60,7 @@ async function validateDeploy(options) {
   const beforeLiveVersionId = soleLiveVersion(before, "deployments-before.json", false);
   const afterLiveVersionId = soleLiveVersion(after, "deployments-live.json", true);
 
-  assert(options.purpose === "initial_release" || options.purpose === "restore_after_rollback", `Unsupported deployment purpose: ${options.purpose}`);
+  assert(["initial_release", "restore_after_rollback", "post_release_update"].includes(options.purpose), `Unsupported deployment purpose: ${options.purpose}`);
   if (options.expectedWorkerName) assert(deploy.worker_name === options.expectedWorkerName, `Unexpected Worker name: ${deploy.worker_name}`);
   assert(afterLiveVersionId === deploy.version_id, "Post-deploy live version does not match Wrangler deploy version_id");
 
@@ -163,6 +163,16 @@ async function selfTest() {
       expectedWorkerName: "cas-flight-simulator",
     });
     assert(deploy.deployedVersionId === "version-new", "Valid deploy self-test did not resolve deployed version");
+
+    const postReleaseDeploy = await validateDeploy({
+      beforeFile,
+      afterFile,
+      wranglerOutputFile: wranglerFile,
+      purpose: "post_release_update",
+      productionUrl: "https://example.invalid",
+      expectedWorkerName: "cas-flight-simulator",
+    });
+    assert(postReleaseDeploy.deploymentPurpose === "post_release_update", "Post-release deploy purpose was not accepted");
 
     await writeFile(afterFile, JSON.stringify(status("version-other", "deployment-other")), "utf8");
     await expectFailure("deploy version/status mismatch", () => validateDeploy({
