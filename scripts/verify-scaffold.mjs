@@ -42,11 +42,13 @@ const required = [
   "src/shared/rating.ts",
   "src/shared/aircraft.ts",
   "src/shared/aircraft-catalog.json",
+  "src/shared/aircraft-visuals.ts",
   "src/shared/action-modules.ts",
   "src/shared/action-module-catalog.json",
   "src/shared/competition.ts",
   "src/shared/matchmaking.ts",
   "scripts/dev-school.mjs",
+  "scripts/sync-aircraft-assets.mjs",
   "scripts/render-school-gateway.mjs",
   "scripts/verify-render-school-gateway.mjs",
   "scripts/verify-render-cesium-token.mjs",
@@ -83,6 +85,14 @@ execFileSync(process.execPath, ["--check", join(root, "scripts/verify-production
 const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 if (pkg.dependencies?.cesium !== "1.145.0") throw new Error("Unexpected Cesium version");
 if (!pkg.scripts?.build || !pkg.scripts?.deploy) throw new Error("Missing build/deploy scripts");
+if (!pkg.scripts?.["sync:aircraft"]?.includes("sync-aircraft-assets.mjs")) {
+  throw new Error("Missing authoritative aircraft asset synchronization script");
+}
+for (const scriptName of ["predev", "dev:school", "prebuild", "build:render"]) {
+  if (!pkg.scripts?.[scriptName]?.includes("sync:aircraft")) {
+    throw new Error(`${scriptName} must synchronize aircraft assets before serving/building`);
+  }
+}
 if (!pkg.scripts?.["dev:school"]?.includes("scripts/dev-school.mjs")) {
   throw new Error("School mode must use the OS-compatible Node local relay launcher");
 }
