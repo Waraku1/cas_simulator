@@ -93,7 +93,7 @@ function browserOriginAllowed(request) {
 function securityHeaders(headers = {}) {
   return {
     "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer",
+    "referrer-policy": "strict-origin-when-cross-origin",
     "x-frame-options": "DENY",
     "permissions-policy": "camera=(), microphone=(), geolocation=()",
     ...headers,
