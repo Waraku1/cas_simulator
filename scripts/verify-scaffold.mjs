@@ -75,6 +75,7 @@ const required = [
   "docs/architecture/C3_MULTIPLAYER.md",
   "docs/architecture/C4_PRODUCT_CONTRACT.md",
   "docs/architecture/C4D_RATING.md",
+  "docs/architecture/C4E_WEAPONS.md",
 ];
 
 for (const relative of required) {
