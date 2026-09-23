@@ -284,18 +284,22 @@ function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFound
         : Math.max(0, state.activeAtMs - serverNow)
     : MATCH_RULES.regulationSeconds * 1_000;
 
+  const weaponAuthorityReady = Boolean(local?.weaponReadyAtMs);
   const selectedReadyAt = local?.weaponReadyAtMs?.[selectedWeaponId] ?? local?.nextActionAtMs ?? 0;
   const cooldown = Math.max(0, selectedReadyAt - serverNow);
-  const weaponReady = (phase === "active" || phase === "overtime")
+  const weaponReady = weaponAuthorityReady
+    && (phase === "active" || phase === "overtime")
     && cooldown === 0
     && ranked.peerConnected;
-  const weaponStatus = weaponReady
-    ? "READY"
-    : cooldown > 0
-      ? `${(cooldown / 1_000).toFixed(selectedWeaponId === "gun" ? 1 : 0)}S`
-      : ranked.status === "connecting"
-        ? "SYNCING"
-        : "STANDBY";
+  const weaponStatus = !weaponAuthorityReady
+    ? "AUTH SYNC"
+    : weaponReady
+      ? "READY"
+      : cooldown > 0
+        ? `${(cooldown / 1_000).toFixed(selectedWeaponId === "gun" ? 1 : 0)}S`
+        : ranked.status === "connecting"
+          ? "SYNCING"
+          : "STANDBY";
   const stagingSlot = assignment.spawnSide === "left" ? 1 : 2;
   const weaponName = selectedWeapon?.displayName ?? selectedWeaponId.toUpperCase();
 
@@ -325,7 +329,7 @@ function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFound
       <div className="match-action-state" data-weapon={selectedWeaponId}>
         <span>WEAPON // {weaponName}</span>
         <strong>{weaponStatus}</strong>
-        <small>{weaponFeedbackLabel(ranked.lastActionFeedback?.code, weaponName)}</small>
+        <small>{weaponAuthorityReady ? weaponFeedbackLabel(ranked.lastActionFeedback?.code, weaponName) : "FORMAL WEAPON AUTHORITY PENDING"}</small>
       </div>
       <button className="match-exit-preview" onClick={ranked.leaveMatch} disabled={Boolean(state?.result)}>FORFEIT MATCH</button>
     </div>
