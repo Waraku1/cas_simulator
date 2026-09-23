@@ -4,6 +4,7 @@ import {
   Color,
   ConstantPositionProperty,
   ConstantProperty,
+  Entity,
   Ion,
   Matrix3,
   Matrix4,
@@ -14,6 +15,8 @@ import {
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { useEffect, useRef, useState } from "react";
+import { aircraftById } from "../../shared/aircraft";
+import { aircraftVisualForSpec } from "../../shared/aircraft-visuals";
 import { C2_RESOURCE_BUDGET } from "../../shared/config";
 import {
   SNAPSHOT_INTERVAL_MS,
@@ -73,6 +76,8 @@ type EarthSceneProps = Readonly<{
   onLocalPose: (pose: AircraftPose) => void;
   remotePose: RemotePoseBuffer | null;
   localSlot: 1 | 2 | null;
+  localAircraftId: string | null;
+  peerAircraftId: string | null;
 }>;
 
 function computeFixedFrame(position: Cartesian3, localFrame: LocalAxes): FlightFrame {
@@ -146,12 +151,33 @@ function interpolateNetworkOrientation(
   return { w: result.w, x: result.x, y: result.y, z: result.z };
 }
 
-function orientationFromFrame(frame: FlightFrame) {
+function bodyRotationFromFrame(frame: FlightFrame) {
   const rotation = Matrix3.clone(Matrix3.IDENTITY, new Matrix3());
   Matrix3.setColumn(rotation, 0, frame.forward, rotation);
   Matrix3.setColumn(rotation, 1, frame.left, rotation);
   Matrix3.setColumn(rotation, 2, frame.up, rotation);
-  return Quaternion.fromRotationMatrix(rotation);
+  return rotation;
+}
+
+function orientationFromFrame(frame: FlightFrame) {
+  return Quaternion.fromRotationMatrix(bodyRotationFromFrame(frame));
+}
+
+// glTF uses +Y up and -Z as the conventional forward direction. CAS uses a
+// right-handed body frame of +X forward, +Y left, +Z up.
+const GLTF_TO_CAS_BODY = new Matrix3(
+  0, 0, -1,
+  -1, 0, 0,
+  0, 1, 0,
+);
+
+function modelOrientationFromFrame(frame: FlightFrame) {
+  const modelToWorld = Matrix3.multiply(
+    bodyRotationFromFrame(frame),
+    GLTF_TO_CAS_BODY,
+    new Matrix3(),
+  );
+  return Quaternion.fromRotationMatrix(modelToWorld);
 }
 
 function offsetFrom(position: Cartesian3, direction: Cartesian3, distanceM: number) {
@@ -181,6 +207,8 @@ export function EarthScene({
   onLocalPose,
   remotePose,
   localSlot,
+  localAircraftId,
+  peerAircraftId,
 }: EarthSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const remotePoseRef = useRef(remotePose);
@@ -204,6 +232,11 @@ export function EarthScene({
     }
 
     if (!containerRef.current) return;
+
+    const localAircraft = localAircraftId ? aircraftById(localAircraftId) : null;
+    const peerAircraft = peerAircraftId ? aircraftById(peerAircraftId) : null;
+    const localVisual = aircraftVisualForSpec(localAircraft);
+    const peerVisual = aircraftVisualForSpec(peerAircraft);
 
     Ion.defaultAccessToken = token;
     let viewer: Viewer | undefined;
@@ -271,7 +304,9 @@ export function EarthScene({
         flightState.altitudeM,
       );
       const initialFrame = computeFlightFrame(initialPosition, flightState);
-      const initialOrientation = orientationFromFrame(initialFrame);
+      const initialOrientation = localVisual
+        ? modelOrientationFromFrame(initialFrame)
+        : orientationFromFrame(initialFrame);
       const positionProperty = new ConstantPositionProperty(initialPosition);
       const nosePositionProperty = new ConstantPositionProperty(
         offsetFrom(initialPosition, initialFrame.forward, NOSE_OFFSET_M),
@@ -280,97 +315,135 @@ export function EarthScene({
       const aircraftMaterial = Color.fromCssColorString("#d9fbff").withAlpha(0.92);
       const aircraftAccent = Color.fromCssColorString("#64e8ff").withAlpha(0.88);
 
-      viewer.entities.add({
-        position: positionProperty,
-        orientation: orientationProperty,
-        box: {
-          dimensions: new Cartesian3(18, 3.2, 2.1),
-          material: aircraftMaterial,
-          outline: true,
-          outlineColor: aircraftAccent,
-        },
-      });
-      viewer.entities.add({
-        position: positionProperty,
-        orientation: orientationProperty,
-        box: {
-          dimensions: new Cartesian3(4.2, 22, 0.7),
-          material: aircraftAccent.withAlpha(0.72),
-        },
-      });
-      viewer.entities.add({
-        position: nosePositionProperty,
-        orientation: orientationProperty,
-        box: {
-          dimensions: new Cartesian3(5.2, 2.4, 1.4),
-          material: aircraftAccent,
-          outline: true,
-          outlineColor: Color.WHITE.withAlpha(0.72),
-        },
-      });
+      if (localVisual) {
+        viewer.entities.add({
+          name: `CAS local aircraft // ${localVisual.realAircraftName}`,
+          position: positionProperty,
+          orientation: orientationProperty,
+          model: {
+            uri: localVisual.modelUri,
+            scale: localVisual.scale * (localAircraft?.visualScale ?? 1),
+            minimumPixelSize: localVisual.minimumPixelSize,
+            maximumScale: localVisual.maximumScale,
+          },
+        });
+      } else {
+        viewer.entities.add({
+          name: "CAS local aircraft fallback",
+          position: positionProperty,
+          orientation: orientationProperty,
+          box: {
+            dimensions: new Cartesian3(18, 3.2, 2.1),
+            material: aircraftMaterial,
+            outline: true,
+            outlineColor: aircraftAccent,
+          },
+        });
+        viewer.entities.add({
+          name: "CAS local wings fallback",
+          position: positionProperty,
+          orientation: orientationProperty,
+          box: {
+            dimensions: new Cartesian3(4.2, 22, 0.7),
+            material: aircraftAccent.withAlpha(0.72),
+          },
+        });
+        viewer.entities.add({
+          name: "CAS local nose fallback",
+          position: nosePositionProperty,
+          orientation: orientationProperty,
+          box: {
+            dimensions: new Cartesian3(5.2, 2.4, 1.4),
+            material: aircraftAccent,
+            outline: true,
+            outlineColor: Color.WHITE.withAlpha(0.72),
+          },
+        });
+      }
 
       const remotePositionProperty = new ConstantPositionProperty(initialPosition);
       const remoteNosePositionProperty = new ConstantPositionProperty(initialPosition);
-      const remoteOrientationProperty = new ConstantProperty(initialOrientation);
+      const remoteInitialOrientation = peerVisual
+        ? modelOrientationFromFrame(initialFrame)
+        : orientationFromFrame(initialFrame);
+      const remoteOrientationProperty = new ConstantProperty(remoteInitialOrientation);
       const remoteMaterial = Color.fromCssColorString("#ffd48a").withAlpha(0.9);
       const remoteAccent = Color.fromCssColorString("#ff9f43").withAlpha(0.9);
-      const remoteEntities = [
-        viewer.entities.add({
-          name: "C3 peer aircraft",
+      const remoteEntities: Entity[] = [];
+
+      if (peerVisual) {
+        remoteEntities.push(viewer.entities.add({
+          name: `C3 peer aircraft // ${peerVisual.realAircraftName}`,
           show: false,
           position: remotePositionProperty,
           orientation: remoteOrientationProperty,
-          box: {
-            dimensions: new Cartesian3(18, 3.2, 2.1),
-            material: remoteMaterial,
-            outline: true,
-            outlineColor: remoteAccent,
+          model: {
+            uri: peerVisual.modelUri,
+            scale: peerVisual.scale * (peerAircraft?.visualScale ?? 1),
+            minimumPixelSize: peerVisual.minimumPixelSize,
+            maximumScale: peerVisual.maximumScale,
           },
-        }),
-        viewer.entities.add({
-          name: "C3 peer wings",
-          show: false,
-          position: remotePositionProperty,
-          orientation: remoteOrientationProperty,
-          box: {
-            dimensions: new Cartesian3(4.2, 22, 0.7),
-            material: remoteAccent.withAlpha(0.72),
-          },
-        }),
-        viewer.entities.add({
-          name: "C3 peer nose",
-          show: false,
-          position: remoteNosePositionProperty,
-          orientation: remoteOrientationProperty,
-          box: {
-            dimensions: new Cartesian3(5.2, 2.4, 1.4),
-            material: remoteAccent,
-            outline: true,
-            outlineColor: Color.WHITE.withAlpha(0.68),
-          },
-        }),
-        viewer.entities.add({
-          name: "C3 peer marker",
-          show: false,
-          position: remotePositionProperty,
-          point: {
-            pixelSize: 13,
-            color: remoteAccent,
-            outlineColor: Color.WHITE,
-            outlineWidth: 2,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          },
-          label: {
-            text: "PEER",
-            font: "600 14px monospace",
-            fillColor: Color.WHITE,
-            showBackground: true,
-            backgroundColor: Color.BLACK.withAlpha(0.62),
-            pixelOffset: new Cartesian2(0, -28),
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          },
-        }),
-      ];
+        }));
+      } else {
+        remoteEntities.push(
+          viewer.entities.add({
+            name: "C3 peer aircraft fallback",
+            show: false,
+            position: remotePositionProperty,
+            orientation: remoteOrientationProperty,
+            box: {
+              dimensions: new Cartesian3(18, 3.2, 2.1),
+              material: remoteMaterial,
+              outline: true,
+              outlineColor: remoteAccent,
+            },
+          }),
+          viewer.entities.add({
+            name: "C3 peer wings fallback",
+            show: false,
+            position: remotePositionProperty,
+            orientation: remoteOrientationProperty,
+            box: {
+              dimensions: new Cartesian3(4.2, 22, 0.7),
+              material: remoteAccent.withAlpha(0.72),
+            },
+          }),
+          viewer.entities.add({
+            name: "C3 peer nose fallback",
+            show: false,
+            position: remoteNosePositionProperty,
+            orientation: remoteOrientationProperty,
+            box: {
+              dimensions: new Cartesian3(5.2, 2.4, 1.4),
+              material: remoteAccent,
+              outline: true,
+              outlineColor: Color.WHITE.withAlpha(0.68),
+            },
+          }),
+        );
+      }
+
+      remoteEntities.push(viewer.entities.add({
+        name: "C3 peer marker",
+        show: false,
+        position: remotePositionProperty,
+        point: {
+          pixelSize: 13,
+          color: remoteAccent,
+          outlineColor: Color.WHITE,
+          outlineWidth: 2,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: {
+          text: "PEER",
+          font: "600 14px monospace",
+          fillColor: Color.WHITE,
+          showBackground: true,
+          backgroundColor: Color.BLACK.withAlpha(0.62),
+          pixelOffset: new Cartesian2(0, -28),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      }));
 
       const updateCamera = (position: Cartesian3, frame: FlightFrame) => {
         if (!viewer) return;
@@ -413,7 +486,9 @@ export function EarthScene({
         const frame = computeNetworkFlightFrame(position, orientation);
         remotePositionProperty.setValue(position);
         remoteNosePositionProperty.setValue(offsetFrom(position, frame.forward, NOSE_OFFSET_M));
-        remoteOrientationProperty.setValue(orientationFromFrame(frame));
+        remoteOrientationProperty.setValue(
+          peerVisual ? modelOrientationFromFrame(frame) : orientationFromFrame(frame),
+        );
       };
 
       const publishFlightState = () => {
@@ -475,7 +550,9 @@ export function EarthScene({
         const flightFrame = computeFlightFrame(position, flightState);
         positionProperty.setValue(position);
         nosePositionProperty.setValue(offsetFrom(position, flightFrame.forward, NOSE_OFFSET_M));
-        orientationProperty.setValue(orientationFromFrame(flightFrame));
+        orientationProperty.setValue(
+          localVisual ? modelOrientationFromFrame(flightFrame) : orientationFromFrame(flightFrame),
+        );
         updateCamera(position, flightFrame);
         updateRemoteAircraft(now);
 
@@ -512,7 +589,7 @@ export function EarthScene({
       window.removeEventListener("blur", handleBlur);
       if (viewer && !viewer.isDestroyed()) viewer.destroy();
     };
-  }, [onLocalPose, onTelemetry, onTheaterStatus]);
+  }, [localAircraftId, peerAircraftId, onLocalPose, onTelemetry, onTheaterStatus]);
 
   return (
     <section className="earth-shell" aria-label="Cesium Earth flight viewport">

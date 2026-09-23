@@ -42,16 +42,19 @@ const required = [
   "src/shared/rating.ts",
   "src/shared/aircraft.ts",
   "src/shared/aircraft-catalog.json",
+  "src/shared/aircraft-visuals.ts",
   "src/shared/action-modules.ts",
   "src/shared/action-module-catalog.json",
   "src/shared/competition.ts",
   "src/shared/matchmaking.ts",
   "scripts/dev-school.mjs",
+  "scripts/sync-aircraft-assets.mjs",
   "scripts/render-school-gateway.mjs",
   "scripts/verify-render-school-gateway.mjs",
   "scripts/verify-render-cesium-token.mjs",
   "render.yaml",
   "docs/operations/RENDER_SCHOOL_GATEWAY.md",
+  "docs/assets/AIRCRAFT_VISUAL_ASSETS.md",
   "scripts/school-local-backend.mjs",
   "scripts/school-account-backend.mjs",
   "scripts/school-account-store.mjs",
@@ -83,6 +86,14 @@ execFileSync(process.execPath, ["--check", join(root, "scripts/verify-production
 const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 if (pkg.dependencies?.cesium !== "1.145.0") throw new Error("Unexpected Cesium version");
 if (!pkg.scripts?.build || !pkg.scripts?.deploy) throw new Error("Missing build/deploy scripts");
+if (!pkg.scripts?.["sync:aircraft"]?.includes("sync-aircraft-assets.mjs")) {
+  throw new Error("Missing authoritative aircraft asset synchronization script");
+}
+for (const scriptName of ["predev", "dev:school", "prebuild", "build:render"]) {
+  if (!pkg.scripts?.[scriptName]?.includes("sync:aircraft")) {
+    throw new Error(`${scriptName} must synchronize aircraft assets before serving/building`);
+  }
+}
 if (!pkg.scripts?.["dev:school"]?.includes("scripts/dev-school.mjs")) {
   throw new Error("School mode must use the OS-compatible Node local relay launcher");
 }
@@ -101,12 +112,27 @@ if (!pkg.scripts?.["verify:production:c4d"]?.includes("verify-production-rated-p
   throw new Error("Missing C4D production rated-product verification command");
 }
 
+const aircraftCatalog = await readFile(join(root, "src/shared/aircraft-catalog.json"), "utf8");
+if (!aircraftCatalog.includes('"aircraftId": "orbit-a1"') || !aircraftCatalog.includes('"appearanceKey": "bell-x1"')) {
+  throw new Error("orbit-a1 must retain the reviewed Bell X-1 visual identity");
+}
+
+const aircraftVisuals = await readFile(join(root, "src/shared/aircraft-visuals.ts"), "utf8");
+for (const token of ["Bell X-1", "/aircraft/bell-x1.glb", "Smithsonian Institution", 'license: "CC0"']) {
+  if (!aircraftVisuals.includes(token)) throw new Error(`Bell X-1 visual metadata missing: ${token}`);
+}
+
+const earthScene = await readFile(join(root, "src/client/components/EarthScene.tsx"), "utf8");
+for (const token of ["aircraftVisualForSpec", "localAircraftId", "peerAircraftId", "modelOrientationFromFrame", "model: {"]) {
+  if (!earthScene.includes(token)) throw new Error(`EarthScene aircraft model integration missing: ${token}`);
+}
+
 const appShell = await readFile(join(root, "src/client/App.tsx"), "utf8");
 if (!appShell.includes('const devFlight = params.get("devFlight") === "1";')) {
   throw new Error("Raw flight development UI must require explicit ?devFlight=1 opt-in");
 }
-if (!appShell.includes("if (devFlight) return <FlightRuntime />;")) {
-  throw new Error("Explicit devFlight route must render the raw FlightRuntime");
+if (!appShell.includes('if (devFlight) return <FlightRuntime') || !appShell.includes('localAircraftId="orbit-a1"')) {
+  throw new Error("Explicit devFlight route must render FlightRuntime with the reviewed Bell X-1 test aircraft");
 }
 if (!appShell.includes("{staticPreview ? <ProductPreview /> : <ProductLive />}")) {
   throw new Error("Normal application entrypoint must default to ProductLive");

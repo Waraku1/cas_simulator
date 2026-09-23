@@ -6,11 +6,11 @@
   "packageManager": "pnpm@10.32.1",
   "scripts": {
     "sync:cesium": "node scripts/sync-cesium.mjs",
-    "predev": "pnpm sync:cesium",
+    "predev": "pnpm sync:cesium && pnpm sync:aircraft",
     "dev": "vite dev --config vite.client.config.ts",
     "dev:cloudflare": "vite dev",
-    "dev:school": "pnpm sync:cesium && node scripts/dev-school.mjs",
-    "build:render": "pnpm verify:render:cesium && pnpm sync:cesium && tsc -b && vite build --config vite.client.config.ts",
+    "dev:school": "pnpm sync:cesium && pnpm sync:aircraft && node scripts/dev-school.mjs",
+    "build:render": "pnpm verify:render:cesium && pnpm sync:cesium && pnpm sync:aircraft && tsc -b && vite build --config vite.client.config.ts",
     "start:render": "node scripts/render-school-gateway.mjs",
     "verify:render:school": "node scripts/verify-render-school-gateway.mjs",
     "verify:school": "SCHOOL_URL=http://127.0.0.1:5173 node scripts/verify-production-multiplayer.mjs",
@@ -32,14 +32,15 @@
     "verify:c5c:target": "node scripts/verify-c5c-production-target.mjs",
     "verify:c5e": "node scripts/verify-c5e-human-qa.mjs",
     "verify:c5f": "node scripts/verify-c5f-entrypoint.mjs",
-    "prebuild": "pnpm sync:cesium",
+    "prebuild": "pnpm sync:cesium && pnpm sync:aircraft",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "deploy": "pnpm build && wrangler deploy",
     "cf:typegen": "wrangler types",
     "check": "tsc -b",
     "validate:scaffold": "node scripts/verify-release-scaffold.mjs",
-    "verify:render:cesium": "node scripts/verify-render-cesium-token.mjs"
+    "verify:render:cesium": "node scripts/verify-render-cesium-token.mjs",
+    "sync:aircraft": "node scripts/sync-aircraft-assets.mjs"
   },
   "dependencies": {
     "cesium": "1.145.0",

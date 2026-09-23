@@ -6,8 +6,8 @@
     "maximumSpeedMps": 155,
     "pitchAccelerationDegS2": 48,
     "rollAccelerationDegS2": 88,
-    "visualScale": 1.0,
-    "appearanceKey": "orbit-a1",
+    "visualScale": 1,
+    "appearanceKey": "bell-x1",
     "actionModuleId": "vector-link"
   },
   {
