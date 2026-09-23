@@ -99,33 +99,68 @@ ranked1.socket.send(JSON.stringify({ type: "pose", pose }));
 ranked2.socket.send(JSON.stringify({ type: "pose", pose: { ...pose, sequence: 1 } }));
 await new Promise((resolve) => setTimeout(resolve, 120));
 
-ranked1.socket.send(JSON.stringify({ type: "action", clientTimeMs: performance.now() }));
-const accepted = await waitForMessage(
+ranked1.socket.send(JSON.stringify({ type: "action", weaponId: "missile", clientTimeMs: performance.now() }));
+const missileAccepted = await waitForMessage(
   ranked1,
-  (message) => message.type === "action_feedback" && message.code === "accepted",
-  "accepted abstract action",
+  (message) => message.type === "action_feedback"
+    && message.code === "accepted"
+    && message.weaponId === "missile",
+  "accepted missile",
 );
-if (!accepted.accepted) throw new Error("abstract action was not accepted");
+if (!missileAccepted.accepted) throw new Error("missile was not accepted");
 
 const peerSlot = welcome1.slot === 1 ? 2 : 1;
-const hpUpdate = await waitForMessage(
+const missileHpUpdate = await waitForMessage(
   ranked2,
   (message) => message.type === "match_state"
     && message.state.participants.some(
-      (participant) => participant.slot === peerSlot && participant.heartPoints < 100,
+      (participant) => participant.slot === peerSlot && participant.heartPoints === 80,
     ),
-  "HP update",
+  "missile HP update",
 );
-const changedParticipant = hpUpdate.state.participants.find((participant) => participant.slot === peerSlot);
-if (!changedParticipant || changedParticipant.heartPoints >= 100) throw new Error("peer HP did not decrease");
+const afterMissile = missileHpUpdate.state.participants.find((participant) => participant.slot === peerSlot);
+if (!afterMissile || afterMissile.heartPoints !== 80) throw new Error("missile did not apply 20 HP effect");
 
-ranked1.socket.send(JSON.stringify({ type: "action", clientTimeMs: performance.now() }));
-const cooldown = await waitForMessage(
+ranked1.socket.send(JSON.stringify({ type: "action", weaponId: "missile", clientTimeMs: performance.now() }));
+const missileCooldown = await waitForMessage(
   ranked1,
-  (message) => message.type === "action_feedback" && message.code === "cooldown",
-  "cooldown rejection",
+  (message) => message.type === "action_feedback"
+    && message.code === "cooldown"
+    && message.weaponId === "missile",
+  "missile cooldown rejection",
 );
-if (cooldown.accepted) throw new Error("cooldown action was incorrectly accepted");
+if (missileCooldown.accepted) throw new Error("missile cooldown was bypassed");
+
+ranked1.socket.send(JSON.stringify({ type: "action", weaponId: "gun", clientTimeMs: performance.now() }));
+const gunAccepted = await waitForMessage(
+  ranked1,
+  (message) => message.type === "action_feedback"
+    && message.code === "accepted"
+    && message.weaponId === "gun",
+  "accepted gun",
+);
+if (!gunAccepted.accepted) throw new Error("gun was not independently ready");
+
+const gunHpUpdate = await waitForMessage(
+  ranked2,
+  (message) => message.type === "match_state"
+    && message.state.participants.some(
+      (participant) => participant.slot === peerSlot && participant.heartPoints === 76,
+    ),
+  "gun HP update",
+);
+const afterGun = gunHpUpdate.state.participants.find((participant) => participant.slot === peerSlot);
+if (!afterGun || afterGun.heartPoints !== 76) throw new Error("gun did not apply 4 HP effect");
+
+ranked1.socket.send(JSON.stringify({ type: "action", weaponId: "gun", clientTimeMs: performance.now() }));
+const gunCooldown = await waitForMessage(
+  ranked1,
+  (message) => message.type === "action_feedback"
+    && message.code === "cooldown"
+    && message.weaponId === "gun",
+  "gun cooldown rejection",
+);
+if (gunCooldown.accepted) throw new Error("gun cooldown was bypassed");
 
 ranked1.socket.send(JSON.stringify({ type: "leave_match" }));
 const forfeit = await waitForMessage(
@@ -144,7 +179,10 @@ console.log(JSON.stringify({
   gate: "C4C_SCHOOL_COMPETITION_SMOKE",
   matchId: a.matchId,
   startingHp: 100,
-  peerHpAfterAction: changedParticipant.heartPoints,
-  cooldownRejected: true,
+  peerHpAfterMissile: afterMissile.heartPoints,
+  peerHpAfterGun: afterGun.heartPoints,
+  missileCooldownRejected: true,
+  gunCooldownRejected: true,
+  independentWeaponCooldowns: true,
   forfeitWinnerSlot: welcome2.slot,
 }, null, 2));
