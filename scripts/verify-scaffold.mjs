@@ -232,8 +232,8 @@ for (const token of [
   'event.code === "ArrowRight"',
   'event.code === "Space"',
   'WEAPON //',
-  'MISSILE',
-  'GUN',
+  'weaponById',
+  'selectedWeaponId',
   'weaponReadyAtMs',
 ]) {
   if (!productLive.includes(token)) throw new Error(`Product weapon control/HUD missing: ${token}`);
