@@ -351,7 +351,7 @@ function handleRankedMessage(client, payload) {
       peer?.latestPose && peer.latestPoseReceivedAtMs !== null ? { pose: peer.latestPose, receivedAtMs: peer.latestPoseReceivedAtMs } : null,
     );
     updateState(match, resolution.state, nowMs);
-    sendJson(client, { type: "action_feedback", accepted: resolution.accepted, code: resolution.code, nextActionAtMs: resolution.nextActionAtMs });
+    sendJson(client, { type: "action_feedback", accepted: resolution.accepted, code: resolution.code, nextActionAtMs: resolution.nextActionAtMs, weaponId: resolution.weaponId });
     return;
   }
   sendJson(client, { type: "error", code: "invalid_message", message: "Ranked match payload failed validation." });
