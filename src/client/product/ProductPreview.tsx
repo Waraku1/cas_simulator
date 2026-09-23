@@ -9,6 +9,7 @@ import {
   type MatchResultReason,
   type PlayerProfile,
   type ProductScreen,
+  type WeaponId,
 } from "../../shared/product";
 import { FlightRuntime } from "../FlightRuntime";
 import { useMatchmaking } from "./useMatchmaking";
@@ -381,6 +382,22 @@ function MatchPreview({ assignment, onResolved }: Readonly<{ assignment: MatchFo
       <div className="match-action-state" data-weapon={selectedWeaponId}><span>WEAPON // {weaponName}</span><strong>{weaponStatus}</strong><small>{weaponFeedbackLabel(ranked.lastActionFeedback?.code, weaponName)}</small></div>
     </div>
   </div>;
+}
+
+function resultTitle(result: MatchResult) {
+  if (result === "win") return "WIN";
+  if (result === "loss") return "LOSS";
+  if (result === "draw") return "DRAW";
+  return "NO CONTEST";
+}
+
+function resultReasonLabel(reason: MatchResultReason) {
+  if (reason === "heart-points-depleted") return "HEART POINTS REACHED ZERO";
+  if (reason === "regulation-heart-points") return "REGULATION HP RESULT";
+  if (reason === "overtime-heart-points") return "OVERTIME HP RESULT";
+  if (reason === "overtime-draw") return "OVERTIME ENDED LEVEL";
+  if (reason === "forfeit") return "FORFEIT";
+  return "INFRASTRUCTURE FAILURE";
 }
 
 function ResultPreview({
