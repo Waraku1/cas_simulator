@@ -67,7 +67,7 @@ Required environment:
 
 - `CAS_UPSTREAM_ORIGIN`: fixed production Worker HTTPS origin. The Blueprint contains the reviewed production value.
 - `CAS_PUBLIC_ORIGIN`: exact public Render origin. The reviewed Blueprint pins this to `https://cas-simulator-school.onrender.com`.
-- `VITE_CESIUM_ION_TOKEN`: Render secret/environment value available during build. Use a token scoped to required Cesium assets and permit the Render school origin.
+- `VITE_CESIUM_ION_TOKEN`: Render environment value available during build. Use a dedicated public-client Cesium ion token with `assets:read`, Allowed URL `https://cas-simulator-school.onrender.com`, and access to the assets used by the client (World Terrain and default world imagery).
 
 ## Deployment
 
@@ -92,6 +92,8 @@ Repository contract:
 pnpm verify:render:school
 pnpm build:render
 ```
+
+On Render, `build:render` first runs a live Cesium ion token preflight for asset 1 and asset 2 with the exact school origin as the Referer. Invalid tokens, URL restrictions, or missing asset access fail the build before a broken client is deployed. Outside Render the live credential check is skipped; the verifier source itself remains covered by Project CI.
 
 After deployment, perform two-Mac E2E on the school LAN. This is the acceptance test that matters for the new capability.
 
