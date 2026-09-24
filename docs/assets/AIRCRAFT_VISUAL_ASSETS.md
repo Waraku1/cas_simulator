@@ -19,6 +19,8 @@ The repository does not copy an untracked third-party model manually. `scripts/s
 
 Generated aircraft files under `public/aircraft/` are build artifacts and must not be hand-edited.
 
+The sync selects an orientation-compliant official GLB under a **24 MiB** byte budget (1 MiB below Cloudflare Workers' per-asset upload limit), then checks the final normalized GLB size before writing it. If Smithsonian has no suitable candidate, the build fails before a production deploy rather than producing an oversized asset. The selected quality and byte length are recorded in `bell-x1.source.json`.
+
 ### Physical-scale normalization
 
 The Smithsonian digitization GLB does not guarantee that one model coordinate unit equals one meter. CAS therefore derives the default-scene bounding box from POSITION accessor bounds and scene-node transforms during asset synchronization.
