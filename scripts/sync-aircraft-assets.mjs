@@ -13,7 +13,9 @@ const BELL_X1 = Object.freeze({
   sourcePage: "https://3d.si.edu/object/3d/6c69a6bb-55e6-4356-8725-120ff7f8d652",
   api: "https://3d-api.si.edu/api/v1.0/content/file/search",
   rights: "CC0",
-  maxBytes: 48 * 1024 * 1024,
+  // Wrangler rejects individual Worker assets over 25 MiB. Reserve 1 MiB
+  // for source metadata variance and the normalization JSON rewrite.
+  maxBytes: 24 * 1024 * 1024,
   // Smithsonian object metadata: H 3.264 m × L 9.373 m × W 8.534 m.
   // The source GLB is a digitization asset whose coordinate units are not
   // guaranteed to be meters, so normalize the scene to the authoritative
@@ -341,24 +343,23 @@ async function discoverBellX1() {
   const payload = await response.json();
   const rows = Array.isArray(payload?.rows) ? payload.rows : [];
   const candidates = rows.map(candidateFromRow).filter(Boolean);
+  const deployable = candidates.filter((candidate) => (
+    candidate.orientationCompliant && candidate.bytes <= BELL_X1.maxBytes
+  ));
 
-  if (candidates.length === 0) {
-    throw new Error("Smithsonian 3D API returned no Bell X-1 GLB candidates.");
+  if (deployable.length === 0) {
+    throw new Error(
+      `No orientation-compliant Bell X-1 GLB fits the ${Math.round(BELL_X1.maxBytes / 1024 / 1024)} MiB Worker asset budget. Candidate sizes (MiB): ${candidates.map((candidate) => Math.round(candidate.bytes / 1024 / 1024)).join(", ")}.`,
+    );
   }
 
-  candidates.sort((a, b) => {
+  deployable.sort((a, b) => {
     const scoreDelta = candidateScore(a) - candidateScore(b);
     if (scoreDelta !== 0) return scoreDelta;
     return a.bytes - b.bytes;
   });
 
-  const selected = candidates[0];
-  if (selected.bytes > BELL_X1.maxBytes) {
-    throw new Error(
-      `Best Bell X-1 GLB is larger than the ${Math.round(BELL_X1.maxBytes / 1024 / 1024)} MiB web budget.`,
-    );
-  }
-  return selected;
+  return deployable[0];
 }
 
 async function downloadGlb(candidate) {
@@ -386,6 +387,9 @@ const normalized = normalizeGlbToLongestDimension(
   BELL_X1.targetLongestDimensionM,
 );
 const bytes = normalized.buffer;
+if (bytes.byteLength > BELL_X1.maxBytes) {
+  throw new Error("Normalized Bell X-1 GLB exceeds the 24 MiB Worker asset budget.");
+}
 
 await writeFile(join(outputDir, "bell-x1.glb"), bytes);
 await writeFile(
