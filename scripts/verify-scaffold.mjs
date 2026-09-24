@@ -127,6 +127,9 @@ for (const token of [
   "sourceBounds",
   "normalizationScale",
   "normalizedBoundsM",
+  "maxBytes: 24 * 1024 * 1024",
+  "candidate.orientationCompliant && candidate.bytes <= BELL_X1.maxBytes",
+  "Normalized Bell X-1 GLB exceeds the 24 MiB Worker asset budget",
 ]) {
   if (!aircraftSync.includes(token)) throw new Error(`Aircraft physical-scale normalization missing: ${token}`);
 }
