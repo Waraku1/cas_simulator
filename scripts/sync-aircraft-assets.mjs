@@ -344,12 +344,12 @@ async function discoverBellX1() {
   const rows = Array.isArray(payload?.rows) ? payload.rows : [];
   const candidates = rows.map(candidateFromRow).filter(Boolean);
   const deployable = candidates.filter((candidate) => (
-    candidate.orientationCompliant && candidate.bytes <= BELL_X1.maxBytes
+    candidate.orientationCompliant && (candidate.bytes <= BELL_X1.maxBytes || !Number.isFinite(candidate.bytes))
   ));
 
   if (deployable.length === 0) {
     throw new Error(
-      `No orientation-compliant Bell X-1 GLB fits the ${Math.round(BELL_X1.maxBytes / 1024 / 1024)} MiB Worker asset budget. Candidate sizes (MiB): ${candidates.map((candidate) => Math.round(candidate.bytes / 1024 / 1024)).join(", ")}.`,
+      `No potentially deployable orientation-compliant Bell X-1 GLB fits the ${Math.round(BELL_X1.maxBytes / 1024 / 1024)} MiB Worker asset budget. Candidate sizes (MiB): ${candidates.map((candidate) => Math.round(candidate.bytes / 1024 / 1024)).join(", ")}.`,
     );
   }
 
@@ -359,20 +359,32 @@ async function discoverBellX1() {
     return a.bytes - b.bytes;
   });
 
-  return deployable[0];
+  return deployable;
 }
 
 async function downloadGlb(candidate) {
   const response = await fetchWithRetry(candidate.uri);
   const contentLength = Number(response.headers.get("content-length") ?? "0");
   if (Number.isFinite(contentLength) && contentLength > BELL_X1.maxBytes) {
-    throw new Error("Bell X-1 GLB exceeds the web asset budget.");
+    await response.body?.cancel();
+    return null;
   }
 
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.byteLength > BELL_X1.maxBytes) {
-    throw new Error("Bell X-1 GLB exceeds the web asset budget.");
+  if (!response.body) throw new Error("Bell X-1 GLB response has no body.");
+  const reader = response.body.getReader();
+  const chunks = [];
+  let totalBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (totalBytes > BELL_X1.maxBytes) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(Buffer.from(value));
   }
+  const bytes = Buffer.concat(chunks, totalBytes);
   if (bytes.byteLength < 12 || bytes.toString("utf8", 0, 4) !== "glTF") {
     throw new Error("Downloaded Bell X-1 asset is not a valid binary glTF container.");
   }
@@ -380,16 +392,30 @@ async function downloadGlb(candidate) {
 }
 
 await mkdir(outputDir, { recursive: true });
-const candidate = await discoverBellX1();
-const sourceBytes = await downloadGlb(candidate);
-const normalized = normalizeGlbToLongestDimension(
-  sourceBytes,
-  BELL_X1.targetLongestDimensionM,
-);
-const bytes = normalized.buffer;
-if (bytes.byteLength > BELL_X1.maxBytes) {
-  throw new Error("Normalized Bell X-1 GLB exceeds the 24 MiB Worker asset budget.");
+const candidates = await discoverBellX1();
+let chosen = null;
+for (const candidate of candidates) {
+  const sourceBytes = await downloadGlb(candidate);
+  if (!sourceBytes) {
+    console.log(`Bell X-1 candidate skipped (over 24 MiB): ${candidate.quality || "unspecified"}`);
+    continue;
+  }
+  const normalized = normalizeGlbToLongestDimension(
+    sourceBytes,
+    BELL_X1.targetLongestDimensionM,
+  );
+  if (normalized.buffer.byteLength > BELL_X1.maxBytes) {
+    console.log(`Normalized Bell X-1 GLB exceeds the 24 MiB Worker asset budget: ${candidate.quality || "unspecified"}`);
+    continue;
+  }
+  chosen = { candidate, sourceBytes, normalized };
+  break;
 }
+if (!chosen) {
+  throw new Error("No official orientation-compliant Bell X-1 GLB fits the 24 MiB Worker asset budget.");
+}
+const { candidate, sourceBytes, normalized } = chosen;
+const bytes = normalized.buffer;
 
 await writeFile(join(outputDir, "bell-x1.glb"), bytes);
 await writeFile(
