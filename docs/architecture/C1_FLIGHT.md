@@ -62,6 +62,8 @@ Post-release correction: Cesium already converts a standard glTF model's axes wh
 
 Bell X-1 presentation: the official, physically normalized GLB is shared by all three current gameplay profiles and by free flight. Its display multiplier matches the previous game silhouette at the existing chase-camera distance; it does not change flight handling or source-model dimensions. The peer's orange marker is lifted above the same live pose used by the 3D model so it does not cover the aircraft. The marker and model still update from the same interpolated peer pose.
 
+Ranked flight loads the Bell X-1 GLB as two scene models and updates their model matrices in the same frame loop as the local aircraft and interpolated peer pose. The generic body, wings, and nose remain visible only while each model loads or if it fails. A concise notice reports failures instead of leaving an apparently missing aircraft. Free flight retains the Entity model path.
+
 ## Verification evidence
 
 C1.6 final implementation:

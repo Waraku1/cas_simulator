@@ -8,6 +8,7 @@ import {
   Ion,
   Matrix3,
   Matrix4,
+  Model,
   Quaternion,
   Terrain,
   Transforms,
@@ -82,6 +83,7 @@ type EarthSceneProps = Readonly<{
   localSlot: 1 | 2 | null;
   localAircraftId: string | null;
   peerAircraftId: string | null;
+  competitiveModels?: boolean;
   projectiles?: readonly CompetitionProjectileSnapshot[];
 }>;
 
@@ -168,6 +170,10 @@ function orientationFromFrame(frame: FlightFrame) {
   return Quaternion.fromRotationMatrix(bodyRotationFromFrame(frame));
 }
 
+function modelMatrixFromFrame(position: Cartesian3, frame: FlightFrame) {
+  return Matrix4.fromRotationTranslation(bodyRotationFromFrame(frame), position, new Matrix4());
+}
+
 function offsetFrom(position: Cartesian3, direction: Cartesian3, distanceM: number) {
   const offset = Cartesian3.multiplyByScalar(direction, distanceM, new Cartesian3());
   return Cartesian3.add(position, offset, offset);
@@ -227,6 +233,7 @@ export function EarthScene({
   localSlot,
   localAircraftId,
   peerAircraftId,
+  competitiveModels = false,
   projectiles,
 }: EarthSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -239,6 +246,7 @@ export function EarthScene({
   const localSlotRef = useRef(localSlot);
   const [status, setStatus] = useState<"booting" | "ready" | "missing-token" | "error">("booting");
   const [errorMessage, setErrorMessage] = useState("");
+  const [modelIssue, setModelIssue] = useState("");
 
   useEffect(() => {
     remotePoseRef.current = remotePose;
@@ -249,6 +257,7 @@ export function EarthScene({
   }, [localSlot]);
 
   useEffect(() => {
+    setModelIssue("");
     const token = import.meta.env.VITE_CESIUM_ION_TOKEN?.trim();
     if (!token) {
       setStatus("missing-token");
@@ -273,6 +282,10 @@ export function EarthScene({
     let appliedMultiplayerSlot: 1 | 2 | null = null;
     let flightState = createInitialFlightState();
     let renderedRemotePose: AircraftPose | null = null;
+    let localModel: Model | undefined;
+    let remoteModel: Model | undefined;
+    let localModelFailed = false;
+    let remoteModelFailed = false;
     const pressedKeys = new Set<string>();
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -334,8 +347,8 @@ export function EarthScene({
         flightState.altitudeM,
       );
       const initialFrame = computeFlightFrame(initialPosition, flightState);
-      // Cesium applies glTF axis conversion internally; the entity frame is
-      // already the canonical +X nose / +Y left / +Z up aircraft frame.
+      // Cesium applies glTF axis conversion internally; both Entity and
+      // primitive model matrices use the +X nose / +Y left / +Z up body frame.
       const initialOrientation = orientationFromFrame(initialFrame);
       const positionProperty = new ConstantPositionProperty(initialPosition);
       const nosePositionProperty = new ConstantPositionProperty(
@@ -344,8 +357,10 @@ export function EarthScene({
       const orientationProperty = new ConstantProperty(initialOrientation);
       const aircraftMaterial = Color.fromCssColorString("#d9fbff").withAlpha(0.92);
       const aircraftAccent = Color.fromCssColorString("#64e8ff").withAlpha(0.88);
+      const localFallback: Entity[] = [];
+      let latestLocalModelMatrix = modelMatrixFromFrame(initialPosition, initialFrame);
 
-      if (localVisual) {
+      if (localVisual && !competitiveModels) {
         viewer.entities.add({
           name: `CAS local aircraft // ${localVisual.realAircraftName}`,
           position: positionProperty,
@@ -360,7 +375,7 @@ export function EarthScene({
           },
         });
       } else {
-        viewer.entities.add({
+        localFallback.push(viewer.entities.add({
           name: "CAS local aircraft fallback",
           position: positionProperty,
           orientation: orientationProperty,
@@ -370,8 +385,8 @@ export function EarthScene({
             outline: true,
             outlineColor: aircraftAccent,
           },
-        });
-        viewer.entities.add({
+        }));
+        localFallback.push(viewer.entities.add({
           name: "CAS local wings fallback",
           position: positionProperty,
           orientation: orientationProperty,
@@ -379,8 +394,8 @@ export function EarthScene({
             dimensions: new Cartesian3(4.2, 22, 0.7),
             material: aircraftAccent.withAlpha(0.72),
           },
-        });
-        viewer.entities.add({
+        }));
+        localFallback.push(viewer.entities.add({
           name: "CAS local nose fallback",
           position: nosePositionProperty,
           orientation: orientationProperty,
@@ -390,7 +405,7 @@ export function EarthScene({
             outline: true,
             outlineColor: Color.WHITE.withAlpha(0.72),
           },
-        });
+        }));
       }
 
       const remotePositionProperty = new ConstantPositionProperty(initialPosition);
@@ -403,8 +418,10 @@ export function EarthScene({
       const remoteMaterial = Color.fromCssColorString("#ffd48a").withAlpha(0.9);
       const remoteAccent = Color.fromCssColorString("#ff9f43").withAlpha(0.9);
       const remoteEntities: Entity[] = [];
+      const remoteFallback: Entity[] = [];
+      let latestRemoteModelMatrix = modelMatrixFromFrame(initialPosition, initialFrame);
 
-      if (peerVisual) {
+      if (peerVisual && !competitiveModels) {
         remoteEntities.push(viewer.entities.add({
           name: `C3 peer aircraft // ${peerVisual.realAircraftName}`,
           show: false,
@@ -420,7 +437,7 @@ export function EarthScene({
           },
         }));
       } else {
-        remoteEntities.push(
+        remoteFallback.push(
           viewer.entities.add({
             name: "C3 peer aircraft fallback",
             show: false,
@@ -456,6 +473,56 @@ export function EarthScene({
             },
           }),
         );
+        remoteEntities.push(...remoteFallback);
+      }
+
+      // In a ranked flight, manage the GLB explicitly. Entity ModelGraphics
+      // reports asynchronous model failures only in the console; a primitive
+      // lets the match retain a visible fallback until the model is ready.
+      const loadCompetitiveModel = async (local: boolean) => {
+        const visual = local ? localVisual : peerVisual;
+        if (!visual || !viewer) return;
+        try {
+          const model = await Model.fromGltfAsync({
+            url: visual.modelUri,
+            scene: viewer.scene,
+            modelMatrix: local ? latestLocalModelMatrix : latestRemoteModelMatrix,
+            scale: visual.scale * ((local ? localAircraft : peerAircraft)?.visualScale ?? 1),
+            minimumPixelSize: visual.minimumPixelSize,
+            maximumScale: visual.maximumScale,
+            silhouetteColor: local ? aircraftAccent : remoteAccent,
+            silhouetteSize: local ? 1.5 : 2.5,
+          });
+          if (cancelled || viewer.isDestroyed()) {
+            model.destroy();
+            return;
+          }
+          model.errorEvent.addEventListener((error: Error) => {
+            if (error.name === "TextureError" || cancelled) return;
+            model.show = false;
+            if (local) {
+              localModelFailed = true;
+              for (const entity of localFallback) entity.show = true;
+            } else {
+              remoteModelFailed = true;
+              for (const entity of remoteFallback) entity.show = remotePoseRef.current !== null;
+            }
+            setModelIssue("Bell X-1 3D model could not be displayed; showing the backup shape.");
+          });
+          model.modelMatrix = local ? latestLocalModelMatrix : latestRemoteModelMatrix;
+          model.show = local || remotePoseRef.current !== null;
+          viewer.scene.primitives.add(model);
+          if (local) localModel = model;
+          else remoteModel = model;
+        } catch {
+          if (!cancelled) {
+            setModelIssue("Bell X-1 3D model could not be loaded; showing the backup shape.");
+          }
+        }
+      };
+      if (competitiveModels) {
+        void loadCompetitiveModel(true);
+        void loadCompetitiveModel(false);
       }
 
       remoteEntities.push(viewer.entities.add({
@@ -513,6 +580,10 @@ export function EarthScene({
       const updateRemoteAircraft = (now: number, frameDeltaMs = SIMULATION_FRAME_INTERVAL_MS) => {
         const buffer = remotePoseRef.current;
         for (const entity of remoteEntities) entity.show = buffer !== null;
+        for (const entity of remoteFallback) {
+          entity.show = buffer !== null && (!remoteModel?.ready || remoteModelFailed);
+        }
+        if (remoteModel) remoteModel.show = buffer !== null && !remoteModelFailed;
         if (!buffer) {
           renderedRemotePose = null;
           return;
@@ -546,6 +617,10 @@ export function EarthScene({
           renderedRemotePose.altitudeM,
         );
         const frame = computeNetworkFlightFrame(position, renderedRemotePose.orientation);
+        if (competitiveModels) {
+          latestRemoteModelMatrix = modelMatrixFromFrame(position, frame);
+          if (remoteModel && !remoteModelFailed) remoteModel.modelMatrix = latestRemoteModelMatrix;
+        }
         remotePositionProperty.setValue(position);
         remoteNosePositionProperty.setValue(offsetFrom(position, frame.forward, NOSE_OFFSET_M));
         remoteMarkerPositionProperty.setValue(offsetFrom(position, frame.up, REMOTE_MARKER_LIFT_M));
@@ -611,6 +686,13 @@ export function EarthScene({
           flightState.altitudeM,
         );
         const flightFrame = computeFlightFrame(position, flightState);
+        if (competitiveModels) {
+          latestLocalModelMatrix = modelMatrixFromFrame(position, flightFrame);
+          if (localModel && !localModelFailed) {
+            localModel.modelMatrix = latestLocalModelMatrix;
+            for (const entity of localFallback) entity.show = !localModel.ready;
+          }
+        }
         positionProperty.setValue(position);
         nosePositionProperty.setValue(offsetFrom(position, flightFrame.forward, NOSE_OFFSET_M));
         orientationProperty.setValue(orientationFromFrame(flightFrame));
@@ -654,7 +736,7 @@ export function EarthScene({
       projectileEntitiesRef.current.clear();
       if (viewer && !viewer.isDestroyed()) viewer.destroy();
     };
-  }, [localAircraftId, peerAircraftId, onLocalPose, onTelemetry, onTheaterStatus]);
+  }, [competitiveModels, localAircraftId, peerAircraftId, onLocalPose, onTelemetry, onTheaterStatus]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -707,6 +789,7 @@ export function EarthScene({
           <p>{errorMessage}</p>
         </div>
       )}
+      {status === "ready" && modelIssue && <div className="earth-shell__model-issue" role="status">{modelIssue}</div>}
     </section>
   );
 }
