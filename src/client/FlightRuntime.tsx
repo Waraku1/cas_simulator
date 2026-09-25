@@ -103,6 +103,7 @@ export function FlightRuntime({
         localSlot={stagingSlot ?? multiplayer.slot}
         localAircraftId={localAircraftId}
         peerAircraftId={peerAircraftId}
+        competitiveModels={externalNetworkController !== null}
         projectiles={projectiles}
       />
       <FlightHud telemetry={telemetry} />

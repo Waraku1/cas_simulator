@@ -173,6 +173,20 @@ if (!multiplayerContract.includes("SNAPSHOT_INTERVAL_MS = 100")) {
 }
 
 const earthScene = await readFile(join(root, "src/client/components/EarthScene.tsx"), "utf8");
+const flightRuntime = await readFile(join(root, "src/client/FlightRuntime.tsx"), "utf8");
+if (!flightRuntime.includes("competitiveModels={externalNetworkController !== null}")) {
+  throw new Error("Ranked flight must enable explicit 3D model management");
+}
+for (const token of [
+  "Model.fromGltfAsync",
+  "viewer.scene.primitives.add(model)",
+  "localModel.modelMatrix = latestLocalModelMatrix",
+  "remoteModel.modelMatrix = latestRemoteModelMatrix",
+  "localFallback) entity.show = !localModel.ready",
+  "remoteModel?.ready || remoteModelFailed",
+]) {
+  if (!earthScene.includes(token)) throw new Error(`Ranked Bell X-1 rendering contract missing: ${token}`);
+}
 for (const token of [
   "aircraftVisualForSpec",
   "localAircraftId",

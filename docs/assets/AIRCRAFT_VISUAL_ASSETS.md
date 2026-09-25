@@ -46,4 +46,6 @@ The browser loads the synchronized model from the same application origin:
 
 `/aircraft/bell-x1.glb`
 
+In ranked flight, each participant creates a Cesium scene model from this asset. Its matrix is updated alongside the aircraft pose each frame; a simple temporary shape remains until the GLB is ready and reappears if the model cannot load. The match displays a concise notice when the asset fails so the missing model can be distinguished from a network pose issue.
+
 This avoids a runtime dependency on Smithsonian network access and keeps the Render school path compatible with managed school networks.

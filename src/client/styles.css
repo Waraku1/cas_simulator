@@ -39,6 +39,20 @@ body { background: #02070a; }
 .earth-shell__viewport { position: absolute; inset: 0; }
 .earth-shell { z-index: 1; }
 .earth-shell__viewport { background: #041014; }
+.earth-shell__model-issue {
+  position: absolute;
+  z-index: 12;
+  bottom: 88px;
+  left: 22px;
+  max-width: min(360px, calc(100vw - 44px));
+  padding: 8px 11px;
+  border: 1px solid rgba(255, 191, 126, 0.6);
+  border-radius: 7px;
+  background: rgba(24, 12, 6, 0.85);
+  color: #fff0db;
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  pointer-events: none;
+}
 
 .flight-hud {
   position: absolute;
