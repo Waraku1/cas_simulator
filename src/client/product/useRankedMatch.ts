@@ -7,6 +7,7 @@ import type { MatchFoundAssignment } from "../../shared/matchmaking";
 import {
   parseServerRoomMessage,
   type AircraftPose,
+  type GameView,
   type PoseSnapshot,
 } from "../../shared/multiplayer";
 import { MATCH_RULES, type WeaponId } from "../../shared/product";
@@ -35,9 +36,10 @@ export type RankedMatchController = Readonly<{
   remotePose: RemotePoseBuffer | null;
   errorMessage: string;
   matchState: CompetitionStateSnapshot | null;
+  incomingLockAlert: boolean;
   serverTimeOffsetMs: number;
   lastActionFeedback: RankedActionFeedback | null;
-  publishLocalPose: (pose: AircraftPose) => void;
+  publishLocalPose: (pose: AircraftPose & { view?: GameView }) => void;
   fireWeapon: (weaponId: WeaponId) => boolean;
   leaveMatch: () => void;
 }>;
@@ -64,6 +66,7 @@ export function useRankedMatch(assignment: MatchFoundAssignment): RankedMatchCon
   const [remotePose, setRemotePose] = useState<RemotePoseBuffer | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [matchState, setMatchState] = useState<CompetitionStateSnapshot | null>(null);
+  const [incomingLockAlert, setIncomingLockAlert] = useState(false);
   const [serverTimeOffsetMs, setServerTimeOffsetMs] = useState(0);
   const [lastActionFeedback, setLastActionFeedback] = useState<RankedActionFeedback | null>(null);
 
@@ -117,6 +120,7 @@ export function useRankedMatch(assignment: MatchFoundAssignment): RankedMatchCon
         setPeerConnected(message.peerConnected);
         setStatus(message.peerConnected ? "connected" : "waiting");
         if (!message.peerConnected) {
+          setIncomingLockAlert(false);
           latestPeerPoseRef.current = null;
           setRemotePose(null);
         }
@@ -138,6 +142,12 @@ export function useRankedMatch(assignment: MatchFoundAssignment): RankedMatchCon
         matchStateRef.current = message.state;
         setMatchState(message.state);
         setServerTimeOffsetMs(message.state.serverTimeMs - Date.now());
+        if (message.state.result) setIncomingLockAlert(false);
+        return;
+      }
+
+      if (message.type === "lock_alert") {
+        setIncomingLockAlert(message.locked);
         return;
       }
 
@@ -163,6 +173,7 @@ export function useRankedMatch(assignment: MatchFoundAssignment): RankedMatchCon
       if (socketRef.current !== socket) return;
       socketRef.current = null;
       setPeerConnected(false);
+      setIncomingLockAlert(false);
       setPlayerId(null);
       setSlot(null);
 
@@ -197,7 +208,7 @@ export function useRankedMatch(assignment: MatchFoundAssignment): RankedMatchCon
     connectRef.current = connect;
   }, [connect]);
 
-  const publishLocalPose = useCallback((pose: AircraftPose) => {
+  const publishLocalPose = useCallback((pose: AircraftPose & { view?: GameView }) => {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     const snapshot: PoseSnapshot = {
@@ -254,6 +265,7 @@ export function useRankedMatch(assignment: MatchFoundAssignment): RankedMatchCon
     setRemotePose(null);
     setErrorMessage("");
     setMatchState(null);
+    setIncomingLockAlert(false);
     setServerTimeOffsetMs(0);
     setLastActionFeedback(null);
 
@@ -282,6 +294,7 @@ export function useRankedMatch(assignment: MatchFoundAssignment): RankedMatchCon
     remotePose,
     errorMessage,
     matchState,
+    incomingLockAlert,
     serverTimeOffsetMs,
     lastActionFeedback,
     publishLocalPose,

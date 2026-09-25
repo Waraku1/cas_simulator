@@ -4,6 +4,8 @@ import {
   type ClientCompetitionMessage,
   type ServerCompetitionMessage,
 } from "./competition";
+import { isWeaponId } from "./weapons";
+import type { WeaponId } from "./product";
 
 export const ROOM_CODE_LENGTH = 6;
 export const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -26,9 +28,16 @@ export type AircraftPose = Readonly<{
   orientation: NetworkQuaternion;
 }>;
 
+export type GameView = Readonly<{
+  yawRad: number;
+  pitchRad: number;
+  weaponId: WeaponId;
+}>;
+
 export type PoseSnapshot = AircraftPose & Readonly<{
   sequence: number;
   clientTimeMs: number;
+  view?: GameView;
 }>;
 
 export type ClientRoomMessage =
@@ -127,7 +136,15 @@ export function isPoseSnapshot(value: unknown): value is PoseSnapshot {
     && finite(snapshotRecord.sequence)
     && snapshotRecord.sequence >= 0
     && finite(snapshotRecord.clientTimeMs)
-    && snapshotRecord.clientTimeMs >= 0;
+    && snapshotRecord.clientTimeMs >= 0
+    && (snapshotRecord.view === undefined || (
+      record(snapshotRecord.view)
+      && finite(snapshotRecord.view.yawRad)
+      && Math.abs(snapshotRecord.view.yawRad) <= Math.PI
+      && finite(snapshotRecord.view.pitchRad)
+      && Math.abs(snapshotRecord.view.pitchRad) <= 1.1
+      && isWeaponId(snapshotRecord.view.weaponId)
+    ));
 }
 
 export function parseClientRoomMessage(text: string): ClientRoomMessage | null {

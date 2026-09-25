@@ -97,6 +97,11 @@ export type ServerCompetitionMessage =
       nextActionAtMs: number;
       weaponId?: WeaponId;
       locked?: boolean;
+    }>
+  | Readonly<{
+      type: "lock_alert";
+      sourceSlot: CompetitionSlot;
+      locked: boolean;
     }>;
 
 export type CompetitionPosition = Readonly<{
@@ -201,6 +206,11 @@ export function parseServerCompetitionMessage(text: string): ServerCompetitionMe
   try {
     const value: unknown = JSON.parse(text);
     if (!record(value) || typeof value.type !== "string") return null;
+
+    if (value.type === "lock_alert") {
+      if ((value.sourceSlot !== 1 && value.sourceSlot !== 2) || typeof value.locked !== "boolean") return null;
+      return value as ServerCompetitionMessage;
+    }
 
     if (value.type === "action_feedback") {
       if (

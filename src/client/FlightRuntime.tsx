@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { CompetitionProjectileSnapshot } from "../shared/competition";
-import type { AircraftPose } from "../shared/multiplayer";
+import type { AircraftPose, GameView } from "../shared/multiplayer";
+import type { WeaponId } from "../shared/product";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { EarthScene } from "./components/EarthScene";
 import { FlightHud } from "./components/FlightHud";
@@ -42,7 +43,9 @@ type FlightRuntimeProps = Readonly<{
   localAircraftId?: string | null;
   peerAircraftId?: string | null;
   projectiles?: readonly CompetitionProjectileSnapshot[];
-  onLocalPose?: (pose: AircraftPose) => void;
+  selectedWeaponId?: WeaponId | null;
+  peerLocked?: boolean;
+  onLocalPose?: (pose: AircraftPose & { view?: GameView }) => void;
   onMultiplayerState?: (state: FlightRuntimeMultiplayerState) => void;
 }>;
 
@@ -62,6 +65,8 @@ export function FlightRuntime({
   localAircraftId = null,
   peerAircraftId = null,
   projectiles,
+  selectedWeaponId = null,
+  peerLocked = false,
   onLocalPose,
   onMultiplayerState,
 }: FlightRuntimeProps) {
@@ -70,7 +75,7 @@ export function FlightRuntime({
   const manualMultiplayer = useMultiplayer(externalNetworkController ? null : autoRoomCode);
   const multiplayer = externalNetworkController ?? manualMultiplayer;
   const publishLocalPose = multiplayer.publishLocalPose;
-  const handleLocalPose = useCallback((pose: AircraftPose) => {
+  const handleLocalPose = useCallback((pose: AircraftPose & { view?: GameView }) => {
     publishLocalPose(pose);
     onLocalPose?.(pose);
   }, [publishLocalPose, onLocalPose]);
@@ -105,6 +110,8 @@ export function FlightRuntime({
         peerAircraftId={peerAircraftId}
         competitiveModels={externalNetworkController !== null}
         projectiles={projectiles}
+        selectedWeaponId={selectedWeaponId}
+        peerLocked={peerLocked}
       />
       <FlightHud telemetry={telemetry} />
       <TheaterStatusPanel status={theaterStatus} />

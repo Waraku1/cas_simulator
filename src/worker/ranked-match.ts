@@ -1,4 +1,5 @@
 import { isAircraftId } from "../shared/aircraft";
+import { ARCADE_LOCK, gameCaptureAvailable } from "../shared/arcade-projectiles.mjs";
 import type { CompetitionRoomInit, CompetitionSlot } from "../shared/competition";
 import {
   isValidRoomCode,
@@ -21,6 +22,7 @@ import {
   type StoredCompetitionRuntime,
 } from "./competition-runtime";
 import { D1RatingRepository } from "./rating/repository";
+import { weaponById } from "../shared/weapons";
 
 interface DurableObjectStorage {
   get<T>(key: string): Promise<T | undefined>;
@@ -50,6 +52,9 @@ type RankedSocketAttachment = Readonly<{
   joinToken: string;
   latestPose: PoseSnapshot | null;
   latestPoseReceivedAtMs: number | null;
+  captureStartedAtMs?: number | null;
+  captureLastAtMs?: number | null;
+  lockNotified?: boolean;
 }>;
 
 type RankedMatchEnv = Readonly<{
@@ -272,6 +277,62 @@ export class RankedMatch {
     };
   }
 
+  private updateCaptureForSlot(slot: CompetitionSlot, state: StoredCompetitionRuntime, nowMs: number) {
+    const socket = this.socketForSlot(slot);
+    if (!socket) return;
+    const attachment = attachmentOf(socket);
+    if (!attachment) return;
+    const own = this.poseForSlot(slot);
+    const otherSlot = slot === 1 ? 2 : 1;
+    const peer = this.poseForSlot(otherSlot);
+    const range = weaponById("missile")?.activationRadiusM ?? 0;
+    const capturing = (state.phase === "active" || state.phase === "overtime")
+      && state.participants.every((participant) => participant.connected)
+      && own !== null && peer !== null
+      && own.pose.view?.weaponId === "missile"
+      && nowMs - own.receivedAtMs <= ARCADE_LOCK.sampleGapMs
+      && nowMs - peer.receivedAtMs <= ARCADE_LOCK.sampleGapMs
+      && gameCaptureAvailable(own.pose, peer.pose, range);
+    const continuous = capturing && attachment.captureLastAtMs !== null
+      && attachment.captureLastAtMs !== undefined
+      && nowMs - attachment.captureLastAtMs <= ARCADE_LOCK.sampleGapMs;
+    const startedAtMs = capturing
+      ? continuous ? attachment.captureStartedAtMs ?? nowMs : nowMs
+      : null;
+    const locked = startedAtMs !== null && nowMs - startedAtMs >= ARCADE_LOCK.holdMs;
+    socket.serializeAttachment({
+      ...attachment,
+      captureStartedAtMs: startedAtMs,
+      captureLastAtMs: capturing ? nowMs : null,
+      lockNotified: locked,
+    } satisfies RankedSocketAttachment);
+    if (Boolean(attachment.lockNotified) !== locked) {
+      const peerSocket = this.socketForSlot(otherSlot);
+      if (peerSocket) this.send(peerSocket, { type: "lock_alert", sourceSlot: slot, locked });
+    }
+  }
+
+  private lockForSlot(slot: CompetitionSlot, nowMs: number) {
+    const own = this.poseForSlot(slot);
+    // Older pose clients retain the existing instantaneous arcade rule.
+    if (!own?.pose.view) return undefined;
+    const peer = this.poseForSlot(slot === 1 ? 2 : 1);
+    const attachment = this.socketForSlot(slot);
+    const capture = attachment ? attachmentOf(attachment) : null;
+    const range = weaponById("missile")?.activationRadiusM ?? 0;
+    return Boolean(
+      peer && capture?.captureStartedAtMs !== null
+      && capture?.captureStartedAtMs !== undefined
+      && capture.captureLastAtMs !== null && capture.captureLastAtMs !== undefined
+      && nowMs - own.receivedAtMs <= ARCADE_LOCK.sampleGapMs
+      && nowMs - peer.receivedAtMs <= ARCADE_LOCK.sampleGapMs
+      && nowMs - capture.captureLastAtMs <= ARCADE_LOCK.sampleGapMs
+      && nowMs - capture.captureStartedAtMs >= ARCADE_LOCK.holdMs
+      && own.pose.view.weaponId === "missile"
+      && gameCaptureAvailable(own.pose, peer.pose, range),
+    );
+  }
+
   private async persist(state: StoredCompetitionRuntime, nowMs: number, broadcast = true) {
     const moved = advanceCompetitionProjectiles(state, nowMs, (slot) => this.poseForSlot(slot));
     const advanced = advanceCompetitionRuntime(moved, nowMs);
@@ -344,6 +405,9 @@ export class RankedMatch {
       joinToken,
       latestPose: null,
       latestPoseReceivedAtMs: null,
+      captureStartedAtMs: null,
+      captureLastAtMs: null,
+      lockNotified: false,
     };
     server.serializeAttachment(attachment);
     this.ctx.acceptWebSocket(server);
@@ -411,6 +475,8 @@ export class RankedMatch {
         latestPose: parsed.pose,
         latestPoseReceivedAtMs: nowMs,
       } satisfies RankedSocketAttachment);
+      this.updateCaptureForSlot(sender.slot, state, nowMs);
+      this.updateCaptureForSlot(sender.slot === 1 ? 2 : 1, state, nowMs);
       const relay: ServerRoomMessage = {
         type: "peer_pose",
         playerId: sender.playerId,
@@ -436,6 +502,7 @@ export class RankedMatch {
       this.poseForSlot(sender.slot),
       this.poseForSlot(sender.slot === 1 ? 2 : 1),
       parsed.weaponId ?? "missile",
+      this.lockForSlot(sender.slot, nowMs),
     );
     state = await this.persist(resolution.state, nowMs);
     this.send(socket, {
@@ -458,6 +525,7 @@ export class RankedMatch {
     const state = await this.loadState();
     if (!state || state.result) return;
     const nowMs = Date.now();
+    this.updateCaptureForSlot(attachment.slot === 1 ? 2 : 1, state, nowMs);
     await this.persist(markCompetitionDisconnected(state, attachment.slot, nowMs), nowMs);
   }
 
