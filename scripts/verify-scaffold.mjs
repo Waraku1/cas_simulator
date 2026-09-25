@@ -169,10 +169,10 @@ for (const token of [
   "aircraftVisualForSpec",
   "localAircraftId",
   "peerAircraftId",
-  "modelOrientationFromFrame",
+  "orientationFromFrame(frame)",
   "model: {",
-  "stabilizedCameraUp",
-  "CAMERA_ROLL_FOLLOW = 0.2",
+  "CAMERA_UP_M = 16",
+  "integrateFlightElapsed",
   "REMOTE_EXTRAPOLATION_LIMIT_MS = 180",
   "REMOTE_SMOOTHING_TIME_CONSTANT_MS = 65",
   "predictRemotePose",
@@ -181,6 +181,9 @@ for (const token of [
   "silhouetteSize: 2.5",
 ]) {
   if (!earthScene.includes(token)) throw new Error(`EarthScene aircraft/network presentation contract missing: ${token}`);
+}
+if (earthScene.includes("GLTF_TO_CAS_BODY") || earthScene.includes("modelOrientationFromFrame")) {
+  throw new Error("Cesium model axes must not receive a second glTF-to-body rotation");
 }
 
 const appShell = await readFile(join(root, "src/client/App.tsx"), "utf8");
