@@ -48,6 +48,8 @@ const required = [
   "src/shared/action-modules.ts",
   "src/shared/action-module-catalog.json",
   "src/shared/competition.ts",
+  "src/shared/arcade-projectiles.mjs",
+  "src/shared/arcade-projectiles.d.mts",
   "src/shared/matchmaking.ts",
   "scripts/dev-school.mjs",
   "scripts/sync-aircraft-assets.mjs",
@@ -69,6 +71,7 @@ const required = [
   "scripts/verify-school-accounts.mjs",
   "scripts/verify-school-rated-product.mjs",
   "scripts/verify-c4c-runtime.mjs",
+  "scripts/verify-arcade-projectiles.mjs",
   "docs/architecture/C0_FOUNDATION.md",
   "docs/architecture/C1_FLIGHT.md",
   "docs/architecture/C2_WORLD_THEATER.md",
@@ -306,7 +309,8 @@ for (const token of [
   "weaponReadyAtMs",
   "requestedWeaponId",
   "weapon.activationRadiusM",
-  "weapon.heartPointEffect",
+  "advanceCompetitionProjectiles",
+  "weaponById(projectile.weaponId)?.heartPointEffect",
   "weapon.cooldownMs",
   'return reject("invalid_weapon")',
 ]) {
@@ -317,7 +321,7 @@ const schoolRuntime = await readFile(join(root, "scripts/school-ranked-runtime.m
 if (!schoolRuntime.includes("disconnectDeadlineMs: init.activeAtMs + DISCONNECT_GRACE_MS")) {
   throw new Error("C4D school runtime must mirror the production initial connection grace");
 }
-for (const token of ["weaponReadyAtMs", "requestedWeaponId", "weapon.activationRadiusM", "weapon.heartPointEffect"]) {
+for (const token of ["weaponReadyAtMs", "requestedWeaponId", "weapon.activationRadiusM", "advanceSchoolRankedProjectiles", "weaponById.get(projectile.weaponId)?.heartPointEffect"]) {
   if (!schoolRuntime.includes(token)) throw new Error(`School weapon authority missing: ${token}`);
 }
 
