@@ -1,10 +1,12 @@
 import {
+  advanceSchoolRankedProjectiles,
   advanceSchoolRankedRuntime,
   createSchoolRankedRuntime,
   markSchoolRankedConnected,
   markSchoolRankedDisconnected,
   resolveSchoolRankedAction,
 } from "./school-ranked-runtime.mjs";
+import { gamePointToPosition } from "../src/shared/arcade-projectiles.mjs";
 
 function baseState(activeAtMs = 10_000) {
   return createSchoolRankedRuntime({
@@ -32,17 +34,23 @@ const poseSample = {
   },
   receivedAtMs: 10_001,
 };
+const targetSample = {
+  pose: { ...poseSample.pose, ...gamePointToPosition(poseSample.pose, [80, 0, 0]) },
+  receivedAtMs: 10_001,
+};
+const targetAt = (nowMs) => ({ ...targetSample, receivedAtMs: nowMs });
 let weaponState = state;
 const missile = resolveSchoolRankedAction(
   weaponState,
   1,
   10_001,
   poseSample,
-  poseSample,
+  targetSample,
   "missile",
 );
-if (!missile.accepted || missile.weaponId !== "missile" || missile.state.participants[1].heartPoints !== 80) {
-  throw new Error("MISSILE contract failed");
+if (!missile.accepted || !missile.locked || missile.state.projectiles?.length !== 1
+  || missile.state.participants[1].heartPoints !== 100) {
+  throw new Error("MISSILE must launch with lock and without immediate HP change");
 }
 weaponState = missile.state;
 const missileCooldown = resolveSchoolRankedAction(
@@ -50,33 +58,53 @@ const missileCooldown = resolveSchoolRankedAction(
   1,
   10_002,
   { ...poseSample, receivedAtMs: 10_002 },
-  { ...poseSample, receivedAtMs: 10_002 },
+  targetAt(10_002),
   "missile",
 );
 if (missileCooldown.accepted || missileCooldown.code !== "cooldown") {
   throw new Error("MISSILE cooldown was not enforced");
 }
+weaponState = advanceSchoolRankedProjectiles(weaponState, 10_260, (slot) =>
+  slot === 2 ? targetAt(10_260) : { ...poseSample, receivedAtMs: 10_260 });
+if (weaponState.participants[1].heartPoints !== 80 || weaponState.projectiles.length !== 0) {
+  throw new Error("MISSILE must change HP on contact only");
+}
 const gun = resolveSchoolRankedAction(
   weaponState,
   1,
-  10_002,
-  { ...poseSample, receivedAtMs: 10_002 },
-  { ...poseSample, receivedAtMs: 10_002 },
+  10_262,
+  { ...poseSample, receivedAtMs: 10_262 },
+  targetAt(10_262),
   "gun",
 );
-if (!gun.accepted || gun.weaponId !== "gun" || gun.state.participants[1].heartPoints !== 76) {
+if (!gun.accepted || gun.locked || gun.state.participants[1].heartPoints !== 80) {
   throw new Error("GUN independent cooldown/effect contract failed");
 }
 const gunCooldown = resolveSchoolRankedAction(
   gun.state,
   1,
-  10_003,
-  { ...poseSample, receivedAtMs: 10_003 },
-  { ...poseSample, receivedAtMs: 10_003 },
+  10_263,
+  { ...poseSample, receivedAtMs: 10_263 },
+  targetAt(10_263),
   "gun",
 );
 if (gunCooldown.accepted || gunCooldown.code !== "cooldown") {
   throw new Error("GUN cooldown was not enforced");
+}
+weaponState = advanceSchoolRankedProjectiles(gun.state, 10_460, (slot) =>
+  slot === 2 ? targetAt(10_460) : { ...poseSample, receivedAtMs: 10_460 });
+if (weaponState.participants[1].heartPoints !== 76) throw new Error("GUN contact did not apply HP effect");
+
+const miss = resolveSchoolRankedAction(state, 1, 10_010,
+  { ...poseSample, receivedAtMs: 10_010 },
+  { pose: { ...poseSample.pose, ...gamePointToPosition(poseSample.pose, [0, 90, 0]) }, receivedAtMs: 10_010 },
+  "gun");
+if (!miss.accepted) throw new Error("Off-axis GUN launch unexpectedly rejected");
+const afterMiss = advanceSchoolRankedProjectiles(miss.state, 10_600, (slot) => slot === 2
+  ? { pose: { ...poseSample.pose, ...gamePointToPosition(poseSample.pose, [0, 90, 0]) }, receivedAtMs: 10_600 }
+  : { ...poseSample, receivedAtMs: 10_600 });
+if (afterMiss.participants[1].heartPoints !== 100 || afterMiss.projectiles.length !== 0) {
+  throw new Error("Off-axis GUN projectile must miss and expire");
 }
 
 const regulationEnd = state.regulationEndsAtMs;
