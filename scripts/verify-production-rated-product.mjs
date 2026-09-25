@@ -391,13 +391,17 @@ const smokePose = {
   altitudeM: 2_000,
   orientation: { w: 1, x: 0, y: 0, z: 0 },
 };
+const smokeTargetPose = {
+  ...smokePose,
+  longitudeDeg: smokePose.longitudeDeg + 80 / (111_195 * Math.cos(smokePose.latitudeDeg * Math.PI / 180)),
+};
 rankedA.send({
   type: "pose",
   pose: { ...smokePose, sequence: 0, clientTimeMs: performance.now() },
 });
 rankedB.send({
   type: "pose",
-  pose: { ...smokePose, sequence: 0, clientTimeMs: performance.now() },
+  pose: { ...smokeTargetPose, sequence: 0, clientTimeMs: performance.now() },
 });
 await new Promise((resolve) => setTimeout(resolve, 150));
 
@@ -410,8 +414,16 @@ const missileAccepted = await rankedA.waitFor(
   4_000,
 );
 assert(missileAccepted.accepted === true, "MISSILE request was not accepted");
+assert(missileAccepted.locked === true, "MISSILE did not lock on the aimed game target");
 
 const targetSlot = welcomeB.slot;
+const inFlightState = await rankedB.waitFor(
+  (message) => message.type === "match_state"
+    && message.state?.projectiles?.some((projectile) => projectile.weaponId === "missile"),
+  "MISSILE in flight",
+);
+assert(inFlightState.state.participants.find((participant) => participant.slot === targetSlot)?.heartPoints === 100,
+  "HP changed before game projectile contact");
 const afterMissileState = await rankedB.waitFor(
   (message) => message.type === "match_state"
     && message.state?.participants?.some(

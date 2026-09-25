@@ -17,6 +17,7 @@ import "cesium/Build/Cesium/Widgets/widgets.css";
 import { useEffect, useRef, useState } from "react";
 import { aircraftById } from "../../shared/aircraft";
 import { aircraftVisualForSpec } from "../../shared/aircraft-visuals";
+import type { CompetitionProjectileSnapshot } from "../../shared/competition";
 import { C2_RESOURCE_BUDGET } from "../../shared/config";
 import {
   SNAPSHOT_INTERVAL_MS,
@@ -80,6 +81,7 @@ type EarthSceneProps = Readonly<{
   localSlot: 1 | 2 | null;
   localAircraftId: string | null;
   peerAircraftId: string | null;
+  projectiles?: readonly CompetitionProjectileSnapshot[];
 }>;
 
 function computeFixedFrame(position: Cartesian3, localFrame: LocalAxes): FlightFrame {
@@ -224,8 +226,14 @@ export function EarthScene({
   localSlot,
   localAircraftId,
   peerAircraftId,
+  projectiles,
 }: EarthSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const viewerRef = useRef<Viewer | null>(null);
+  const projectileEntitiesRef = useRef(new Map<number, {
+    entity: Entity;
+    position: ConstantPositionProperty;
+  }>());
   const remotePoseRef = useRef(remotePose);
   const localSlotRef = useRef(localSlot);
   const [status, setStatus] = useState<"booting" | "ready" | "missing-token" | "error">("booting");
@@ -298,6 +306,7 @@ export function EarthScene({
         targetFrameRate: C2_RESOURCE_BUDGET.runtimeFrameCapFps,
         timeline: false,
       });
+      viewerRef.current = viewer;
 
       viewer.scene.globe.enableLighting = true;
       viewer.scene.fog.enabled = true;
@@ -636,9 +645,45 @@ export function EarthScene({
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleBlur);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      viewerRef.current = null;
+      projectileEntitiesRef.current.clear();
       if (viewer && !viewer.isDestroyed()) viewer.destroy();
     };
   }, [localAircraftId, peerAircraftId, onLocalPose, onTelemetry, onTheaterStatus]);
+
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    const active = new Set<number>();
+    for (const projectile of projectiles ?? []) {
+      active.add(projectile.id);
+      const position = Cartesian3.fromDegrees(
+        projectile.longitudeDeg, projectile.latitudeDeg, projectile.altitudeM,
+      );
+      const existing = projectileEntitiesRef.current.get(projectile.id);
+      if (existing) {
+        existing.position.setValue(position);
+      } else {
+        const property = new ConstantPositionProperty(position);
+        const entity = viewer.entities.add({
+          name: `Game projectile ${projectile.id}`,
+          position: property,
+          point: {
+            pixelSize: projectile.weaponId === "missile" ? 11 : 7,
+            color: Color.fromCssColorString(projectile.weaponId === "missile" ? "#7ef5ff" : "#ffe18a"),
+            outlineColor: Color.WHITE,
+            outlineWidth: 1,
+          },
+        });
+        projectileEntitiesRef.current.set(projectile.id, { entity, position: property });
+      }
+    }
+    for (const [id, rendered] of projectileEntitiesRef.current) {
+      if (active.has(id)) continue;
+      viewer.entities.remove(rendered.entity);
+      projectileEntitiesRef.current.delete(id);
+    }
+  }, [projectiles]);
 
   return (
     <section className="earth-shell" aria-label="Cesium Earth flight viewport">

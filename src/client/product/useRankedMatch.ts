@@ -22,6 +22,7 @@ export type RankedActionFeedback = Readonly<{
   code: CompetitionActionFeedbackCode;
   nextActionAtMs: number;
   weaponId: WeaponId | null;
+  locked: boolean;
   receivedAtMs: number;
 }>;
 
@@ -146,6 +147,7 @@ export function useRankedMatch(assignment: MatchFoundAssignment): RankedMatchCon
           code: message.code,
           nextActionAtMs: message.nextActionAtMs,
           weaponId: message.weaponId ?? null,
+          locked: message.locked ?? false,
           receivedAtMs: performance.now(),
         });
         return;

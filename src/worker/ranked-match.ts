@@ -9,6 +9,7 @@ import {
 import { D1AuthRepository, type D1DatabaseLike } from "./auth/repository";
 import {
   advanceCompetitionRuntime,
+  advanceCompetitionProjectiles,
   competitionSnapshot,
   createCompetitionRuntime,
   forfeitCompetition,
@@ -272,7 +273,8 @@ export class RankedMatch {
   }
 
   private async persist(state: StoredCompetitionRuntime, nowMs: number, broadcast = true) {
-    const advanced = advanceCompetitionRuntime(state, nowMs);
+    const moved = advanceCompetitionProjectiles(state, nowMs, (slot) => this.poseForSlot(slot));
+    const advanced = advanceCompetitionRuntime(moved, nowMs);
     await this.saveState(advanced);
     await this.schedule(advanced, nowMs);
     if (broadcast) this.broadcastMatchState(advanced, nowMs);
@@ -396,8 +398,12 @@ export class RankedMatch {
     }
 
     const nowMs = Date.now();
-    const advanced = advanceCompetitionRuntime(state, nowMs);
-    if (advanced !== state) state = await this.persist(advanced, nowMs);
+    if (state.projectiles?.length) {
+      state = await this.persist(state, nowMs);
+    } else {
+      const advanced = advanceCompetitionRuntime(state, nowMs);
+      if (advanced !== state) state = await this.persist(advanced, nowMs);
+    }
 
     if (parsed.type === "pose") {
       socket.serializeAttachment({
@@ -412,6 +418,7 @@ export class RankedMatch {
         pose: parsed.pose,
       };
       for (const peer of this.openSockets(socket)) this.send(peer, relay);
+      if (state.projectiles?.length) await this.persist(state, nowMs);
       return;
     }
 
@@ -437,6 +444,7 @@ export class RankedMatch {
       code: resolution.code,
       nextActionAtMs: resolution.nextActionAtMs,
       weaponId: resolution.weaponId,
+      locked: resolution.locked,
     });
   }
 
@@ -461,6 +469,6 @@ export class RankedMatch {
     const state = await this.loadState();
     if (!state) return;
     const nowMs = Date.now();
-    await this.persist(advanceCompetitionRuntime(state, nowMs), nowMs);
+    await this.persist(state, nowMs);
   }
 }
