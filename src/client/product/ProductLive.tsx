@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { gameLockAvailable } from "../../shared/arcade-projectiles.mjs";
+import type { AircraftPose } from "../../shared/multiplayer";
 import { weaponById } from "../../shared/weapons";
 import { aircraftById } from "../../shared/aircraft";
 import { aircraftVisualForSpec } from "../../shared/aircraft-visuals";
@@ -191,15 +193,16 @@ function resultFromWinner(localSlot: 1 | 2, winnerSlot: 1 | 2 | null, reason: Ma
   if (reason === "infrastructure-failure") return "no-contest"; if (winnerSlot === null) return "draw"; return winnerSlot === localSlot ? "win" : "loss";
 }
 
-function weaponFeedbackLabel(code: string | undefined, weaponName: string) {
+function weaponFeedbackLabel(code: string | undefined, weaponName: string, locked = false) {
   if (!code) return "← / → SWITCH · SPACE FIRE";
-  if (code === "accepted") return `${weaponName} FIRED`;
+  if (code === "accepted") return `${weaponName} FIRED${locked ? " // LOCKED" : ""}`;
   if (code === "cooldown") return "WEAPON COOLDOWN";
   if (code === "outside_interaction") return "TARGET OUT OF RANGE";
   if (code === "pose_stale") return "POSITION SYNCING";
   if (code === "peer_unavailable") return "PEER UNAVAILABLE";
   if (code === "not_active") return "MATCH NOT ACTIVE";
   if (code === "invalid_weapon") return "WEAPON UNAVAILABLE";
+  if (code === "projectile_limit") return "PROJECTILES IN FLIGHT";
   return code.toUpperCase();
 }
 
@@ -215,6 +218,8 @@ function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFound
   const [selectedWeaponId, setSelectedWeaponId] = useState<WeaponId>(weaponIds[0] ?? "missile");
   const selectedWeapon = weaponById(selectedWeaponId);
   const [clockNowMs, setClockNowMs] = useState(Date.now());
+  const [localPose, setLocalPose] = useState<AircraftPose | null>(null);
+  const handleLocalPose = useCallback((pose: AircraftPose) => setLocalPose(pose), []);
   const resolvedRef = useRef(false);
 
   useEffect(() => {
@@ -302,6 +307,10 @@ function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFound
           : "STANDBY";
   const stagingSlot = assignment.spawnSide === "left" ? 1 : 2;
   const weaponName = selectedWeapon?.displayName ?? selectedWeaponId.toUpperCase();
+  const lockAvailable = selectedWeaponId === "missile"
+    && localPose !== null && ranked.remotePose !== null && selectedWeapon !== null
+    && gameLockAvailable(localPose, ranked.remotePose.to, selectedWeapon.activationRadiusM);
+  const projectileCount = state?.projectiles?.length ?? 0;
 
   return <div className="product-match-shell">
     <FlightRuntime
@@ -310,6 +319,8 @@ function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFound
       stagingSlot={stagingSlot}
       localAircraftId={assignment.aircraftId}
       peerAircraftId={assignment.peerAircraftId}
+      projectiles={state?.projectiles}
+      onLocalPose={handleLocalPose}
     />
     <div className="c4-match-hud">
       <div className="match-hud__top">
@@ -329,7 +340,7 @@ function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFound
       <div className="match-action-state" data-weapon={selectedWeaponId}>
         <span>WEAPON // {weaponName}</span>
         <strong>{weaponStatus}</strong>
-        <small>{weaponAuthorityReady ? weaponFeedbackLabel(ranked.lastActionFeedback?.code, weaponName) : "FORMAL WEAPON AUTHORITY PENDING"}</small>
+        <small>{weaponAuthorityReady ? `${selectedWeaponId === "missile" ? lockAvailable ? "LOCK · " : "NO LOCK · " : "STRAIGHT · "}${weaponFeedbackLabel(ranked.lastActionFeedback?.code, weaponName, ranked.lastActionFeedback?.locked)}${projectileCount ? ` · ${projectileCount} IN FLIGHT` : ""}` : "FORMAL WEAPON AUTHORITY PENDING"}</small>
       </div>
       <button className="match-exit-preview" onClick={ranked.leaveMatch} disabled={Boolean(state?.result)}>FORFEIT MATCH</button>
     </div>
