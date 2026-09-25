@@ -383,6 +383,23 @@ export function integrateFlightState(
   return finite ? next : createInitialFlightState();
 }
 
+/** Preserve the accepted control response when a rendered frame takes over 50 ms. */
+export function integrateFlightElapsed(
+  previous: FlightState,
+  input: FlightInput,
+  elapsedSeconds: number,
+): FlightState {
+  // Bound catch-up after a suspended tab, but never discard ordinary slow frames.
+  let remaining = clamp(Number.isFinite(elapsedSeconds) ? elapsedSeconds : 0, 0, 0.25);
+  let state = previous;
+  while (remaining > 1e-8) {
+    const step = Math.min(remaining, 1 / 60);
+    state = integrateFlightState(state, input, step);
+    remaining -= step;
+  }
+  return state;
+}
+
 export function toFlightTelemetry(state: FlightState): FlightTelemetry {
   const attitude = attitudeFromOrientation(state.orientation);
   return {
