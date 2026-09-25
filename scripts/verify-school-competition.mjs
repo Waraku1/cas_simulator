@@ -96,7 +96,11 @@ const pose = {
   clientTimeMs: performance.now(),
 };
 ranked1.socket.send(JSON.stringify({ type: "pose", pose }));
-ranked2.socket.send(JSON.stringify({ type: "pose", pose: { ...pose, sequence: 1 } }));
+ranked2.socket.send(JSON.stringify({ type: "pose", pose: {
+  ...pose,
+  longitudeDeg: pose.longitudeDeg + 80 / (111_195 * Math.cos(pose.latitudeDeg * Math.PI / 180)),
+  sequence: 1,
+} }));
 await new Promise((resolve) => setTimeout(resolve, 120));
 
 ranked1.socket.send(JSON.stringify({ type: "action", weaponId: "missile", clientTimeMs: performance.now() }));
@@ -108,6 +112,7 @@ const missileAccepted = await waitForMessage(
   "accepted missile",
 );
 if (!missileAccepted.accepted) throw new Error("missile was not accepted");
+if (!missileAccepted.locked) throw new Error("missile did not lock the aimed game target");
 
 const peerSlot = welcome1.slot === 1 ? 2 : 1;
 const missileHpUpdate = await waitForMessage(
