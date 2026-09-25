@@ -18,13 +18,16 @@ import "cesium/Build/Cesium/Widgets/widgets.css";
 import { useEffect, useRef, useState } from "react";
 import { aircraftById } from "../../shared/aircraft";
 import { aircraftVisualForSpec } from "../../shared/aircraft-visuals";
+import { ARCADE_LOCK } from "../../shared/arcade-projectiles.mjs";
 import type { CompetitionProjectileSnapshot } from "../../shared/competition";
 import { C2_RESOURCE_BUDGET } from "../../shared/config";
 import {
   SNAPSHOT_INTERVAL_MS,
   type AircraftPose,
+  type GameView,
   type NetworkQuaternion,
 } from "../../shared/multiplayer";
+import type { WeaponId } from "../../shared/product";
 import { recordRenderedFrame } from "../diagnostics/useRuntimeDiagnostics";
 import {
   createInitialFlightState,
@@ -53,9 +56,9 @@ const CONTROLLED_KEYS = new Set([
 const keyAxis = (keys: Set<string>, positive: string, negative: string) =>
   (keys.has(positive) ? 1 : 0) - (keys.has(negative) ? 1 : 0);
 
-const CAMERA_BACK_M = 108;
-const CAMERA_UP_M = 16;
-const CAMERA_LOOK_AHEAD_M = 72;
+const CAMERA_BACK_M = ARCADE_LOCK.cameraBackM;
+const CAMERA_UP_M = ARCADE_LOCK.cameraUpM;
+const CAMERA_LOOK_AHEAD_M = ARCADE_LOCK.cameraLookAheadM;
 const REMOTE_EXTRAPOLATION_LIMIT_MS = 180;
 const REMOTE_SMOOTHING_TIME_CONSTANT_MS = 65;
 const NOSE_OFFSET_M = 11;
@@ -78,12 +81,14 @@ type FlightFrame = Readonly<{
 type EarthSceneProps = Readonly<{
   onTelemetry: (telemetry: FlightTelemetry) => void;
   onTheaterStatus: (status: TheaterStatus) => void;
-  onLocalPose: (pose: AircraftPose) => void;
+  onLocalPose: (pose: AircraftPose & { view?: GameView }) => void;
   remotePose: RemotePoseBuffer | null;
   localSlot: 1 | 2 | null;
   localAircraftId: string | null;
   peerAircraftId: string | null;
   competitiveModels?: boolean;
+  selectedWeaponId?: WeaponId | null;
+  peerLocked?: boolean;
   projectiles?: readonly CompetitionProjectileSnapshot[];
 }>;
 
@@ -234,16 +239,23 @@ export function EarthScene({
   localAircraftId,
   peerAircraftId,
   competitiveModels = false,
+  selectedWeaponId = null,
+  peerLocked = false,
   projectiles,
 }: EarthSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
+  const peerMarkerRef = useRef<Entity | null>(null);
   const projectileEntitiesRef = useRef(new Map<number, {
     entity: Entity;
     position: ConstantPositionProperty;
+    trail?: Entity;
+    trailPositions?: ConstantProperty;
+    previous: Cartesian3;
   }>());
   const remotePoseRef = useRef(remotePose);
   const localSlotRef = useRef(localSlot);
+  const weaponRef = useRef(selectedWeaponId);
   const [status, setStatus] = useState<"booting" | "ready" | "missing-token" | "error">("booting");
   const [errorMessage, setErrorMessage] = useState("");
   const [modelIssue, setModelIssue] = useState("");
@@ -257,6 +269,23 @@ export function EarthScene({
   }, [localSlot]);
 
   useEffect(() => {
+    weaponRef.current = selectedWeaponId;
+  }, [selectedWeaponId]);
+
+  useEffect(() => {
+    const marker = peerMarkerRef.current;
+    if (!marker) return;
+    if (marker.label) {
+      marker.label.text = new ConstantProperty(peerLocked ? "LOCKED" : "PEER");
+      marker.label.fillColor = new ConstantProperty(peerLocked ? Color.fromCssColorString("#ffe4a8") : Color.WHITE);
+    }
+    if (marker.point) {
+      marker.point.pixelSize = new ConstantProperty(peerLocked ? 18 : 13);
+      marker.point.color = new ConstantProperty(peerLocked ? Color.fromCssColorString("#ff654e") : Color.fromCssColorString("#ff9f43"));
+    }
+  }, [peerLocked]);
+
+  useEffect(() => {
     setModelIssue("");
     const token = import.meta.env.VITE_CESIUM_ION_TOKEN?.trim();
     if (!token) {
@@ -265,6 +294,7 @@ export function EarthScene({
     }
 
     if (!containerRef.current) return;
+    const viewport = containerRef.current;
 
     const localAircraft = localAircraftId ? aircraftById(localAircraftId) : null;
     const peerAircraft = peerAircraftId ? aircraftById(peerAircraftId) : null;
@@ -286,6 +316,12 @@ export function EarthScene({
     let remoteModel: Model | undefined;
     let localModelFailed = false;
     let remoteModelFailed = false;
+    let removeViewListeners = () => {};
+    let viewYawRad = 0;
+    let viewPitchRad = 0;
+    let activePointerId: number | null = null;
+    let pointerX = 0;
+    let pointerY = 0;
     const pressedKeys = new Set<string>();
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -525,7 +561,7 @@ export function EarthScene({
         void loadCompetitiveModel(false);
       }
 
-      remoteEntities.push(viewer.entities.add({
+      const peerMarker = viewer.entities.add({
         name: "C3 peer marker",
         show: false,
         position: remoteMarkerPositionProperty,
@@ -545,19 +581,27 @@ export function EarthScene({
           pixelOffset: new Cartesian2(0, -28),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
-      }));
+      });
+      remoteEntities.push(peerMarker);
+      peerMarkerRef.current = peerMarker;
 
       const updateCamera = (position: Cartesian3, frame: FlightFrame) => {
         if (!viewer) return;
-        const cameraPosition = offsetFrom(position, frame.forward, -CAMERA_BACK_M);
+        const orbit = Math.cos(viewPitchRad);
+        const cameraPosition = offsetFrom(position, frame.forward,
+          -CAMERA_BACK_M * Math.cos(viewYawRad) * orbit);
+        Cartesian3.add(cameraPosition,
+          Cartesian3.multiplyByScalar(frame.left, CAMERA_BACK_M * Math.sin(viewYawRad) * orbit, new Cartesian3()),
+          cameraPosition);
         const cameraLift = Cartesian3.multiplyByScalar(
           frame.up,
-          CAMERA_UP_M,
+          CAMERA_UP_M + CAMERA_BACK_M * Math.sin(viewPitchRad),
           new Cartesian3(),
         );
         Cartesian3.add(cameraPosition, cameraLift, cameraPosition);
 
-        const lookTarget = offsetFrom(position, frame.forward, CAMERA_LOOK_AHEAD_M);
+        const lookTarget = offsetFrom(position, frame.forward,
+          CAMERA_LOOK_AHEAD_M * Math.max(0, Math.cos(viewYawRad) * orbit));
         const direction = Cartesian3.subtract(lookTarget, cameraPosition, new Cartesian3());
         Cartesian3.normalize(direction, direction);
 
@@ -645,7 +689,42 @@ export function EarthScene({
             y: flightState.orientation.y,
             z: flightState.orientation.z,
           },
+          ...(competitiveModels && weaponRef.current ? {
+            view: { yawRad: viewYawRad, pitchRad: viewPitchRad, weaponId: weaponRef.current },
+          } : {}),
         });
+      };
+
+      const handlePointerDown = (event: PointerEvent) => {
+        if (!competitiveModels || activePointerId !== null || (event.pointerType === "mouse" && event.button !== 0)) return;
+        activePointerId = event.pointerId;
+        pointerX = event.clientX;
+        pointerY = event.clientY;
+        viewport.setPointerCapture(event.pointerId);
+        viewport.classList.add("is-looking");
+        event.preventDefault();
+      };
+      const handlePointerMove = (event: PointerEvent) => {
+        if (activePointerId !== event.pointerId) return;
+        const dx = event.clientX - pointerX;
+        const dy = event.clientY - pointerY;
+        pointerX = event.clientX;
+        pointerY = event.clientY;
+        viewYawRad = ((viewYawRad + dx * 0.004 + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+        viewPitchRad = Math.max(-1.1, Math.min(1.1, viewPitchRad + dy * 0.004));
+        event.preventDefault();
+      };
+      const handlePointerUp = (event: PointerEvent) => {
+        if (activePointerId !== event.pointerId) return;
+        activePointerId = null;
+        viewport.classList.remove("is-looking");
+        if (viewport.hasPointerCapture(event.pointerId)) viewport.releasePointerCapture(event.pointerId);
+      };
+      const handleViewReset = (event: MouseEvent) => {
+        if (!competitiveModels) return;
+        viewYawRad = 0;
+        viewPitchRad = 0;
+        event.preventDefault();
       };
 
       const applyMultiplayerStagingIfNeeded = () => {
@@ -714,6 +793,21 @@ export function EarthScene({
       window.addEventListener("keyup", handleKeyUp, { passive: false });
       window.addEventListener("blur", handleBlur);
       document.addEventListener("visibilitychange", handleVisibilityChange);
+      if (competitiveModels) {
+        viewport.addEventListener("pointerdown", handlePointerDown);
+        viewport.addEventListener("pointermove", handlePointerMove);
+        viewport.addEventListener("pointerup", handlePointerUp);
+        viewport.addEventListener("pointercancel", handlePointerUp);
+        viewport.addEventListener("dblclick", handleViewReset);
+        removeViewListeners = () => {
+          viewport.removeEventListener("pointerdown", handlePointerDown);
+          viewport.removeEventListener("pointermove", handlePointerMove);
+          viewport.removeEventListener("pointerup", handlePointerUp);
+          viewport.removeEventListener("pointercancel", handlePointerUp);
+          viewport.removeEventListener("dblclick", handleViewReset);
+          viewport.classList.remove("is-looking");
+        };
+      }
       updateCamera(initialPosition, initialFrame);
       publishFlightState();
       updateRemoteAircraft(performance.now());
@@ -732,7 +826,9 @@ export function EarthScene({
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleBlur);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      removeViewListeners();
       viewerRef.current = null;
+      peerMarkerRef.current = null;
       projectileEntitiesRef.current.clear();
       if (viewer && !viewer.isDestroyed()) viewer.destroy();
     };
@@ -749,25 +845,53 @@ export function EarthScene({
       );
       const existing = projectileEntitiesRef.current.get(projectile.id);
       if (existing) {
+        if (existing.trailPositions) {
+          const segment = Cartesian3.subtract(position, existing.previous, new Cartesian3());
+          const segmentLength = Cartesian3.magnitude(segment);
+          const start = segmentLength > 32
+            ? Cartesian3.lerp(existing.previous, position, 1 - 32 / segmentLength, new Cartesian3())
+            : existing.previous;
+          existing.trailPositions.setValue([start, position]);
+        }
+        existing.previous = Cartesian3.clone(position);
         existing.position.setValue(position);
       } else {
         const property = new ConstantPositionProperty(position);
+        const gun = projectile.weaponId === "gun";
+        const color = Color.fromCssColorString(gun ? "#ffe18a" : "#7ef5ff");
         const entity = viewer.entities.add({
           name: `Game projectile ${projectile.id}`,
           position: property,
           point: {
-            pixelSize: projectile.weaponId === "missile" ? 11 : 7,
-            color: Color.fromCssColorString(projectile.weaponId === "missile" ? "#7ef5ff" : "#ffe18a"),
+            pixelSize: gun ? 12 : 11,
+            color,
             outlineColor: Color.WHITE,
-            outlineWidth: 1,
+            outlineWidth: gun ? 2 : 1,
+            disableDepthTestDistance: gun ? Number.POSITIVE_INFINITY : 0,
           },
         });
-        projectileEntitiesRef.current.set(projectile.id, { entity, position: property });
+        const trailPositions = gun ? new ConstantProperty([position, position]) : undefined;
+        const trail = trailPositions ? viewer.entities.add({
+          name: `Game projectile trail ${projectile.id}`,
+          polyline: {
+            positions: trailPositions,
+            width: 3,
+            material: color.withAlpha(0.88),
+          },
+        }) : undefined;
+        projectileEntitiesRef.current.set(projectile.id, {
+          entity,
+          position: property,
+          trail,
+          trailPositions,
+          previous: Cartesian3.clone(position),
+        });
       }
     }
     for (const [id, rendered] of projectileEntitiesRef.current) {
       if (active.has(id)) continue;
       viewer.entities.remove(rendered.entity);
+      if (rendered.trail) viewer.entities.remove(rendered.trail);
       projectileEntitiesRef.current.delete(id);
     }
   }, [projectiles]);

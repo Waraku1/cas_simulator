@@ -15,7 +15,7 @@ import {
   type CompetitionSlot,
   type CompetitionStateSnapshot,
 } from "../shared/competition";
-import type { AircraftPose } from "../shared/multiplayer";
+import type { AircraftPose, GameView } from "../shared/multiplayer";
 import {
   clampHeartPoints,
   MATCH_RULES,
@@ -56,7 +56,7 @@ export type StoredCompetitionRuntime = {
 };
 
 export type ServerPoseSample = Readonly<{
-  pose: AircraftPose;
+  pose: AircraftPose & { view?: GameView };
   receivedAtMs: number;
 }>;
 
@@ -250,6 +250,7 @@ export function resolveCompetitionAction(
   localPose: ServerPoseSample | null,
   peerPose: ServerPoseSample | null,
   requestedWeaponId: WeaponId = "missile",
+  confirmedLock?: boolean,
 ): ActionResolution {
   let advanced = advanceCompetitionRuntime(state, nowMs);
   const local = participantBySlot(advanced, slot);
@@ -287,7 +288,9 @@ export function resolveCompetitionAction(
     return reject("pose_stale");
   }
 
-  if (competitionDistanceM(localPose.pose, peerPose.pose) > weapon.activationRadiusM) {
+  // The gun launches regardless of peer distance. Its bounded game-space
+  // trajectory and segment contact decide whether it can reach the peer.
+  if (requestedWeaponId === "missile" && competitionDistanceM(localPose.pose, peerPose.pose) > weapon.activationRadiusM) {
     return reject("outside_interaction");
   }
   if ((advanced.projectiles?.length ?? 0) >= MAX_ARCADE_PROJECTILES) return reject("projectile_limit");
@@ -301,6 +304,7 @@ export function resolveCompetitionAction(
     localPose.pose,
     peerPose.pose,
     weapon.activationRadiusM,
+    confirmedLock,
   );
   const participants = advanced.participants.map((participant) => {
     if (participant.slot === local.slot) {

@@ -11,7 +11,8 @@ The values below are **CAS gameplay balance parameters only**. They are not inte
 ## Player controls
 
 - `Left Arrow / Right Arrow`: cycle the selected weapon.
-- `Space`: fire the selected weapon.
+- `Space`: fire the selected weapon. Holding it repeats GUN fire at its 0.40 s cooldown cadence; MISSILE remains a single press.
+- Drag the ranked viewport to look around. Double-click to center the view. The drag changes only camera yaw/pitch, never the aircraft orientation or the accepted W/S, A/D, and throttle inputs.
 - `Up Arrow / Down Arrow`: throttle remains unchanged.
 - `W / S`: pitch remains unchanged.
 - `A / D`: bank/turn remains unchanged.
@@ -38,7 +39,7 @@ Aircraft catalog order defines the cycling order.
 
 - HP effect: 4
 - cooldown: 0.40 s
-- interaction radius: 180 m
+- interaction radius: 180 m (legacy catalog indicator; no longer a launch gate)
 - fire profile: rapid
 
 Cooldowns are independent per weapon.
@@ -64,8 +65,9 @@ The production RankedMatch authority verifies:
 - selected weapon is present in the aircraft loadout;
 - selected weapon cooldown;
 - fresh authoritative pose samples;
-- 3D participant distance against the selected weapon's CAS interaction radius.
+- 3D participant distance against the MISSILE interaction radius; GUN can launch at any peer distance.
 - an available game projectile slot (at most eight in flight per match).
+- for a tracking MISSILE, fresh view and target poses in the central camera region continuously for 1.2 s.
 
 An accepted request creates a server-owned projectile eight game units ahead of the aircraft.
 It does **not** immediately change HP. The server advances projectiles in bounded game steps,
@@ -73,9 +75,19 @@ checks each traveled segment against the peer's current aircraft position, and a
 only when the two touch. A miss or an expired projectile has no HP effect. Stale peer poses
 cannot create a contact, and completing the match removes remaining projectiles.
 
-`GUN` travels along the aircraft's forward direction without tracking. `MISSILE` tracks
-only when the opponent is in the forward aim region when fired; otherwise it travels
-straight. These are intentionally abstract game rules, with no real-world guidance model.
+`GUN` travels straight along the aircraft's forward direction without tracking. Its
+game path is limited to 360 m and 0.9 s; contact is checked only along the traveled
+segments, and the display removes the point and short trail when the path ends.
+Holding Space sends GUN requests at 0.44 s intervals, subject to server cooldown and
+the match's eight-projectile cap. The client does not determine contact.
+
+`MISSILE` follows the opponent only when the selected missile view has kept the peer
+near the camera center for 1.2 s with fresh pose updates. The progress bar shows the
+local hold estimate; the server separately verifies the hold before allowing tracking.
+Once held, the peer marker says `LOCKED` until capture is lost, and the peer receives
+`MISSILE LOCK ALERT`. Firing without a completed lock still launches a straight game
+projectile. Older clients without a view field temporarily use the previous aim rule
+during the rollout. These are abstract game rules with no real-world guidance model.
 
 Only the server may:
 
@@ -108,6 +120,8 @@ The WebSocket message type remains `action` during the migration. The new client
 - New Worker snapshots add `weaponReadyAtMs`; the new client accepts old snapshots that do not contain it.
 - New Worker snapshots add optional `projectiles`; the client accepts snapshots without it.
 - Action feedback may include `locked`; older feedback without it remains valid.
+- New pose snapshots may include `view` (`yawRad`, `pitchRad`, `weaponId`); older pose clients remain readable.
+- The Worker may send `lock_alert` with a source slot and a locked/unlocked transition.
 
 This compatibility layer may be removed after production Worker and supported clients are fully migrated.
 
@@ -127,8 +141,8 @@ The match HUD displays:
 - selected weapon name;
 - READY / selected-weapon cooldown;
 - server feedback;
-- game lock availability and in-flight projectile count;
-- visible game projectile points at server-authoritative positions;
+- central MISSILE capture progress, peer marker, incoming lock alert, and in-flight projectile count;
+- visible game projectile points and short GUN trails at server-authoritative positions;
 - `← / → SWITCH · SPACE FIRE`.
 
 MISSILE uses a warm accent; GUN uses the existing cyan accent.

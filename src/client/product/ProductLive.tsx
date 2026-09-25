@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { gameLockAvailable } from "../../shared/arcade-projectiles.mjs";
-import type { AircraftPose } from "../../shared/multiplayer";
+import { ARCADE_LOCK, gameCaptureAvailable } from "../../shared/arcade-projectiles.mjs";
+import { COMPETITION_POSE_FRESHNESS_MS } from "../../shared/competition";
+import type { AircraftPose, GameView } from "../../shared/multiplayer";
 import { weaponById } from "../../shared/weapons";
 import { aircraftById } from "../../shared/aircraft";
 import { aircraftVisualForSpec } from "../../shared/aircraft-visuals";
@@ -218,8 +219,10 @@ function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFound
   const [selectedWeaponId, setSelectedWeaponId] = useState<WeaponId>(weaponIds[0] ?? "missile");
   const selectedWeapon = weaponById(selectedWeaponId);
   const [clockNowMs, setClockNowMs] = useState(Date.now());
-  const [localPose, setLocalPose] = useState<AircraftPose | null>(null);
-  const handleLocalPose = useCallback((pose: AircraftPose) => setLocalPose(pose), []);
+  const [localPose, setLocalPose] = useState<(AircraftPose & { view?: GameView }) | null>(null);
+  const [lockProgress, setLockProgress] = useState(0);
+  const captureStartedAtRef = useRef<number | null>(null);
+  const handleLocalPose = useCallback((pose: AircraftPose & { view?: GameView }) => setLocalPose(pose), []);
   const resolvedRef = useRef(false);
 
   useEffect(() => {
@@ -232,6 +235,11 @@ function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFound
   }, [selectedWeaponId, weaponIds]);
 
   useEffect(() => {
+    let gunTimer: number | null = null;
+    const stopGun = () => {
+      if (gunTimer !== null) window.clearInterval(gunTimer);
+      gunTimer = null;
+    };
     const handle = (event: KeyboardEvent) => {
       const target = event.target;
       if (
@@ -252,14 +260,30 @@ function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFound
         return;
       }
 
-      if (event.code === "Space" && !event.repeat) {
+      if (event.code === "Space") {
         event.preventDefault();
+        if (event.repeat) return;
         ranked.fireWeapon(selectedWeaponId);
+        if (selectedWeaponId === "gun") {
+          stopGun();
+          gunTimer = window.setInterval(() => ranked.fireWeapon("gun"), 440);
+        }
       }
     };
+    const handleKeyUp = (event: KeyboardEvent) => { if (event.code === "Space") stopGun(); };
+    const handleVisibility = () => { if (document.hidden) stopGun(); };
 
     window.addEventListener("keydown", handle, { passive: false });
-    return () => window.removeEventListener("keydown", handle);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", stopGun);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      stopGun();
+      window.removeEventListener("keydown", handle);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", stopGun);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [ranked.fireWeapon, selectedWeaponId, weaponIds]);
 
   const state = ranked.matchState;
@@ -307,9 +331,25 @@ function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFound
           : "STANDBY";
   const stagingSlot = assignment.spawnSide === "left" ? 1 : 2;
   const weaponName = selectedWeapon?.displayName ?? selectedWeaponId.toUpperCase();
-  const lockAvailable = selectedWeaponId === "missile"
+  const targetCaptured = selectedWeaponId === "missile"
     && localPose !== null && ranked.remotePose !== null && selectedWeapon !== null
-    && gameLockAvailable(localPose, ranked.remotePose.to, selectedWeapon.activationRadiusM);
+    && localPose.view?.weaponId === "missile"
+    && (phase === "active" || phase === "overtime")
+    && ranked.peerConnected
+    && performance.now() - ranked.remotePose.receivedAtMs < Math.min(COMPETITION_POSE_FRESHNESS_MS, ARCADE_LOCK.sampleGapMs)
+    && gameCaptureAvailable(localPose, ranked.remotePose.to, selectedWeapon.activationRadiusM);
+  useEffect(() => {
+    if (!targetCaptured) {
+      captureStartedAtRef.current = null;
+      setLockProgress(0);
+      return;
+    }
+    const now = performance.now();
+    if (captureStartedAtRef.current === null) captureStartedAtRef.current = now;
+    // Leave one network snapshot of margin before presenting a completed lock.
+    setLockProgress(Math.min(1, (now - captureStartedAtRef.current) / (ARCADE_LOCK.holdMs + 200)));
+  }, [targetCaptured, clockNowMs]);
+  const lockAvailable = targetCaptured && lockProgress >= 1;
   const projectileCount = state?.projectiles?.length ?? 0;
 
   return <div className="product-match-shell">
@@ -320,9 +360,24 @@ function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFound
       localAircraftId={assignment.aircraftId}
       peerAircraftId={assignment.peerAircraftId}
       projectiles={state?.projectiles}
+      selectedWeaponId={selectedWeaponId}
+      peerLocked={lockAvailable}
       onLocalPose={handleLocalPose}
     />
     <div className="c4-match-hud">
+      <div className={`match-lock-reticle${targetCaptured ? " is-capturing" : ""}${lockAvailable ? " is-locked" : ""}`}>
+        <span aria-hidden="true">+</span>
+        {selectedWeaponId === "missile" && (
+          <div className="match-lock-progress" role="progressbar" aria-label="Missile lock progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(lockProgress * 100)}>
+            <strong>{lockAvailable ? "LOCKED" : targetCaptured ? `LOCK ${Math.round(lockProgress * 100)}%` : "CENTER TARGET"}</strong>
+            <i style={{ width: `${lockProgress * 100}%` }} />
+          </div>
+        )}
+      </div>
+      {ranked.incomingLockAlert && (phase === "active" || phase === "overtime") && (
+        <div className="match-incoming-alert" role="alert">MISSILE LOCK ALERT</div>
+      )}
+      <div className="match-view-hint">DRAG TO LOOK · DOUBLE-CLICK TO CENTER</div>
       <div className="match-hud__top">
         <div className="hp-block hp-block--local">
           <span>YOU // {aircraftVisual?.realAircraftName ?? aircraft?.displayName ?? assignment.aircraftId}</span>

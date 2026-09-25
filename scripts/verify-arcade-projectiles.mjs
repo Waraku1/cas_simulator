@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   advanceArcadeProjectile,
   createArcadeProjectile,
+  gameCaptureAvailable,
   gameLockAvailable,
   gamePointToPosition,
 } from "../src/shared/arcade-projectiles.mjs";
@@ -25,11 +26,30 @@ assert.ok(gunAt200.projectile.position[0] > 80);
 assert.equal(gunAt200.projectile.position[1], 0, "GUN must fly straight");
 const gunExpired = advanceArcadeProjectile(gunAt200.projectile, 501, point(0, 90));
 assert.equal(gunExpired.touched, false);
-assert.equal(gunExpired.projectile, null);
+assert.ok(gunExpired.projectile, "GUN remains visible after a short flight");
+const gunAtLimit = advanceArcadeProjectile(gunExpired.projectile, 900, point(420));
+assert.equal(gunAtLimit.touched, false);
+assert.equal(gunAtLimit.projectile, null, "GUN simulation stops at the bounded game distance");
 
 const gunOnAxis = createArcadeProjectile(2, 1, "gun", 0, pilot, point(80), 180);
 assert.equal(advanceArcadeProjectile(gunOnAxis, 200, point(80)).touched, true,
   "Segment contact must register even when one update crosses the target");
+const gunBeyondActivation = createArcadeProjectile(5, 1, "gun", 0, pilot, point(300), 180);
+assert.equal(advanceArcadeProjectile(gunBeyondActivation, 700, point(300)).touched, true,
+  "GUN contact is decided by the path even beyond the activation indicator");
+const gunBeyondSimulation = createArcadeProjectile(6, 1, "gun", 0, pilot, point(420), 180);
+assert.equal(advanceArcadeProjectile(gunBeyondSimulation, 900, point(420)).touched, false,
+  "GUN cannot contact a peer beyond the simulated segment");
+
+const viewedPilot = { ...pilot, view: { yawRad: 0, pitchRad: 0, weaponId: "missile" } };
+assert.equal(gameCaptureAvailable(viewedPilot, point(120), 600), true);
+assert.equal(gameCaptureAvailable(viewedPilot, point(0, 120), 600), false);
+assert.equal(gameCaptureAvailable({ ...viewedPilot, view: { ...viewedPilot.view, yawRad: -Math.PI / 2 } }, point(0, 120), 600), true,
+  "Camera drag alone can bring an off-axis game target into the center");
+assert.equal(createArcadeProjectile(7, 1, "missile", 0, viewedPilot, point(120), 600, false).targetSlot, null,
+  "A server-declined capture must not create a tracking projectile");
+assert.equal(createArcadeProjectile(8, 1, "missile", 0, viewedPilot, point(0, 120), 600, true).targetSlot, 2,
+  "A server-confirmed camera capture can track an off-axis target");
 
 const locked = createArcadeProjectile(3, 1, "missile", 0, pilot, point(120), 600);
 const unlocked = createArcadeProjectile(4, 1, "missile", 0, pilot, point(0, 120), 600);

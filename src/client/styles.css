@@ -39,6 +39,8 @@ body { background: #02070a; }
 .earth-shell__viewport { position: absolute; inset: 0; }
 .earth-shell { z-index: 1; }
 .earth-shell__viewport { background: #041014; }
+.product-match-shell .earth-shell__viewport { cursor: grab; touch-action: none; }
+.product-match-shell .earth-shell__viewport.is-looking { cursor: grabbing; }
 .earth-shell__model-issue {
   position: absolute;
   z-index: 12;

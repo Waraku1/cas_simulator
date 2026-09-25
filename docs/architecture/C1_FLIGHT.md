@@ -64,6 +64,8 @@ Bell X-1 presentation: the official, physically normalized GLB is shared by all 
 
 Ranked flight loads the Bell X-1 GLB as two scene models and updates their model matrices in the same frame loop as the local aircraft and interpolated peer pose. The generic body, wings, and nose remain visible only while each model loads or if it fails. A concise notice reports failures instead of leaving an apparently missing aircraft. Free flight retains the Entity model path.
 
+Ranked viewport dragging orbits the chase camera around the own aircraft, with a bounded vertical view angle and double-click recentering. The camera offset is published as a separate view value for screen-center capture. It never enters `FlightInput`, `FlightState`, model orientation, or the bank-mediated turn integration. The accepted flight controls and angular response remain fixed.
+
 ## Verification evidence
 
 C1.6 final implementation:

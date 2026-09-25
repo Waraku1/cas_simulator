@@ -100,9 +100,9 @@ const miss = resolveSchoolRankedAction(state, 1, 10_010,
   { pose: { ...poseSample.pose, ...gamePointToPosition(poseSample.pose, [0, 90, 0]) }, receivedAtMs: 10_010 },
   "gun");
 if (!miss.accepted) throw new Error("Off-axis GUN launch unexpectedly rejected");
-const afterMiss = advanceSchoolRankedProjectiles(miss.state, 10_600, (slot) => slot === 2
-  ? { pose: { ...poseSample.pose, ...gamePointToPosition(poseSample.pose, [0, 90, 0]) }, receivedAtMs: 10_600 }
-  : { ...poseSample, receivedAtMs: 10_600 });
+const afterMiss = advanceSchoolRankedProjectiles(miss.state, 10_950, (slot) => slot === 2
+  ? { pose: { ...poseSample.pose, ...gamePointToPosition(poseSample.pose, [0, 90, 0]) }, receivedAtMs: 10_950 }
+  : { ...poseSample, receivedAtMs: 10_950 });
 if (afterMiss.participants[1].heartPoints !== 100 || afterMiss.projectiles.length !== 0) {
   throw new Error("Off-axis GUN projectile must miss and expire");
 }

@@ -2,10 +2,18 @@
 // contact sizes, not a model of any real aircraft or weapon.
 export const ARCADE_PROJECTILES = Object.freeze({
   missile: Object.freeze({ speed: 280, lifetimeMs: 2_600, touchRadius: 18 }),
-  gun: Object.freeze({ speed: 450, lifetimeMs: 500, touchRadius: 10 }),
+  gun: Object.freeze({ speed: 450, lifetimeMs: 900, maxTravelM: 360, touchRadius: 10 }),
 });
 export const MAX_ARCADE_PROJECTILES = 8;
 export const ARCADE_TICK_MS = 100;
+export const ARCADE_LOCK = Object.freeze({
+  holdMs: 1_200,
+  sampleGapMs: 400,
+  centerCosine: Math.cos(8 * Math.PI / 180),
+  cameraBackM: 108,
+  cameraUpM: 16,
+  cameraLookAheadM: 72,
+});
 
 const RADIUS = 6_371_000;
 const RAD = Math.PI / 180;
@@ -36,13 +44,24 @@ export function gamePointToPosition(origin, point) {
   };
 }
 
-export function gameForward(orientation) {
+function gameAxis(orientation, axis) {
   const norm = Math.hypot(orientation.w, orientation.x, orientation.y, orientation.z) || 1;
   const { w, x, y, z } = Object.fromEntries(
     ["w", "x", "y", "z"].map((key) => [key, orientation[key] / norm]),
   );
   // The flight state shares the +X forward, +Y left, +Z up game frame.
-  return normalized([1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)]);
+  const [vx, vy, vz] = axis;
+  const product = x * vx + y * vy + z * vz;
+  const squared = x * x + y * y + z * z;
+  return normalized([
+    2 * product * x + (w * w - squared) * vx + 2 * w * (y * vz - z * vy),
+    2 * product * y + (w * w - squared) * vy + 2 * w * (z * vx - x * vz),
+    2 * product * z + (w * w - squared) * vz + 2 * w * (x * vy - y * vx),
+  ]);
+}
+
+export function gameForward(orientation) {
+  return gameAxis(orientation, [1, 0, 0]);
 }
 
 export function gameLockAvailable(localPose, peerPose, maximumDistance) {
@@ -53,10 +72,34 @@ export function gameLockAvailable(localPose, peerPose, maximumDistance) {
     && dot(gameForward(localPose.orientation), normalized(delta)) >= 0.9;
 }
 
-export function createArcadeProjectile(id, ownerSlot, weaponId, nowMs, localPose, peerPose, maximumDistance) {
+// A small, dimensionless screen-center region in the fictional game camera.
+// The same view offset is used by the renderer and the server-side check.
+export function gameCaptureAvailable(localPose, peerPose, maximumDistance) {
+  const view = localPose.view;
+  if (!view) return false;
+  const target = relativeGamePoint(localPose, peerPose);
+  const distance = length(target);
+  if (distance <= 15 || distance > maximumDistance) return false;
+  const forward = gameForward(localPose.orientation);
+  const left = gameAxis(localPose.orientation, [0, 1, 0]);
+  const up = gameAxis(localPose.orientation, [0, 0, 1]);
+  const yaw = view.yawRad;
+  const pitch = view.pitchRad;
+  const orbit = Math.cos(pitch);
+  let camera = addScaled([0, 0, 0], forward, -ARCADE_LOCK.cameraBackM * Math.cos(yaw) * orbit);
+  camera = addScaled(camera, left, ARCADE_LOCK.cameraBackM * Math.sin(yaw) * orbit);
+  camera = addScaled(camera, up, ARCADE_LOCK.cameraUpM + ARCADE_LOCK.cameraBackM * Math.sin(pitch));
+  const ahead = ARCADE_LOCK.cameraLookAheadM * Math.max(0, Math.cos(yaw) * orbit);
+  const focus = addScaled([0, 0, 0], forward, ahead);
+  const direction = normalized(focus.map((value, index) => value - camera[index]));
+  const toTarget = normalized(target.map((value, index) => value - camera[index]));
+  return dot(direction, toTarget) >= ARCADE_LOCK.centerCosine;
+}
+
+export function createArcadeProjectile(id, ownerSlot, weaponId, nowMs, localPose, peerPose, maximumDistance, confirmedLock) {
   const rules = ARCADE_PROJECTILES[weaponId];
   const direction = gameForward(localPose.orientation);
-  const locked = weaponId === "missile" && gameLockAvailable(localPose, peerPose, maximumDistance);
+  const locked = weaponId === "missile" && (confirmedLock ?? gameLockAvailable(localPose, peerPose, maximumDistance));
   return {
     id,
     ownerSlot,
@@ -101,11 +144,14 @@ export function advanceArcadeProjectile(projectile, nowMs, peerPose) {
       const blend = Math.min(0.22, stepMs / 250);
       direction = normalized(direction.map((value, index) => value * (1 - blend) + desired[index] * blend));
     }
-    const next = addScaled(position, direction, rules.speed * stepMs / 1_000);
+    let next = addScaled(position, direction, rules.speed * stepMs / 1_000);
+    const capped = rules.maxTravelM !== undefined && length(next) >= rules.maxTravelM;
+    if (capped) next = addScaled(position, direction, Math.max(0, rules.maxTravelM - length(position)));
     if (target && touchesSegment(position, next, target, rules.touchRadius)) {
       return { projectile: null, touched: true };
     }
     position = next;
+    if (capped) return { projectile: null, touched: false };
     remainingMs -= stepMs;
   }
 
