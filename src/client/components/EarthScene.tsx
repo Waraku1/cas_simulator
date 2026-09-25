@@ -27,7 +27,7 @@ import { recordRenderedFrame } from "../diagnostics/useRuntimeDiagnostics";
 import {
   createInitialFlightState,
   getLocalBodyFrame,
-  integrateFlightState,
+  integrateFlightElapsed,
   toFlightTelemetry,
   type FlightInput,
   type FlightState,
@@ -52,9 +52,8 @@ const keyAxis = (keys: Set<string>, positive: string, negative: string) =>
   (keys.has(positive) ? 1 : 0) - (keys.has(negative) ? 1 : 0);
 
 const CAMERA_BACK_M = 108;
-const CAMERA_UP_M = 12;
+const CAMERA_UP_M = 16;
 const CAMERA_LOOK_AHEAD_M = 72;
-const CAMERA_ROLL_FOLLOW = 0.2;
 const REMOTE_EXTRAPOLATION_LIMIT_MS = 180;
 const REMOTE_SMOOTHING_TIME_CONSTANT_MS = 65;
 const NOSE_OFFSET_M = 11;
@@ -166,47 +165,9 @@ function orientationFromFrame(frame: FlightFrame) {
   return Quaternion.fromRotationMatrix(bodyRotationFromFrame(frame));
 }
 
-// glTF uses +Y up and -Z as the conventional forward direction. CAS uses a
-// right-handed body frame of +X forward, +Y left, +Z up.
-const GLTF_TO_CAS_BODY = new Matrix3(
-  0, 0, -1,
-  -1, 0, 0,
-  0, 1, 0,
-);
-
-function modelOrientationFromFrame(frame: FlightFrame) {
-  const modelToWorld = Matrix3.multiply(
-    bodyRotationFromFrame(frame),
-    GLTF_TO_CAS_BODY,
-    new Matrix3(),
-  );
-  return Quaternion.fromRotationMatrix(modelToWorld);
-}
-
 function offsetFrom(position: Cartesian3, direction: Cartesian3, distanceM: number) {
   const offset = Cartesian3.multiplyByScalar(direction, distanceM, new Cartesian3());
   return Cartesian3.add(position, offset, offset);
-}
-
-function geodeticUpAt(position: Cartesian3) {
-  const enu = Transforms.eastNorthUpToFixedFrame(position);
-  const up = Matrix4.multiplyByPointAsVector(
-    enu,
-    new Cartesian3(0, 0, 1),
-    new Cartesian3(),
-  );
-  return Cartesian3.normalize(up, up);
-}
-
-function stabilizedCameraUp(position: Cartesian3, frame: FlightFrame) {
-  const worldUp = geodeticUpAt(position);
-  const blended = Cartesian3.lerp(
-    worldUp,
-    frame.up,
-    CAMERA_ROLL_FOLLOW,
-    new Cartesian3(),
-  );
-  return Cartesian3.normalize(blended, blended);
 }
 
 function clampRemoteSegmentDuration(buffer: RemotePoseBuffer) {
@@ -250,7 +211,7 @@ function stagedFlightState(slot: 1 | 2): FlightState {
 
 function isFormTarget(target: EventTarget | null) {
   return target instanceof HTMLInputElement
-    || target instanceof HTMLButtonElement
+    || target instanceof HTMLSelectElement
     || target instanceof HTMLTextAreaElement
     || (target instanceof HTMLElement && target.isContentEditable);
 }
@@ -317,6 +278,10 @@ export function EarthScene({
       event.preventDefault();
     };
     const handleBlur = () => pressedKeys.clear();
+    const handleVisibilityChange = () => {
+      if (document.hidden) pressedKeys.clear();
+      lastFrameTime = performance.now();
+    };
 
     try {
       viewer = new Viewer(containerRef.current, {
@@ -359,9 +324,9 @@ export function EarthScene({
         flightState.altitudeM,
       );
       const initialFrame = computeFlightFrame(initialPosition, flightState);
-      const initialOrientation = localVisual
-        ? modelOrientationFromFrame(initialFrame)
-        : orientationFromFrame(initialFrame);
+      // Cesium applies glTF axis conversion internally; the entity frame is
+      // already the canonical +X nose / +Y left / +Z up aircraft frame.
+      const initialOrientation = orientationFromFrame(initialFrame);
       const positionProperty = new ConstantPositionProperty(initialPosition);
       const nosePositionProperty = new ConstantPositionProperty(
         offsetFrom(initialPosition, initialFrame.forward, NOSE_OFFSET_M),
@@ -420,9 +385,7 @@ export function EarthScene({
 
       const remotePositionProperty = new ConstantPositionProperty(initialPosition);
       const remoteNosePositionProperty = new ConstantPositionProperty(initialPosition);
-      const remoteInitialOrientation = peerVisual
-        ? modelOrientationFromFrame(initialFrame)
-        : orientationFromFrame(initialFrame);
+      const remoteInitialOrientation = orientationFromFrame(initialFrame);
       const remoteOrientationProperty = new ConstantProperty(remoteInitialOrientation);
       const remoteMaterial = Color.fromCssColorString("#ffd48a").withAlpha(0.9);
       const remoteAccent = Color.fromCssColorString("#ff9f43").withAlpha(0.9);
@@ -506,10 +469,9 @@ export function EarthScene({
 
       const updateCamera = (position: Cartesian3, frame: FlightFrame) => {
         if (!viewer) return;
-        const cameraReferenceUp = stabilizedCameraUp(position, frame);
         const cameraPosition = offsetFrom(position, frame.forward, -CAMERA_BACK_M);
         const cameraLift = Cartesian3.multiplyByScalar(
-          cameraReferenceUp,
+          frame.up,
           CAMERA_UP_M,
           new Cartesian3(),
         );
@@ -519,7 +481,7 @@ export function EarthScene({
         const direction = Cartesian3.subtract(lookTarget, cameraPosition, new Cartesian3());
         Cartesian3.normalize(direction, direction);
 
-        const right = Cartesian3.cross(direction, cameraReferenceUp, new Cartesian3());
+        const right = Cartesian3.cross(direction, frame.up, new Cartesian3());
         if (Cartesian3.magnitudeSquared(right) < 1e-8) {
           Cartesian3.clone(frame.left, right);
           Cartesian3.negate(right, right);
@@ -574,7 +536,7 @@ export function EarthScene({
         remotePositionProperty.setValue(position);
         remoteNosePositionProperty.setValue(offsetFrom(position, frame.forward, NOSE_OFFSET_M));
         remoteOrientationProperty.setValue(
-          peerVisual ? modelOrientationFromFrame(frame) : orientationFromFrame(frame),
+          orientationFromFrame(frame),
         );
       };
 
@@ -618,7 +580,7 @@ export function EarthScene({
           return;
         }
 
-        const deltaSeconds = Math.min(elapsedMs / 1_000, 0.05);
+        const deltaSeconds = elapsedMs / 1_000;
         lastFrameTime = now;
         applyMultiplayerStagingIfNeeded();
 
@@ -627,7 +589,7 @@ export function EarthScene({
           roll: keyAxis(pressedKeys, "KeyD", "KeyA"),
           throttle: keyAxis(pressedKeys, "ArrowUp", "ArrowDown"),
         };
-        flightState = integrateFlightState(flightState, input, deltaSeconds);
+        flightState = integrateFlightElapsed(flightState, input, deltaSeconds);
 
         const position = Cartesian3.fromDegrees(
           flightState.longitudeDeg,
@@ -637,9 +599,7 @@ export function EarthScene({
         const flightFrame = computeFlightFrame(position, flightState);
         positionProperty.setValue(position);
         nosePositionProperty.setValue(offsetFrom(position, flightFrame.forward, NOSE_OFFSET_M));
-        orientationProperty.setValue(
-          localVisual ? modelOrientationFromFrame(flightFrame) : orientationFromFrame(flightFrame),
-        );
+        orientationProperty.setValue(orientationFromFrame(flightFrame));
         updateCamera(position, flightFrame);
         updateRemoteAircraft(now, elapsedMs);
 
@@ -657,6 +617,7 @@ export function EarthScene({
       window.addEventListener("keydown", handleKeyDown, { passive: false });
       window.addEventListener("keyup", handleKeyUp, { passive: false });
       window.addEventListener("blur", handleBlur);
+      document.addEventListener("visibilitychange", handleVisibilityChange);
       updateCamera(initialPosition, initialFrame);
       publishFlightState();
       updateRemoteAircraft(performance.now());
@@ -674,6 +635,7 @@ export function EarthScene({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleBlur);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (viewer && !viewer.isDestroyed()) viewer.destroy();
     };
   }, [localAircraftId, peerAircraftId, onLocalPose, onTelemetry, onTheaterStatus]);
