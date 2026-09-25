@@ -193,7 +193,7 @@ for (const token of [
   "peerAircraftId",
   "orientationFromFrame(frame)",
   "model: {",
-  "CAMERA_UP_M = 16",
+  "CAMERA_UP_M = ARCADE_LOCK.cameraUpM",
   "integrateFlightElapsed",
   "REMOTE_EXTRAPOLATION_LIMIT_MS = 180",
   "REMOTE_SMOOTHING_TIME_CONSTANT_MS = 65",
@@ -204,6 +204,10 @@ for (const token of [
   "remoteMarkerPositionProperty.setValue(offsetFrom(position, frame.up, REMOTE_MARKER_LIFT_M))",
 ]) {
   if (!earthScene.includes(token)) throw new Error(`EarthScene aircraft/network presentation contract missing: ${token}`);
+}
+const arcadeProjectiles = await readFile(join(root, "src/shared/arcade-projectiles.mjs"), "utf8");
+if (!arcadeProjectiles.includes("cameraUpM: 16")) {
+  throw new Error("Accepted chase-camera lift must stay at 16 m for rendering and capture");
 }
 if (earthScene.includes("GLTF_TO_CAS_BODY") || earthScene.includes("modelOrientationFromFrame")) {
   throw new Error("Cesium model axes must not receive a second glTF-to-body rotation");
