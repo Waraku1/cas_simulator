@@ -51,7 +51,18 @@ export type CompetitionStateSnapshot = Readonly<{
   regulationEndsAtMs: number;
   overtimeEndsAtMs: number;
   participants: readonly CompetitionParticipantSnapshot[];
+  projectiles?: readonly CompetitionProjectileSnapshot[];
   result: CompetitionResultSnapshot | null;
+}>;
+
+export type CompetitionProjectileSnapshot = Readonly<{
+  id: number;
+  ownerSlot: CompetitionSlot;
+  weaponId: WeaponId;
+  locked: boolean;
+  latitudeDeg: number;
+  longitudeDeg: number;
+  altitudeM: number;
 }>;
 
 export type ClientCompetitionMessage =
@@ -71,7 +82,8 @@ export type CompetitionActionFeedbackCode =
   | "peer_unavailable"
   | "pose_stale"
   | "outside_interaction"
-  | "invalid_weapon";
+  | "invalid_weapon"
+  | "projectile_limit";
 
 export type ServerCompetitionMessage =
   | Readonly<{
@@ -84,6 +96,7 @@ export type ServerCompetitionMessage =
       code: CompetitionActionFeedbackCode;
       nextActionAtMs: number;
       weaponId?: WeaponId;
+      locked?: boolean;
     }>;
 
 export type CompetitionPosition = Readonly<{
@@ -114,6 +127,7 @@ const ACTION_FEEDBACK_CODES = new Set<CompetitionActionFeedbackCode>([
   "pose_stale",
   "outside_interaction",
   "invalid_weapon",
+  "projectile_limit",
 ]);
 
 const RESULT_REASONS = new Set<MatchResultReason>([
@@ -151,6 +165,17 @@ function validParticipant(value: unknown): value is CompetitionParticipantSnapsh
       || (finite(value.disconnectDeadlineMs) && value.disconnectDeadlineMs >= 0));
 }
 
+function validProjectile(value: unknown): value is CompetitionProjectileSnapshot {
+  return record(value)
+    && Number.isSafeInteger(value.id) && (value.id as number) >= 0
+    && (value.ownerSlot === 1 || value.ownerSlot === 2)
+    && isWeaponId(value.weaponId)
+    && typeof value.locked === "boolean"
+    && finite(value.latitudeDeg) && Math.abs(value.latitudeDeg) <= 90
+    && finite(value.longitudeDeg) && Math.abs(value.longitudeDeg) <= 180
+    && finite(value.altitudeM) && value.altitudeM >= -1_000 && value.altitudeM <= 100_000;
+}
+
 export function parseClientCompetitionMessage(text: string): ClientCompetitionMessage | null {
   if (byteLength(text) > COMPETITION_MESSAGE_MAX_BYTES) return null;
   try {
@@ -185,6 +210,7 @@ export function parseServerCompetitionMessage(text: string): ServerCompetitionMe
         || !finite(value.nextActionAtMs)
         || value.nextActionAtMs < 0
         || (value.weaponId !== undefined && !isWeaponId(value.weaponId))
+        || (value.locked !== undefined && typeof value.locked !== "boolean")
       ) {
         return null;
       }
@@ -206,6 +232,10 @@ export function parseServerCompetitionMessage(text: string): ServerCompetitionMe
       || state.participants.length !== 2
       || !validParticipant(state.participants[0])
       || !validParticipant(state.participants[1])
+      || (state.projectiles !== undefined
+        && (!Array.isArray(state.projectiles)
+          || state.projectiles.length > 8
+          || !state.projectiles.every(validProjectile)))
     ) {
       return null;
     }
