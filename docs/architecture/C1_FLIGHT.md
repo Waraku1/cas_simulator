@@ -58,6 +58,8 @@ This is intentionally a gentle game-flight coupling, not a claim of real-aircraf
 
 The flight model exports its canonical local body frame. Cesium converts that frame from local ENU to ECEF and uses it consistently for aircraft orientation, asymmetric nose marker, chase-camera position, and camera look direction. Aircraft nose, camera, and actual travel therefore share one reference-frame contract.
 
+Post-release correction: Cesium already converts a standard glTF model's axes when rendering an Entity model. The model and fallback geometry therefore receive the same body-frame orientation; applying another glTF-to-body rotation makes the model appear sideways. The chase camera retains the accepted C1.6 body-up follow and 16 m lift. Frame time is integrated in bounded 60 Hz steps, so a slow render frame no longer drops elapsed input time while the accepted angular response parameters remain fixed.
+
 ## Verification evidence
 
 C1.6 final implementation:
