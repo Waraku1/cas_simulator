@@ -1,5 +1,13 @@
 import { aircraftById } from "../shared/aircraft";
 import {
+  ARCADE_TICK_MS,
+  MAX_ARCADE_PROJECTILES,
+  advanceArcadeProjectile,
+  createArcadeProjectile,
+  gamePointToPosition,
+  type ArcadeProjectile,
+} from "../shared/arcade-projectiles.mjs";
+import {
   COMPETITION_POSE_FRESHNESS_MS,
   competitionDistanceM,
   type CompetitionActionFeedbackCode,
@@ -39,6 +47,8 @@ export type StoredCompetitionRuntime = {
   regulationEndsAtMs: number;
   overtimeEndsAtMs: number;
   participants: [StoredCompetitionParticipant, StoredCompetitionParticipant];
+  projectiles?: ArcadeProjectile[];
+  nextProjectileSequence?: number;
   result: {
     winnerSlot: CompetitionSlot | null;
     reason: MatchResultReason;
@@ -56,6 +66,7 @@ export type ActionResolution = Readonly<{
   code: CompetitionActionFeedbackCode;
   weaponId: WeaponId;
   nextActionAtMs: number;
+  locked: boolean;
 }>;
 
 const regulationDurationMs = MATCH_RULES.regulationSeconds * 1_000;
@@ -88,6 +99,7 @@ function completed(
     ...state,
     phase: reason === "infrastructure-failure" ? "no-contest" : "completed",
     result: { winnerSlot, reason },
+    projectiles: [],
   };
 }
 
@@ -116,6 +128,8 @@ export function createCompetitionRuntime(init: CompetitionRoomInit): StoredCompe
       disconnectDeadlineMs: init.activeAtMs + disconnectGraceMs,
     })) as [StoredCompetitionParticipant, StoredCompetitionParticipant],
     result: null,
+    projectiles: [],
+    nextProjectileSequence: 0,
   };
 }
 
@@ -257,6 +271,7 @@ export function resolveCompetitionAction(
     code,
     weaponId: requestedWeaponId,
     nextActionAtMs: currentReadyAt,
+    locked: false,
   });
 
   if (!weapon) return reject("invalid_weapon");
@@ -275,8 +290,18 @@ export function resolveCompetitionAction(
   if (competitionDistanceM(localPose.pose, peerPose.pose) > weapon.activationRadiusM) {
     return reject("outside_interaction");
   }
+  if ((advanced.projectiles?.length ?? 0) >= MAX_ARCADE_PROJECTILES) return reject("projectile_limit");
 
   const nextReadyAt = nowMs + weapon.cooldownMs;
+  const projectile = createArcadeProjectile(
+    (advanced.nextProjectileSequence ?? 0) + 1,
+    slot,
+    requestedWeaponId,
+    nowMs,
+    localPose.pose,
+    peerPose.pose,
+    weapon.activationRadiusM,
+  );
   const participants = advanced.participants.map((participant) => {
     if (participant.slot === local.slot) {
       return {
@@ -288,27 +313,57 @@ export function resolveCompetitionAction(
         },
       };
     }
-    if (participant.slot === peer.slot) {
-      return {
-        ...participant,
-        heartPoints: clampHeartPoints(participant.heartPoints - weapon.heartPointEffect),
-      };
-    }
     return participant;
   }) as [StoredCompetitionParticipant, StoredCompetitionParticipant];
 
-  advanced = advanceCompetitionRuntime({ ...advanced, participants }, nowMs);
+  advanced = { ...advanced, participants,
+    projectiles: [...(advanced.projectiles ?? []), projectile],
+    nextProjectileSequence: projectile.id,
+  };
   return {
     state: advanced,
     accepted: true,
     code: "accepted",
     weaponId: requestedWeaponId,
+    locked: projectile.targetSlot !== null,
     nextActionAtMs: weaponReadyAt(
       participantBySlot(advanced, slot).weaponReadyAtMs,
       requestedWeaponId,
       nextReadyAt,
     ),
   };
+}
+
+/** Server-side arcade movement and contact. Pose freshness prevents an old
+ * client position from producing a new contact after the link goes stale. */
+export function advanceCompetitionProjectiles(
+  state: StoredCompetitionRuntime,
+  nowMs: number,
+  poseForSlot: (slot: CompetitionSlot) => ServerPoseSample | null,
+): StoredCompetitionRuntime {
+  if (state.result || !state.projectiles?.length) return state;
+  const cutoff = Math.min(nowMs, state.overtimeEndsAtMs,
+    state.phase === "active" && state.participants[0].heartPoints !== state.participants[1].heartPoints
+      ? state.regulationEndsAtMs : Number.POSITIVE_INFINITY);
+  const projectiles: ArcadeProjectile[] = [];
+  const damage: [number, number] = [0, 0];
+  for (const projectile of state.projectiles) {
+    const peerSlot = projectile.ownerSlot === 1 ? 2 : 1;
+    const sample = poseForSlot(peerSlot);
+    const peerPose = sample && cutoff - sample.receivedAtMs <= COMPETITION_POSE_FRESHNESS_MS
+      && sample.receivedAtMs <= cutoff && state.participants[peerSlot - 1].connected
+      ? sample.pose : null;
+    const result = advanceArcadeProjectile(projectile, cutoff, peerPose);
+    if (result.projectile) projectiles.push(result.projectile);
+    if (result.touched) {
+      damage[peerSlot - 1] += weaponById(projectile.weaponId)?.heartPointEffect ?? 0;
+    }
+  }
+  const participants = state.participants.map((participant) => ({
+    ...participant,
+    heartPoints: clampHeartPoints(participant.heartPoints - damage[participant.slot - 1]),
+  })) as [StoredCompetitionParticipant, StoredCompetitionParticipant];
+  return { ...state, participants, projectiles };
 }
 
 export function competitionSnapshot(
@@ -332,6 +387,13 @@ export function competitionSnapshot(
       weaponReadyAtMs: weaponReadiness(participant),
       disconnectDeadlineMs: participant.disconnectDeadlineMs,
     })) as CompetitionStateSnapshot["participants"],
+    projectiles: (advanced.projectiles ?? []).map((projectile) => ({
+      id: projectile.id,
+      ownerSlot: projectile.ownerSlot,
+      weaponId: projectile.weaponId,
+      locked: projectile.targetSlot !== null,
+      ...gamePointToPosition(projectile.origin, projectile.position),
+    })),
     result: advanced.result,
   };
 }
@@ -343,6 +405,7 @@ export function nextCompetitionDeadline(state: StoredCompetitionRuntime, nowMs: 
     advanced.phase === "countdown" ? advanced.activeAtMs : null,
     advanced.phase === "active" ? advanced.regulationEndsAtMs : null,
     advanced.phase === "overtime" ? advanced.overtimeEndsAtMs : null,
+    advanced.projectiles?.length ? nowMs + ARCADE_TICK_MS : null,
     ...advanced.participants.map((participant) => participant.disconnectDeadlineMs),
   ].filter((value): value is number => value !== null && value > nowMs);
   return deadlines.length > 0 ? Math.min(...deadlines) : null;
