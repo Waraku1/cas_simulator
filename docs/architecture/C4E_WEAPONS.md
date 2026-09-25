@@ -65,6 +65,17 @@ The production RankedMatch authority verifies:
 - selected weapon cooldown;
 - fresh authoritative pose samples;
 - 3D participant distance against the selected weapon's CAS interaction radius.
+- an available game projectile slot (at most eight in flight per match).
+
+An accepted request creates a server-owned projectile eight game units ahead of the aircraft.
+It does **not** immediately change HP. The server advances projectiles in bounded game steps,
+checks each traveled segment against the peer's current aircraft position, and applies HP
+only when the two touch. A miss or an expired projectile has no HP effect. Stale peer poses
+cannot create a contact, and completing the match removes remaining projectiles.
+
+`GUN` travels along the aircraft's forward direction without tracking. `MISSILE` tracks
+only when the opponent is in the forward aim region when fired; otherwise it travels
+straight. These are intentionally abstract game rules, with no real-world guidance model.
 
 Only the server may:
 
@@ -95,6 +106,8 @@ The WebSocket message type remains `action` during the migration. The new client
 - New client -> old Worker: old parser ignores the additional field and the match remains usable during rollout.
 - Old client -> new Worker: omitted `weaponId` defaults to `missile`.
 - New Worker snapshots add `weaponReadyAtMs`; the new client accepts old snapshots that do not contain it.
+- New Worker snapshots add optional `projectiles`; the client accepts snapshots without it.
+- Action feedback may include `locked`; older feedback without it remains valid.
 
 This compatibility layer may be removed after production Worker and supported clients are fully migrated.
 
@@ -114,6 +127,8 @@ The match HUD displays:
 - selected weapon name;
 - READY / selected-weapon cooldown;
 - server feedback;
+- game lock availability and in-flight projectile count;
+- visible game projectile points at server-authoritative positions;
 - `← / → SWITCH · SPACE FIRE`.
 
 MISSILE uses a warm accent; GUN uses the existing cyan accent.
@@ -128,4 +143,4 @@ C4E v1 does not attempt to model:
 - weapon-specific real-aircraft performance;
 - client-authoritative hit detection.
 
-Visual launch effects and richer target presentation may be layered on later without changing this authority contract.
+Richer visual effects may be layered on later without changing this authority contract.
