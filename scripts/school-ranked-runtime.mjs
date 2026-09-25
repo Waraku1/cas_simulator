@@ -1,5 +1,12 @@
 import aircraftCatalog from "../src/shared/aircraft-catalog.json" with { type: "json" };
 import weaponCatalog from "../src/shared/weapon-catalog.json" with { type: "json" };
+import {
+  ARCADE_TICK_MS,
+  MAX_ARCADE_PROJECTILES,
+  advanceArcadeProjectile,
+  createArcadeProjectile,
+  gamePointToPosition,
+} from "../src/shared/arcade-projectiles.mjs";
 
 const STARTING_HP = 100;
 const REGULATION_MS = 4 * 60 * 1_000;
@@ -20,6 +27,7 @@ function completed(state, winnerSlot, reason) {
     ...state,
     phase: reason === "infrastructure-failure" ? "no-contest" : "completed",
     result: { winnerSlot, reason },
+    projectiles: [],
   };
 }
 
@@ -50,6 +58,8 @@ export function createSchoolRankedRuntime(init) {
       disconnectDeadlineMs: init.activeAtMs + DISCONNECT_GRACE_MS,
     })),
     result: null,
+    projectiles: [],
+    nextProjectileSequence: 0,
   };
 }
 
@@ -161,6 +171,7 @@ export function resolveSchoolRankedAction(
     code,
     weaponId: requestedWeaponId,
     nextActionAtMs: currentReadyAt,
+    locked: false,
   });
 
   if (!weapon) return reject("invalid_weapon");
@@ -178,10 +189,22 @@ export function resolveSchoolRankedAction(
   if (distanceM(localPose.pose, peerPose.pose) > weapon.activationRadiusM) {
     return reject("outside_interaction");
   }
+  if ((advanced.projectiles?.length ?? 0) >= MAX_ARCADE_PROJECTILES) return reject("projectile_limit");
 
   const nextReadyAt = nowMs + weapon.cooldownMs;
+  const projectile = createArcadeProjectile(
+    (advanced.nextProjectileSequence ?? 0) + 1,
+    slot,
+    requestedWeaponId,
+    nowMs,
+    localPose.pose,
+    peerPose.pose,
+    weapon.activationRadiusM,
+  );
   advanced = {
     ...advanced,
+    projectiles: [...(advanced.projectiles ?? []), projectile],
+    nextProjectileSequence: projectile.id,
     participants: advanced.participants.map((participant) => {
       if (participant.slot === local.slot) {
         return {
@@ -193,15 +216,6 @@ export function resolveSchoolRankedAction(
           },
         };
       }
-      if (participant.slot === peer.slot) {
-        return {
-          ...participant,
-          heartPoints: Math.max(
-            0,
-            Math.min(STARTING_HP, Math.round(participant.heartPoints - weapon.heartPointEffect)),
-          ),
-        };
-      }
       return participant;
     }),
   };
@@ -211,9 +225,39 @@ export function resolveSchoolRankedAction(
     accepted: true,
     code: "accepted",
     weaponId: requestedWeaponId,
+    locked: projectile.targetSlot !== null,
     nextActionAtMs: weaponReadiness(advanced.participants[slot - 1])[requestedWeaponId],
   };
 }
+
+export function advanceSchoolRankedProjectiles(state, nowMs, poseForSlot) {
+  if (state.result || !state.projectiles?.length) return state;
+  const cutoff = Math.min(nowMs, state.overtimeEndsAtMs,
+    state.phase === "active" && state.participants[0].heartPoints !== state.participants[1].heartPoints
+      ? state.regulationEndsAtMs : Number.POSITIVE_INFINITY);
+  const projectiles = [];
+  const damage = [0, 0];
+  for (const projectile of state.projectiles) {
+    const peerSlot = peerSlotOf(projectile.ownerSlot);
+    const sample = poseForSlot(peerSlot);
+    const peerPose = sample && cutoff - sample.receivedAtMs <= POSE_FRESHNESS_MS
+      && sample.receivedAtMs <= cutoff && state.participants[peerSlot - 1].connected
+      ? sample.pose : null;
+    const result = advanceArcadeProjectile(projectile, cutoff, peerPose);
+    if (result.projectile) projectiles.push(result.projectile);
+    if (result.touched) damage[peerSlot - 1] += weaponById.get(projectile.weaponId)?.heartPointEffect ?? 0;
+  }
+  return {
+    ...state,
+    projectiles,
+    participants: state.participants.map((participant) => ({
+      ...participant,
+      heartPoints: Math.max(0, participant.heartPoints - damage[participant.slot - 1]),
+    })),
+  };
+}
+
+const peerSlotOf = (slot) => slot === 1 ? 2 : 1;
 
 export function schoolRankedSnapshot(state, nowMs) {
   const advanced = advanceSchoolRankedRuntime(state, nowMs);
@@ -233,6 +277,13 @@ export function schoolRankedSnapshot(state, nowMs) {
       weaponReadyAtMs: weaponReadiness(participant),
       disconnectDeadlineMs: participant.disconnectDeadlineMs,
     })),
+    projectiles: (advanced.projectiles ?? []).map((projectile) => ({
+      id: projectile.id,
+      ownerSlot: projectile.ownerSlot,
+      weaponId: projectile.weaponId,
+      locked: projectile.targetSlot !== null,
+      ...gamePointToPosition(projectile.origin, projectile.position),
+    })),
     result: advanced.result,
   };
 }
@@ -244,6 +295,7 @@ export function nextSchoolRankedDeadline(state, nowMs) {
     advanced.phase === "countdown" ? advanced.activeAtMs : null,
     advanced.phase === "active" ? advanced.regulationEndsAtMs : null,
     advanced.phase === "overtime" ? advanced.overtimeEndsAtMs : null,
+    advanced.projectiles?.length ? nowMs + ARCADE_TICK_MS : null,
     ...advanced.participants.map((participant) => participant.disconnectDeadlineMs),
   ].filter((value) => value !== null && value > nowMs);
   return deadlines.length > 0 ? Math.min(...deadlines) : null;
