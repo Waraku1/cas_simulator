@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { CompetitionProjectileSnapshot } from "../shared/competition";
+import type { AircraftPose } from "../shared/multiplayer";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { EarthScene } from "./components/EarthScene";
 import { FlightHud } from "./components/FlightHud";
@@ -39,6 +41,8 @@ type FlightRuntimeProps = Readonly<{
   stagingSlot?: 1 | 2 | null;
   localAircraftId?: string | null;
   peerAircraftId?: string | null;
+  projectiles?: readonly CompetitionProjectileSnapshot[];
+  onLocalPose?: (pose: AircraftPose) => void;
   onMultiplayerState?: (state: FlightRuntimeMultiplayerState) => void;
 }>;
 
@@ -57,12 +61,19 @@ export function FlightRuntime({
   stagingSlot = null,
   localAircraftId = null,
   peerAircraftId = null,
+  projectiles,
+  onLocalPose,
   onMultiplayerState,
 }: FlightRuntimeProps) {
   const [telemetry, setTelemetry] = useState(INITIAL_FLIGHT_TELEMETRY);
   const [theaterStatus, setTheaterStatus] = useState(INITIAL_THEATER_STATUS);
   const manualMultiplayer = useMultiplayer(externalNetworkController ? null : autoRoomCode);
   const multiplayer = externalNetworkController ?? manualMultiplayer;
+  const publishLocalPose = multiplayer.publishLocalPose;
+  const handleLocalPose = useCallback((pose: AircraftPose) => {
+    publishLocalPose(pose);
+    onLocalPose?.(pose);
+  }, [publishLocalPose, onLocalPose]);
 
   useEffect(() => {
     onMultiplayerState?.({
@@ -85,13 +96,14 @@ export function FlightRuntime({
   return (
     <main className="app-shell">
       <EarthScene
-        onLocalPose={multiplayer.publishLocalPose}
+        onLocalPose={handleLocalPose}
         onTelemetry={setTelemetry}
         onTheaterStatus={setTheaterStatus}
         remotePose={multiplayer.remotePose}
         localSlot={stagingSlot ?? multiplayer.slot}
         localAircraftId={localAircraftId}
         peerAircraftId={peerAircraftId}
+        projectiles={projectiles}
       />
       <FlightHud telemetry={telemetry} />
       <TheaterStatusPanel status={theaterStatus} />
