@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import aircraftCatalog from "../src/shared/aircraft-catalog.json" with { type: "json" };
 import {
   advanceSchoolRankedRuntime,
+  advanceSchoolRankedProjectiles,
   createSchoolRankedRuntime,
   forfeitSchoolRanked,
   markSchoolRankedConnected,
@@ -153,6 +154,12 @@ function broadcastState(match, nowMs = Date.now()) {
   for (const client of match.clients.values()) sendJson(client, message);
 }
 
+function rankedPoseForSlot(match, slot) {
+  const client = match.clients.get(slot);
+  return client?.latestPose && client.latestPoseReceivedAtMs !== null
+    ? { pose: client.latestPose, receivedAtMs: client.latestPoseReceivedAtMs } : null;
+}
+
 function scheduleMatch(match) {
   if (match.timer) clearTimeout(match.timer);
   match.timer = null;
@@ -161,16 +168,14 @@ function scheduleMatch(match) {
   if (deadline === null) return;
   match.timer = setTimeout(() => {
     const tickNow = Date.now();
-    match.state = advanceSchoolRankedRuntime(match.state, tickNow);
-    if (match.state.result) void persistResult(match, tickNow);
-    broadcastState(match, tickNow);
-    scheduleMatch(match);
+    updateState(match, match.state, tickNow);
   }, Math.max(0, deadline - nowMs));
   match.timer.unref?.();
 }
 
 function updateState(match, state, nowMs = Date.now(), broadcast = true) {
-  match.state = advanceSchoolRankedRuntime(state, nowMs);
+  match.state = advanceSchoolRankedRuntime(
+    advanceSchoolRankedProjectiles(state, nowMs, (slot) => rankedPoseForSlot(match, slot)), nowMs);
   if (match.state.result) void persistResult(match, nowMs);
   scheduleMatch(match);
   if (broadcast) broadcastState(match, nowMs);
@@ -326,12 +331,16 @@ function handleRankedMessage(client, payload) {
   const match = rankedMatches.get(client.matchId);
   if (!match) return;
   const nowMs = Date.now();
-  const advanced = advanceSchoolRankedRuntime(match.state, nowMs);
-  if (advanced !== match.state) updateState(match, advanced, nowMs);
+  if (match.state.projectiles?.length) updateState(match, match.state, nowMs);
+  else {
+    const advanced = advanceSchoolRankedRuntime(match.state, nowMs);
+    if (advanced !== match.state) updateState(match, advanced, nowMs);
+  }
 
   if (value.type === "pose" && validPoseSnapshot(value.pose)) {
     client.latestPose = value.pose;
     client.latestPoseReceivedAtMs = nowMs;
+    if (match.state.projectiles?.length) updateState(match, match.state, nowMs);
     const peer = match.clients.get(client.slot === 1 ? 2 : 1);
     if (peer) sendJson(peer, { type: "peer_pose", playerId: client.playerId, serverTimeMs: nowMs, pose: value.pose });
     return;
@@ -349,9 +358,10 @@ function handleRankedMessage(client, payload) {
       nowMs,
       client.latestPose && client.latestPoseReceivedAtMs !== null ? { pose: client.latestPose, receivedAtMs: client.latestPoseReceivedAtMs } : null,
       peer?.latestPose && peer.latestPoseReceivedAtMs !== null ? { pose: peer.latestPose, receivedAtMs: peer.latestPoseReceivedAtMs } : null,
+      value.weaponId ?? "missile",
     );
     updateState(match, resolution.state, nowMs);
-    sendJson(client, { type: "action_feedback", accepted: resolution.accepted, code: resolution.code, nextActionAtMs: resolution.nextActionAtMs, weaponId: resolution.weaponId });
+    sendJson(client, { type: "action_feedback", accepted: resolution.accepted, code: resolution.code, nextActionAtMs: resolution.nextActionAtMs, weaponId: resolution.weaponId, locked: resolution.locked });
     return;
   }
   sendJson(client, { type: "error", code: "invalid_message", message: "Ranked match payload failed validation." });
