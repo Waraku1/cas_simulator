@@ -42,7 +42,10 @@ jobs:
       - name: Verify C4C lifecycle contract
         run: pnpm verify:c4c:runtime
 
-      - name: Verify arcade projectile contact and lock\n        run: node scripts/verify-arcade-projectiles.mjs\n\n      - name: Verify C4D production binding validator
+      - name: Verify arcade projectile contact and lock
+        run: node scripts/verify-arcade-projectiles.mjs
+
+      - name: Verify C4D production binding validator
         run: C4D_BINDING_SELF_TEST=1 pnpm verify:c4d:binding
 
       - name: Verify public account lifecycle contract
