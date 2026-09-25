@@ -122,6 +122,11 @@ const aircraftCatalog = await readFile(join(root, "src/shared/aircraft-catalog.j
 if (!aircraftCatalog.includes('"aircraftId": "orbit-a1"') || !aircraftCatalog.includes('"appearanceKey": "bell-x1"')) {
   throw new Error("orbit-a1 must retain the reviewed Bell X-1 visual identity");
 }
+for (const aircraft of JSON.parse(aircraftCatalog)) {
+  if (aircraft.appearanceKey !== "bell-x1" || aircraft.visualScale !== 1) {
+    throw new Error(`${aircraft.aircraftId} must use the shared Bell X-1 geometry at the same visual scale`);
+  }
+}
 
 const aircraftSync = await readFile(join(root, "scripts/sync-aircraft-assets.mjs"), "utf8");
 for (const token of [
@@ -182,6 +187,7 @@ for (const token of [
   "silhouetteColor: aircraftAccent",
   "silhouetteColor: remoteAccent",
   "silhouetteSize: 2.5",
+  "remoteMarkerPositionProperty.setValue(offsetFrom(position, frame.up, REMOTE_MARKER_LIFT_M))",
 ]) {
   if (!earthScene.includes(token)) throw new Error(`EarthScene aircraft/network presentation contract missing: ${token}`);
 }

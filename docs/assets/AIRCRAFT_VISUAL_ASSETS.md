@@ -2,7 +2,7 @@
 
 ## Bell X-1
 
-CAS gameplay identity: `orbit-a1`
+CAS gameplay identities: `orbit-a1`, `strata-b2`, `kite-c3`, and free flight
 
 Visual identity: **Bell X-1**
 
@@ -36,7 +36,7 @@ The synchronization log and `bell-x1.source.json` retain the source bounds, norm
 
 ### Product semantics
 
-The Bell X-1 geometry is used as a **visual aircraft identity**. CAS ranked handling remains the normalized `orbit-a1` gameplay profile. SPEED / PITCH / ROLL / ACTION values shown by CAS are game-balance values and must not be represented as historical Bell X-1 performance data.
+The Bell X-1 geometry is used as the **shared visual identity** for every current aircraft. Each aircraft retains its own fictional ranked handling profile. The 2.2× scene presentation scale and 72-pixel minimum make the 9.373 m model readable from the existing chase camera, without changing gameplay movement. The peer marker is displayed above the same live pose as the 3D aircraft so it does not hide the model. SPEED / PITCH / ROLL / ACTION values shown by CAS are game-balance values and must not be represented as historical Bell X-1 performance data.
 
 Basic source credit should remain visible in project documentation even though CC0 does not require attribution.
 

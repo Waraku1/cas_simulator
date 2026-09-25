@@ -21,8 +21,8 @@
     "maximumSpeedMps": 175,
     "pitchAccelerationDegS2": 40,
     "rollAccelerationDegS2": 72,
-    "visualScale": 1.08,
-    "appearanceKey": "strata-b2",
+    "visualScale": 1,
+    "appearanceKey": "bell-x1",
     "actionModuleId": "tempo-link",
     "weaponIds": [
       "missile",
@@ -36,8 +36,8 @@
     "maximumSpeedMps": 140,
     "pitchAccelerationDegS2": 60,
     "rollAccelerationDegS2": 108,
-    "visualScale": 0.88,
-    "appearanceKey": "kite-c3",
+    "visualScale": 1,
+    "appearanceKey": "bell-x1",
     "actionModuleId": "focus-link",
     "weaponIds": [
       "missile",

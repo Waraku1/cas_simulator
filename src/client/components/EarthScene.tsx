@@ -58,6 +58,7 @@ const CAMERA_LOOK_AHEAD_M = 72;
 const REMOTE_EXTRAPOLATION_LIMIT_MS = 180;
 const REMOTE_SMOOTHING_TIME_CONSTANT_MS = 65;
 const NOSE_OFFSET_M = 11;
+const REMOTE_MARKER_LIFT_M = 19;
 const MULTIPLAYER_STAGING_LONGITUDE_OFFSET_DEG = 0.00055;
 const SIMULATION_FRAME_INTERVAL_MS = 1_000 / C2_RESOURCE_BUDGET.runtimeFrameCapFps;
 
@@ -394,6 +395,9 @@ export function EarthScene({
 
       const remotePositionProperty = new ConstantPositionProperty(initialPosition);
       const remoteNosePositionProperty = new ConstantPositionProperty(initialPosition);
+      const remoteMarkerPositionProperty = new ConstantPositionProperty(
+        offsetFrom(initialPosition, initialFrame.up, REMOTE_MARKER_LIFT_M),
+      );
       const remoteInitialOrientation = orientationFromFrame(initialFrame);
       const remoteOrientationProperty = new ConstantProperty(remoteInitialOrientation);
       const remoteMaterial = Color.fromCssColorString("#ffd48a").withAlpha(0.9);
@@ -457,7 +461,7 @@ export function EarthScene({
       remoteEntities.push(viewer.entities.add({
         name: "C3 peer marker",
         show: false,
-        position: remotePositionProperty,
+        position: remoteMarkerPositionProperty,
         point: {
           pixelSize: 13,
           color: remoteAccent,
@@ -544,6 +548,7 @@ export function EarthScene({
         const frame = computeNetworkFlightFrame(position, renderedRemotePose.orientation);
         remotePositionProperty.setValue(position);
         remoteNosePositionProperty.setValue(offsetFrom(position, frame.forward, NOSE_OFFSET_M));
+        remoteMarkerPositionProperty.setValue(offsetFrom(position, frame.up, REMOTE_MARKER_LIFT_M));
         remoteOrientationProperty.setValue(
           orientationFromFrame(frame),
         );

@@ -60,6 +60,8 @@ The flight model exports its canonical local body frame. Cesium converts that fr
 
 Post-release correction: Cesium already converts a standard glTF model's axes when rendering an Entity model. The model and fallback geometry therefore receive the same body-frame orientation; applying another glTF-to-body rotation makes the model appear sideways. The chase camera retains the accepted C1.6 body-up follow and 16 m lift. Frame time is integrated in bounded 60 Hz steps, so a slow render frame no longer drops elapsed input time while the accepted angular response parameters remain fixed.
 
+Bell X-1 presentation: the official, physically normalized GLB is shared by all three current gameplay profiles and by free flight. Its display multiplier matches the previous game silhouette at the existing chase-camera distance; it does not change flight handling or source-model dimensions. The peer's orange marker is lifted above the same live pose used by the 3D model so it does not cover the aircraft. The marker and model still update from the same interpolated peer pose.
+
 ## Verification evidence
 
 C1.6 final implementation:
