@@ -35,9 +35,10 @@ export const ARCADE_LOCK: Readonly<{
 export function relativeGamePoint(origin: GamePosition, pose: GamePosition): GameVector;
 export function gamePointToPosition(origin: GamePosition, point: GameVector): GamePosition;
 export function gameForward(orientation: AircraftPose["orientation"]): GameVector;
+export function gameViewAimDirection(pose: AircraftPose & { view?: { yawRad: number; pitchRad: number } }): GameVector;
 export function gameLockAvailable(localPose: AircraftPose, peerPose: GamePosition, maximumDistance: number): boolean;
 export function gameCaptureAvailable(localPose: AircraftPose & { view?: { yawRad: number; pitchRad: number; looking?: boolean } }, peerPose: GamePosition, maximumDistance: number): boolean;
-export function createArcadeProjectile(id: number, ownerSlot: 1 | 2, weaponId: WeaponId, nowMs: number, localPose: AircraftPose, peerPose: GamePosition, maximumDistance: number, confirmedLock?: boolean): ArcadeProjectile;
+export function createArcadeProjectile(id: number, ownerSlot: 1 | 2, weaponId: WeaponId, nowMs: number, localPose: AircraftPose & { view?: { yawRad: number; pitchRad: number } }, peerPose: GamePosition, maximumDistance: number, confirmedLock?: boolean, lateralOffsetM?: number): ArcadeProjectile;
 export function advanceArcadeProjectile(projectile: ArcadeProjectile, nowMs: number, peerPose: GamePosition | null): {
   projectile: ArcadeProjectile | null;
   touched: boolean;

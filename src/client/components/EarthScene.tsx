@@ -187,9 +187,11 @@ function modelOrientationFromFrame(frame: FlightFrame) {
   return Quaternion.multiply(orientationFromFrame(frame), MODEL_HEADING_QUATERNION, new Quaternion());
 }
 
-function modelMatrixFromFrame(position: Cartesian3, frame: FlightFrame) {
+function modelMatrixFromFrame(position: Cartesian3, frame: FlightFrame,
+  proportions: readonly [number, number, number] = [1, 1, 1]) {
   const rotation = Matrix3.multiply(bodyRotationFromFrame(frame), MODEL_HEADING_CORRECTION, new Matrix3());
-  return Matrix4.fromRotationTranslation(rotation, position, new Matrix4());
+  const matrix = Matrix4.fromRotationTranslation(rotation, position, new Matrix4());
+  return Matrix4.multiplyByScale(matrix, new Cartesian3(...proportions), matrix);
 }
 
 function offsetFrom(position: Cartesian3, direction: Cartesian3, distanceM: number) {
@@ -330,6 +332,7 @@ export function EarthScene({
     let lastNetworkSnapshotTime = 0;
     let appliedMultiplayerSlot: 1 | 2 | null = null;
     let flightState = createInitialFlightState();
+    let cameraOrientation = flightState.orientation;
     let renderedRemotePose: AircraftPose | null = null;
     let localModel: Model | undefined;
     let remoteModel: Model | undefined;
@@ -344,6 +347,7 @@ export function EarthScene({
     let activePointerId: number | null = null;
     let pointerX = 0;
     let pointerY = 0;
+    let lastLookSnapshotTime = 0;
     const pressedKeys = new Set<string>();
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -417,7 +421,7 @@ export function EarthScene({
       const aircraftMaterial = Color.fromCssColorString("#d9fbff").withAlpha(0.92);
       const aircraftAccent = Color.fromCssColorString("#64e8ff").withAlpha(0.88);
       const localFallback: Entity[] = [];
-      let latestLocalModelMatrix = modelMatrixFromFrame(initialPosition, initialFrame);
+      let latestLocalModelMatrix = modelMatrixFromFrame(initialPosition, initialFrame, localVisual.proportions);
 
       if (localVisual && !competitiveModels) {
         viewer.entities.add({
@@ -439,7 +443,8 @@ export function EarthScene({
           position: positionProperty,
           orientation: orientationProperty,
           box: {
-            dimensions: new Cartesian3(18, 3.2, 2.1),
+            dimensions: new Cartesian3(18 * localVisual.proportions[0] * (localAircraft?.visualScale ?? 1),
+              3.2 * localVisual.proportions[1], 2.1 * localVisual.proportions[2]),
             material: aircraftMaterial,
             outline: true,
             outlineColor: aircraftAccent,
@@ -450,7 +455,8 @@ export function EarthScene({
           position: positionProperty,
           orientation: orientationProperty,
           box: {
-            dimensions: new Cartesian3(4.2, 22, 0.7),
+            dimensions: new Cartesian3(4.2 * localVisual.proportions[0],
+              22 * localVisual.proportions[1] * (localAircraft?.visualScale ?? 1), 0.7),
             material: aircraftAccent.withAlpha(0.72),
           },
         }));
@@ -479,7 +485,7 @@ export function EarthScene({
       const remoteAccent = Color.fromCssColorString("#ff9f43").withAlpha(0.9);
       const remoteEntities: Entity[] = [];
       const remoteFallback: Entity[] = [];
-      let latestRemoteModelMatrix = modelMatrixFromFrame(initialPosition, initialFrame);
+      let latestRemoteModelMatrix = modelMatrixFromFrame(initialPosition, initialFrame, peerVisual.proportions);
 
       if (peerVisual && !competitiveModels) {
         remoteEntities.push(viewer.entities.add({
@@ -504,7 +510,8 @@ export function EarthScene({
             position: remotePositionProperty,
             orientation: remoteOrientationProperty,
             box: {
-              dimensions: new Cartesian3(18, 3.2, 2.1),
+              dimensions: new Cartesian3(18 * peerVisual.proportions[0] * (peerAircraft?.visualScale ?? 1),
+                3.2 * peerVisual.proportions[1], 2.1 * peerVisual.proportions[2]),
               material: remoteMaterial,
               outline: true,
               outlineColor: remoteAccent,
@@ -516,7 +523,8 @@ export function EarthScene({
             position: remotePositionProperty,
             orientation: remoteOrientationProperty,
             box: {
-              dimensions: new Cartesian3(4.2, 22, 0.7),
+              dimensions: new Cartesian3(4.2 * peerVisual.proportions[0],
+                22 * peerVisual.proportions[1] * (peerAircraft?.visualScale ?? 1), 0.7),
               material: remoteAccent.withAlpha(0.72),
             },
           }),
@@ -567,7 +575,7 @@ export function EarthScene({
               remoteModelFailed = true;
               for (const entity of remoteFallback) entity.show = remotePoseRef.current !== null;
             }
-            setModelIssue("Bell X-1 3D model could not be displayed; showing the backup shape.");
+            setModelIssue(`${visual.realAircraftName} 3D model could not be displayed; showing the backup shape.`);
           });
           model.modelMatrix = local ? latestLocalModelMatrix : latestRemoteModelMatrix;
           model.show = local || remotePoseRef.current !== null;
@@ -576,7 +584,7 @@ export function EarthScene({
           else remoteModel = model;
         } catch {
           if (!cancelled) {
-            setModelIssue("Bell X-1 3D model could not be loaded; showing the backup shape.");
+            setModelIssue(`${visual.realAircraftName} 3D model could not be loaded; showing the backup shape.`);
           }
         }
       };
@@ -686,7 +694,7 @@ export function EarthScene({
         );
         const frame = computeNetworkFlightFrame(position, renderedRemotePose.orientation);
         if (competitiveModels) {
-          latestRemoteModelMatrix = modelMatrixFromFrame(position, frame);
+          latestRemoteModelMatrix = modelMatrixFromFrame(position, frame, peerVisual.proportions);
           if (remoteModel && !remoteModelFailed) remoteModel.modelMatrix = latestRemoteModelMatrix;
         }
         remotePositionProperty.setValue(position);
@@ -763,6 +771,11 @@ export function EarthScene({
         pointerY = event.clientY;
         viewYawRad = ((viewYawRad + dx * 0.004 + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
         viewPitchRad = Math.max(-1.1, Math.min(1.1, viewPitchRad + dy * 0.004));
+        const snapshotNow = performance.now();
+        if (snapshotNow - lastLookSnapshotTime >= 40) {
+          lastLookSnapshotTime = snapshotNow;
+          publishNetworkPose();
+        }
         event.preventDefault();
       };
       const handlePointerUp = (event: PointerEvent) => {
@@ -793,6 +806,7 @@ export function EarthScene({
         if (appliedMultiplayerSlot === slot) return;
 
         flightState = stagedFlightState(slot);
+        cameraOrientation = flightState.orientation;
         groundContactSent = false;
         appliedMultiplayerSlot = slot;
         lastNetworkSnapshotTime = 0;
@@ -827,7 +841,7 @@ export function EarthScene({
           roll: keyAxis(pressedKeys, "KeyD", "KeyA"),
           throttle: keyAxis(pressedKeys, "ArrowUp", "ArrowDown"),
         };
-        flightState = integrateFlightElapsed(flightState, input, deltaSeconds);
+        flightState = integrateFlightElapsed(flightState, input, deltaSeconds, localAircraft);
         const sampledGround = viewer.scene.globe.getHeight(
           Cartographic.fromDegrees(flightState.longitudeDeg, flightState.latitudeDeg),
         );
@@ -848,8 +862,11 @@ export function EarthScene({
           flightState.altitudeM,
         );
         const flightFrame = computeFlightFrame(position, flightState);
+        const cameraBlend = 1 - Math.exp(-Math.max(0, elapsedMs) / 85);
+        cameraOrientation = interpolateNetworkOrientation(cameraOrientation, flightState.orientation, cameraBlend);
+        const cameraFrame = computeNetworkFlightFrame(position, cameraOrientation);
         if (competitiveModels) {
-          latestLocalModelMatrix = modelMatrixFromFrame(position, flightFrame);
+          latestLocalModelMatrix = modelMatrixFromFrame(position, flightFrame, localVisual.proportions);
           if (localModel && !localModelFailed) {
             localModel.modelMatrix = latestLocalModelMatrix;
             for (const entity of localFallback) entity.show = !localModel.ready;
@@ -859,7 +876,7 @@ export function EarthScene({
         nosePositionProperty.setValue(offsetFrom(position, flightFrame.forward, NOSE_OFFSET_M));
         orientationProperty.setValue(orientationFromFrame(flightFrame));
         modelOrientationProperty.setValue(modelOrientationFromFrame(flightFrame));
-        updateCamera(position, flightFrame);
+        updateCamera(position, cameraFrame);
         updateRemoteAircraft(now, elapsedMs);
         updateProjectileVisuals(now, deltaSeconds);
 

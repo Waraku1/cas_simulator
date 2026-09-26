@@ -44,6 +44,16 @@ Aircraft catalog order defines the cycling order.
 
 Cooldowns are independent per weapon.
 
+## Match clock
+
+Regulation lasts five minutes. At the regulation boundary, both aircraft
+receive overtime even when their HP differs. The HP gap at that instant fixes
+the extension: 0–9 HP gives five minutes; 10–19 four; 20–29 three; 30–39 two;
+40 or more one. Later HP changes do not change the already selected deadline.
+The match still ends immediately if a participant reaches zero HP, leaves,
+or contacts the ground. At the extension deadline, higher HP wins and equal
+HP is a draw.
+
 ## Authority boundary
 
 The client may request:
@@ -66,16 +76,23 @@ The production RankedMatch authority verifies:
 - selected weapon cooldown;
 - fresh authoritative pose samples;
 - 3D participant distance against the MISSILE interaction radius; GUN can launch at any peer distance.
-- an available game projectile slot (at most eight in flight per match).
+- available game projectile slots (at most eight in flight per match, with
+  two slots reserved together for a GUN request).
 - for a tracking MISSILE, fresh view and target poses in the central camera region continuously for 1.2 s.
 
-An accepted request creates a server-owned projectile eight game units ahead of the aircraft.
+An accepted MISSILE request creates one server-owned projectile. A GUN request
+creates two independent projectiles, each starting eight game units along its
+aimed line with a small lateral separation.
 It does **not** immediately change HP. The server advances projectiles in bounded game steps,
 checks each traveled segment against the peer's current aircraft position, and applies HP
 only when the two touch. A miss or an expired projectile has no HP effect. Stale peer poses
 cannot create a contact, and completing the match removes remaining projectiles.
 
-`GUN` travels straight along the aircraft's forward direction without tracking. Its
+`GUN` travels straight along the current look direction without tracking. At a
+neutral view this is the original aircraft-forward path; during a drag the
+camera's orbit angle determines the new line while the aircraft's bank and
+flight direction remain unchanged. Each projectile resolves its own contact
+and 4 HP effect. Its
 game path is limited to 720 m and 1.8 s; contact is checked only along the traveled
 segments, and the display removes the point and short trail when the path ends.
 Holding Space sends GUN requests at 0.44 s intervals, subject to server cooldown and

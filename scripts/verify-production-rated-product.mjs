@@ -369,8 +369,22 @@ const [welcomeA, welcomeB] = await Promise.all([
 assert(welcomeA.slot !== welcomeB.slot, "Ranked participants did not receive distinct slots");
 await rankedB.waitFor((message) => message.type === "presence" && message.peerConnected === true, "peer linked");
 
+const smokePose = {
+  latitudeDeg: 34.4,
+  longitudeDeg: 132.45,
+  altitudeM: 2_000,
+  orientation: { w: 1, x: 0, y: 0, z: 0 },
+};
+const smokeTargetPose = {
+  ...smokePose,
+  longitudeDeg: smokePose.longitudeDeg + 80 / (111_195 * Math.cos(smokePose.latitudeDeg * Math.PI / 180)),
+};
 const waitUntilActiveMs = Math.max(0, a.activeAtMs - Date.now() + 150);
 if (waitUntilActiveMs > 0) await new Promise((resolve) => setTimeout(resolve, waitUntilActiveMs));
+// A normal client publishes poses through the countdown. An explicit fresh
+// pair here also advances the match if a Durable Object alarm is delayed.
+rankedA.send({ type: "pose", pose: { ...smokePose, sequence: 0, clientTimeMs: performance.now() } });
+rankedB.send({ type: "pose", pose: { ...smokeTargetPose, sequence: 0, clientTimeMs: performance.now() } });
 
 await Promise.all([
   rankedA.waitFor(
@@ -385,19 +399,9 @@ await Promise.all([
   ),
 ]);
 
-const smokePose = {
-  latitudeDeg: 34.4,
-  longitudeDeg: 132.45,
-  altitudeM: 2_000,
-  orientation: { w: 1, x: 0, y: 0, z: 0 },
-};
-const smokeTargetPose = {
-  ...smokePose,
-  longitudeDeg: smokePose.longitudeDeg + 80 / (111_195 * Math.cos(smokePose.latitudeDeg * Math.PI / 180)),
-};
 // Keep both samples fresh while the forward, centered view completes the
 // same continuous capture interval required of a game client.
-for (let sequence = 0; sequence < 8; sequence += 1) {
+for (let sequence = 1; sequence <= 8; sequence += 1) {
   rankedA.send({
     type: "pose",
     pose: {
@@ -411,7 +415,7 @@ for (let sequence = 0; sequence < 8; sequence += 1) {
     type: "pose",
     pose: { ...smokeTargetPose, sequence, clientTimeMs: performance.now() },
   });
-  if (sequence < 7) await new Promise((resolve) => setTimeout(resolve, 200));
+  if (sequence < 8) await new Promise((resolve) => setTimeout(resolve, 200));
 }
 await rankedB.waitFor(
   (message) => message.type === "lock_alert" && message.sourceSlot === welcomeA.slot && message.locked === true,
@@ -472,13 +476,13 @@ assert(gunAccepted.accepted === true, "GUN was not independently ready while MIS
 const afterGunState = await rankedB.waitFor(
   (message) => message.type === "match_state"
     && message.state?.participants?.some(
-      (participant) => participant.slot === targetSlot && participant.heartPoints === 76,
+      (participant) => participant.slot === targetSlot && participant.heartPoints === 72,
     ),
-  "GUN 4 HP effect",
+  "two-projectile GUN 8 HP effect",
   4_000,
 );
 const afterGun = afterGunState.state.participants.find((participant) => participant.slot === targetSlot);
-assert(afterGun?.heartPoints === 76, "GUN did not apply the expected 4 HP effect");
+assert(afterGun?.heartPoints === 72, "GUN did not apply the expected two-projectile effect");
 
 rankedA.send({ type: "action", weaponId: "gun", clientTimeMs: performance.now() });
 const gunCooldown = await rankedA.waitFor(
@@ -561,7 +565,7 @@ console.log(JSON.stringify({
   missileHpEffect: 20,
   missileCooldownRejected: true,
   gunAcceptedDuringMissileCooldown: true,
-  gunHpEffect: 4,
+  gunHpEffect: 8,
   gunCooldownRejected: true,
   independentWeaponCooldowns: true,
 }, null, 2));

@@ -335,7 +335,10 @@ export class RankedMatch {
   }
 
   private async persist(state: StoredCompetitionRuntime, nowMs: number, broadcast = true) {
-    const moved = advanceCompetitionProjectiles(state, nowMs, (slot) => this.poseForSlot(slot));
+    // Lock the overtime length at the regulation boundary, then simulate
+    // any remaining in-flight projectiles up to the actual match deadline.
+    const timed = advanceCompetitionRuntime(state, Math.min(nowMs, state.regulationEndsAtMs));
+    const moved = advanceCompetitionProjectiles(timed, nowMs, (slot) => this.poseForSlot(slot));
     const advanced = advanceCompetitionRuntime(moved, nowMs);
     await this.saveState(advanced);
     await this.schedule(advanced, nowMs);
