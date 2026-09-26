@@ -45,6 +45,9 @@ jobs:
       - name: Verify arcade projectile contact and lock
         run: node scripts/verify-arcade-projectiles.mjs
 
+      - name: Verify flight direction speed contract
+        run: node scripts/verify-flight-response.mjs
+
       - name: Verify C4D production binding validator
         run: C4D_BINDING_SELF_TEST=1 pnpm verify:c4d:binding
 

@@ -397,6 +397,7 @@ function resultReasonLabel(reason: MatchResultReason) {
   if (reason === "overtime-heart-points") return "OVERTIME HP RESULT";
   if (reason === "overtime-draw") return "OVERTIME ENDED LEVEL";
   if (reason === "forfeit") return "FORFEIT";
+  if (reason === "ground-crash") return "GROUND CRASH";
   return "INFRASTRUCTURE FAILURE";
 }
 

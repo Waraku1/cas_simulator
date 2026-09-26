@@ -86,8 +86,10 @@ within the expanded central camera region for 1.2 s with fresh pose updates. The
 local hold estimate; the server separately verifies the hold before allowing tracking.
 Once held, the peer marker says `LOCKED` until capture is lost, and the peer receives
 `MISSILE LOCK ALERT`. Firing without a completed lock still launches a straight game
-projectile. Older clients without a view field temporarily use the previous aim rule
-during the rollout. These are abstract game rules with no real-world guidance model.
+projectile. Capture pauses and resets while the look pointer is held, while the
+view remains displaced from forward, or when the aircraft itself is not facing
+the peer. The 1.2 s hold remains unchanged. Older clients without a view field
+cannot establish a tracked shot. These are abstract game rules with no real-world guidance model.
 
 The missile's fictional travel setting is now 400 game m/s for 3.4 s, and the
 server increases its per-step tracking blend for a more responsive curved path.
@@ -128,7 +130,7 @@ The WebSocket message type remains `action` during the migration. The new client
 - New Worker snapshots add `weaponReadyAtMs`; the new client accepts old snapshots that do not contain it.
 - New Worker snapshots add optional `projectiles`; the client accepts snapshots without it.
 - Action feedback may include `locked`; older feedback without it remains valid.
-- New pose snapshots may include `view` (`yawRad`, `pitchRad`, `weaponId`); older pose clients remain readable.
+- New pose snapshots may include `view` (`yawRad`, `pitchRad`, `weaponId`, `looking`) and a terrain `groundHeightM`; older pose clients remain readable, but cannot establish a tracked shot.
 - The Worker may send `lock_alert` with a source slot and a locked/unlocked transition.
 
 This compatibility layer may be removed after production Worker and supported clients are fully migrated.

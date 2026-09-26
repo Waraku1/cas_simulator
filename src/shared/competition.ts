@@ -141,6 +141,7 @@ const RESULT_REASONS = new Set<MatchResultReason>([
   "overtime-heart-points",
   "overtime-draw",
   "forfeit",
+  "ground-crash",
   "infrastructure-failure",
 ]);
 

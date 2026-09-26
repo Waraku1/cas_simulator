@@ -16,6 +16,7 @@ import {
   type CompetitionStateSnapshot,
 } from "../shared/competition";
 import type { AircraftPose, GameView } from "../shared/multiplayer";
+import { gameGroundContact } from "../shared/game-ground.mjs";
 import {
   clampHeartPoints,
   MATCH_RULES,
@@ -236,6 +237,18 @@ export function forfeitCompetition(
   const advanced = advanceCompetitionRuntime(state, nowMs);
   if (advanced.result) return advanced;
   return completed(advanced, peerSlot(slot), "forfeit");
+}
+
+export function groundContactCompetition(
+  state: StoredCompetitionRuntime,
+  slot: CompetitionSlot,
+  pose: AircraftPose,
+  nowMs: number,
+) {
+  const advanced = advanceCompetitionRuntime(state, nowMs);
+  if (advanced.result || (advanced.phase !== "active" && advanced.phase !== "overtime")) return advanced;
+  if (!gameGroundContact(pose.altitudeM, pose.groundHeightM ?? 0)) return advanced;
+  return completed(advanced, peerSlot(slot), "ground-crash");
 }
 
 export function noContestCompetition(state: StoredCompetitionRuntime) {

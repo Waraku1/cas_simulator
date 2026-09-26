@@ -10,6 +10,7 @@ export const ARCADE_LOCK = Object.freeze({
   holdMs: 1_200,
   sampleGapMs: 400,
   centerCosine: Math.cos(14 * Math.PI / 180),
+  forwardViewToleranceRad: 0.03,
   cameraBackM: 108,
   cameraUpM: 16,
   cameraLookAheadM: 72,
@@ -76,7 +77,9 @@ export function gameLockAvailable(localPose, peerPose, maximumDistance) {
 // The same view offset is used by the renderer and the server-side check.
 export function gameCaptureAvailable(localPose, peerPose, maximumDistance) {
   const view = localPose.view;
-  if (!view) return false;
+  if (!view || view.looking || Math.abs(view.yawRad) > ARCADE_LOCK.forwardViewToleranceRad
+    || Math.abs(view.pitchRad) > ARCADE_LOCK.forwardViewToleranceRad
+    || !gameLockAvailable(localPose, peerPose, maximumDistance)) return false;
   const target = relativeGamePoint(localPose, peerPose);
   const distance = length(target);
   if (distance <= 15 || distance > maximumDistance) return false;

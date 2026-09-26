@@ -6,11 +6,14 @@ import {
   advanceSchoolRankedProjectiles,
   createSchoolRankedRuntime,
   forfeitSchoolRanked,
+  groundContactSchoolRanked,
   markSchoolRankedConnected,
   markSchoolRankedDisconnected,
   nextSchoolRankedDeadline,
   resolveSchoolRankedAction,
+  schoolRankedLock,
   schoolRankedSnapshot,
+  updateSchoolRankedCapture,
 } from "./school-ranked-runtime.mjs";
 
 const HOST = "127.0.0.1";
@@ -222,6 +225,8 @@ function validPoseSnapshot(value) {
     !finite(value.latitudeDeg) || value.latitudeDeg < -85 || value.latitudeDeg > 85
     || !finite(value.longitudeDeg) || value.longitudeDeg < -180 || value.longitudeDeg > 180
     || !finite(value.altitudeM) || value.altitudeM < 0 || value.altitudeM > 20_000
+    || (value.groundHeightM !== undefined && (!finite(value.groundHeightM)
+      || value.groundHeightM < -500 || value.groundHeightM > 9_000))
     || !finite(orientation.w) || !finite(orientation.x) || !finite(orientation.y) || !finite(orientation.z)
     || !Number.isSafeInteger(value.sequence) || value.sequence < 0
     || !finite(value.clientTimeMs) || value.clientTimeMs < 0
@@ -340,8 +345,16 @@ function handleRankedMessage(client, payload) {
   if (value.type === "pose" && validPoseSnapshot(value.pose)) {
     client.latestPose = value.pose;
     client.latestPoseReceivedAtMs = nowMs;
+    const grounded = groundContactSchoolRanked(match.state, client.slot, value.pose, nowMs);
+    if (grounded !== match.state) updateState(match, grounded, nowMs);
+    if (grounded.result) return;
     if (match.state.projectiles?.length) updateState(match, match.state, nowMs);
     const peer = match.clients.get(client.slot === 1 ? 2 : 1);
+    for (const [source, target] of [[client, peer], [peer, client]]) {
+      if (!source) continue;
+      const capture = updateSchoolRankedCapture(source, target, match.state, nowMs);
+      if (capture.changed && target) sendJson(target, { type: "lock_alert", sourceSlot: source.slot, locked: capture.locked });
+    }
     if (peer) sendJson(peer, { type: "peer_pose", playerId: client.playerId, serverTimeMs: nowMs, pose: value.pose });
     return;
   }
@@ -359,6 +372,7 @@ function handleRankedMessage(client, payload) {
       client.latestPose && client.latestPoseReceivedAtMs !== null ? { pose: client.latestPose, receivedAtMs: client.latestPoseReceivedAtMs } : null,
       peer?.latestPose && peer.latestPoseReceivedAtMs !== null ? { pose: peer.latestPose, receivedAtMs: peer.latestPoseReceivedAtMs } : null,
       value.weaponId ?? "missile",
+      schoolRankedLock(client, peer, nowMs),
     );
     updateState(match, resolution.state, nowMs);
     sendJson(client, { type: "action_feedback", accepted: resolution.accepted, code: resolution.code, nextActionAtMs: resolution.nextActionAtMs, weaponId: resolution.weaponId, locked: resolution.locked });

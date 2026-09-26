@@ -14,6 +14,7 @@ import {
   competitionSnapshot,
   createCompetitionRuntime,
   forfeitCompetition,
+  groundContactCompetition,
   markCompetitionConnected,
   markCompetitionDisconnected,
   nextCompetitionDeadline,
@@ -315,7 +316,7 @@ export class RankedMatch {
   private lockForSlot(slot: CompetitionSlot, nowMs: number) {
     const own = this.poseForSlot(slot);
     // Older pose clients retain the existing instantaneous arcade rule.
-    if (!own?.pose.view) return undefined;
+    if (!own?.pose.view) return false;
     const peer = this.poseForSlot(slot === 1 ? 2 : 1);
     const attachment = this.socketForSlot(slot);
     const capture = attachment ? attachmentOf(attachment) : null;
@@ -469,8 +470,13 @@ export class RankedMatch {
         latestPose: parsed.pose,
         latestPoseReceivedAtMs: nowMs,
       } satisfies RankedSocketAttachment);
-      this.updateCaptureForSlot(sender.slot, advanced, nowMs);
-      this.updateCaptureForSlot(sender.slot === 1 ? 2 : 1, advanced, nowMs);
+      const withGround = groundContactCompetition(advanced, sender.slot, parsed.pose, nowMs);
+      if (withGround.result && !advanced.result) {
+        await this.persist(withGround, nowMs);
+        return;
+      }
+      this.updateCaptureForSlot(sender.slot, withGround, nowMs);
+      this.updateCaptureForSlot(sender.slot === 1 ? 2 : 1, withGround, nowMs);
       const relay: ServerRoomMessage = {
         type: "peer_pose",
         playerId: sender.playerId,
@@ -480,7 +486,7 @@ export class RankedMatch {
       for (const peer of this.openSockets(socket)) this.send(peer, relay);
       // Advance once with this fresh pose. A duplicate broadcast with the
       // previous pose makes moving projectiles appear to hesitate.
-      if (state.projectiles?.length || advanced !== state) await this.persist(advanced, nowMs);
+      if (state.projectiles?.length || withGround !== state) await this.persist(withGround, nowMs);
       return;
     }
 

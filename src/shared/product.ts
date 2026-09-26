@@ -32,6 +32,7 @@ export type MatchResultReason =
   | "overtime-heart-points"
   | "overtime-draw"
   | "forfeit"
+  | "ground-crash"
   | "infrastructure-failure";
 
 export type PlayerProfile = Readonly<{

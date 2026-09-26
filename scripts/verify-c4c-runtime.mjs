@@ -2,9 +2,12 @@ import {
   advanceSchoolRankedProjectiles,
   advanceSchoolRankedRuntime,
   createSchoolRankedRuntime,
+  groundContactSchoolRanked,
   markSchoolRankedConnected,
   markSchoolRankedDisconnected,
   resolveSchoolRankedAction,
+  schoolRankedLock,
+  updateSchoolRankedCapture,
 } from "./school-ranked-runtime.mjs";
 import { gamePointToPosition } from "../src/shared/arcade-projectiles.mjs";
 
@@ -149,6 +152,59 @@ state = advanceSchoolRankedRuntime(state, state.regulationEndsAtMs);
 const draw = advanceSchoolRankedRuntime(state, state.overtimeEndsAtMs);
 if (draw.phase !== "completed" || draw.result?.winnerSlot !== null || draw.result?.reason !== "overtime-draw") {
   throw new Error("overtime draw failed");
+}
+
+state = baseState();
+state = markSchoolRankedConnected(state, 1, 10_001);
+state = markSchoolRankedConnected(state, 2, 10_001);
+const inAir = groundContactSchoolRanked(state, 1, { altitudeM: 2_000, groundHeightM: 1_000 }, 10_002);
+if (inAir.result !== null) throw new Error("Above-ground flight ended the match");
+const grounded = groundContactSchoolRanked(inAir, 1, { altitudeM: 1_005, groundHeightM: 1_000 }, 10_003);
+if (grounded.result?.winnerSlot !== 2 || grounded.result?.reason !== "ground-crash") {
+  throw new Error("Terrain contact must award the opponent a ground-crash win");
+}
+
+const capturingState = advanceSchoolRankedRuntime(inAir, 10_001);
+const capturingClient = { latestPose: {
+  ...poseSample.pose, view: { yawRad: 0, pitchRad: 0, weaponId: "missile", looking: false },
+}, latestPoseReceivedAtMs: 10_001 };
+const capturePeer = { latestPose: targetSample.pose, latestPoseReceivedAtMs: 10_001 };
+updateSchoolRankedCapture(capturingClient, capturePeer, capturingState, 10_001);
+capturingClient.latestPose.view.looking = true;
+capturingClient.latestPoseReceivedAtMs = 10_101;
+updateSchoolRankedCapture(capturingClient, capturePeer, capturingState, 10_101);
+if (schoolRankedLock(capturingClient, capturePeer, 10_101)) throw new Error("Drag must clear capture");
+capturingClient.latestPose.view.looking = false;
+capturingClient.latestPoseReceivedAtMs = 10_201;
+capturePeer.latestPoseReceivedAtMs = 10_201;
+updateSchoolRankedCapture(capturingClient, capturePeer, capturingState, 10_201);
+capturingClient.latestPoseReceivedAtMs = 11_401;
+capturePeer.latestPoseReceivedAtMs = 11_401;
+updateSchoolRankedCapture(capturingClient, capturePeer, capturingState, 11_401);
+if (schoolRankedLock(capturingClient, capturePeer, 11_401)) {
+  throw new Error("Capture gaps must not count toward the hold");
+}
+capturingClient.latestPoseReceivedAtMs = 12_601;
+capturePeer.latestPoseReceivedAtMs = 12_601;
+updateSchoolRankedCapture(capturingClient, capturePeer, capturingState, 12_601);
+if (schoolRankedLock(capturingClient, capturePeer, 12_601)) {
+  throw new Error("A single later sample cannot complete the hold");
+}
+for (const nowMs of [12_901, 13_201, 13_501, 13_801]) {
+  capturingClient.latestPoseReceivedAtMs = nowMs;
+  capturePeer.latestPoseReceivedAtMs = nowMs;
+  updateSchoolRankedCapture(capturingClient, capturePeer, capturingState, nowMs);
+}
+if (!schoolRankedLock(capturingClient, capturePeer, 13_801)) {
+  throw new Error("Continuous forward capture must complete after 1.2 s");
+}
+capturingClient.latestPose.view.yawRad = 0.1;
+updateSchoolRankedCapture(capturingClient, capturePeer, capturingState, 13_802);
+if (schoolRankedLock(capturingClient, capturePeer, 13_802)) {
+  throw new Error("Displaced view must clear a completed capture");
+}
+if (groundContactSchoolRanked(grounded, 2, { altitudeM: 0, groundHeightM: 0 }, 10_004).result?.winnerSlot !== 2) {
+  throw new Error("Ground-crash result must remain terminal");
 }
 
 state = baseState();
