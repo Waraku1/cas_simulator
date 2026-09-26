@@ -395,15 +395,29 @@ const smokeTargetPose = {
   ...smokePose,
   longitudeDeg: smokePose.longitudeDeg + 80 / (111_195 * Math.cos(smokePose.latitudeDeg * Math.PI / 180)),
 };
-rankedA.send({
-  type: "pose",
-  pose: { ...smokePose, sequence: 0, clientTimeMs: performance.now() },
-});
-rankedB.send({
-  type: "pose",
-  pose: { ...smokeTargetPose, sequence: 0, clientTimeMs: performance.now() },
-});
-await new Promise((resolve) => setTimeout(resolve, 150));
+// Keep both samples fresh while the forward, centered view completes the
+// same continuous capture interval required of a game client.
+for (let sequence = 0; sequence < 8; sequence += 1) {
+  rankedA.send({
+    type: "pose",
+    pose: {
+      ...smokePose,
+      sequence,
+      clientTimeMs: performance.now(),
+      view: { yawRad: 0, pitchRad: 0, weaponId: "missile", looking: false },
+    },
+  });
+  rankedB.send({
+    type: "pose",
+    pose: { ...smokeTargetPose, sequence, clientTimeMs: performance.now() },
+  });
+  if (sequence < 7) await new Promise((resolve) => setTimeout(resolve, 200));
+}
+await rankedB.waitFor(
+  (message) => message.type === "lock_alert" && message.sourceSlot === welcomeA.slot && message.locked === true,
+  "continuous forward-view MISSILE lock",
+  4_000,
+);
 
 rankedA.send({ type: "action", weaponId: "missile", clientTimeMs: performance.now() });
 const missileAccepted = await rankedA.waitFor(
