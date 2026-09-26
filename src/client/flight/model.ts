@@ -45,9 +45,12 @@ export type FlightTelemetry = Readonly<{
 const EARTH_RADIUS_M = 6_371_000;
 const MIN_SPEED_MPS = 90;
 const MAX_SPEED_MPS = 230;
-const MIN_ALTITUDE_M = 450;
+const MIN_ALTITUDE_M = 0;
 const MAX_ALTITUDE_M = 9_000;
 const SPEED_RESPONSE_MPS2 = 42;
+// An arcade speed offset from the vertical component of the flight direction.
+// A level aircraft keeps the existing throttle-to-speed behavior exactly.
+const VERTICAL_SPEED_OFFSET_MPS = 50;
 
 // C1.5 control-response contract. Angle authority remains unlimited; only
 // angular velocity is bounded so sustained input stays controllable.
@@ -256,8 +259,6 @@ export function integrateFlightState(
   const throttleInput = clamp(input.throttle, -1, 1);
 
   const throttle = clamp(previous.throttle + throttleInput * THROTTLE_RATE_PER_S * dt, 0, 1);
-  const targetSpeedMps = MIN_SPEED_MPS + (MAX_SPEED_MPS - MIN_SPEED_MPS) * throttle;
-  const speedMps = approach(previous.speedMps, targetSpeedMps, SPEED_RESPONSE_MPS2 * dt);
 
   // Keyboard input now commands angular acceleration rather than instantaneous
   // angular velocity. Holding a key builds pitch/roll rate; releasing it applies
@@ -341,6 +342,13 @@ export function integrateFlightState(
   }
 
   const forward = rotateVector(orientation, [1, 0, 0]);
+  const levelTargetSpeedMps = MIN_SPEED_MPS + (MAX_SPEED_MPS - MIN_SPEED_MPS) * throttle;
+  const targetSpeedMps = clamp(
+    levelTargetSpeedMps - forward[2] * VERTICAL_SPEED_OFFSET_MPS,
+    MIN_SPEED_MPS,
+    MAX_SPEED_MPS,
+  );
+  const speedMps = approach(previous.speedMps, targetSpeedMps, SPEED_RESPONSE_MPS2 * dt);
   const rawVerticalSpeedMps = speedMps * forward[2];
   const unclampedAltitudeM = previous.altitudeM + rawVerticalSpeedMps * dt;
   const altitudeM = clamp(unclampedAltitudeM, MIN_ALTITUDE_M, MAX_ALTITUDE_M);

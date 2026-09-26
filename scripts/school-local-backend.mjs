@@ -6,11 +6,14 @@ import {
   advanceSchoolRankedProjectiles,
   createSchoolRankedRuntime,
   forfeitSchoolRanked,
+  groundContactSchoolRanked,
   markSchoolRankedConnected,
   markSchoolRankedDisconnected,
   nextSchoolRankedDeadline,
   resolveSchoolRankedAction,
+  schoolRankedLock,
   schoolRankedSnapshot,
+  updateSchoolRankedCapture,
 } from "./school-ranked-runtime.mjs";
 
 const HOST = "127.0.0.1";
@@ -193,6 +196,8 @@ function validPoseSnapshot(value) {
     !finite(pose.latitudeDeg) || pose.latitudeDeg < -85 || pose.latitudeDeg > 85
     || !finite(pose.longitudeDeg) || pose.longitudeDeg < -180 || pose.longitudeDeg > 180
     || !finite(pose.altitudeM) || pose.altitudeM < 0 || pose.altitudeM > 20_000
+    || (pose.groundHeightM !== undefined && (!finite(pose.groundHeightM)
+      || pose.groundHeightM < -500 || pose.groundHeightM > 9_000))
     || !finite(orientation.w) || !finite(orientation.x)
     || !finite(orientation.y) || !finite(orientation.z)
     || !Number.isSafeInteger(pose.sequence) || pose.sequence < 0
@@ -265,8 +270,16 @@ function handleRankedTextMessage(client, payload) {
   if (value.type === "pose" && validPoseSnapshot(value.pose)) {
     client.latestPose = value.pose;
     client.latestPoseReceivedAtMs = nowMs;
+    const grounded = groundContactSchoolRanked(match.state, client.slot, value.pose, nowMs);
+    if (grounded !== match.state) updateRankedState(match, grounded, nowMs);
+    if (grounded.result) return;
     if (match.state.projectiles?.length) updateRankedState(match, match.state, nowMs);
     const peer = match.clients.get(client.slot === 1 ? 2 : 1);
+    for (const [source, target] of [[client, peer], [peer, client]]) {
+      if (!source) continue;
+      const capture = updateSchoolRankedCapture(source, target, match.state, nowMs);
+      if (capture.changed && target) sendJson(target, { type: "lock_alert", sourceSlot: source.slot, locked: capture.locked });
+    }
     if (peer) {
       sendJson(peer, {
         type: "peer_pose",
@@ -298,6 +311,7 @@ function handleRankedTextMessage(client, payload) {
         ? { pose: peer.latestPose, receivedAtMs: peer.latestPoseReceivedAtMs }
         : null,
       value.weaponId ?? "missile",
+      schoolRankedLock(client, peer, nowMs),
     );
     updateRankedState(match, resolution.state, nowMs);
     sendJson(client, {

@@ -1,12 +1,15 @@
 import aircraftCatalog from "../src/shared/aircraft-catalog.json" with { type: "json" };
 import weaponCatalog from "../src/shared/weapon-catalog.json" with { type: "json" };
 import {
+  ARCADE_LOCK,
   ARCADE_TICK_MS,
   MAX_ARCADE_PROJECTILES,
   advanceArcadeProjectile,
   createArcadeProjectile,
   gamePointToPosition,
+  gameCaptureAvailable,
 } from "../src/shared/arcade-projectiles.mjs";
+import { gameGroundContact } from "../src/shared/game-ground.mjs";
 
 const STARTING_HP = 100;
 const REGULATION_MS = 4 * 60 * 1_000;
@@ -136,6 +139,43 @@ export function forfeitSchoolRanked(state, slot, nowMs) {
   return completed(advanced, peerSlot(slot), "forfeit");
 }
 
+export function groundContactSchoolRanked(state, slot, pose, nowMs) {
+  const advanced = advanceSchoolRankedRuntime(state, nowMs);
+  if (advanced.result || (advanced.phase !== "active" && advanced.phase !== "overtime")) return advanced;
+  return gameGroundContact(pose.altitudeM, pose.groundHeightM ?? 0)
+    ? completed(advanced, peerSlot(slot), "ground-crash") : advanced;
+}
+
+export function updateSchoolRankedCapture(client, peer, state, nowMs) {
+  const range = weaponById.get("missile")?.activationRadiusM ?? 0;
+  const capturing = !state.result && (state.phase === "active" || state.phase === "overtime")
+    && state.participants.every((participant) => participant.connected)
+    && client.latestPose?.view?.weaponId === "missile" && peer?.latestPose
+    && nowMs - client.latestPoseReceivedAtMs <= ARCADE_LOCK.sampleGapMs
+    && nowMs - peer.latestPoseReceivedAtMs <= ARCADE_LOCK.sampleGapMs
+    && gameCaptureAvailable(client.latestPose, peer.latestPose, range);
+  const continuous = capturing && client.captureLastAtMs != null
+    && nowMs - client.captureLastAtMs <= ARCADE_LOCK.sampleGapMs;
+  client.captureStartedAtMs = capturing
+    ? continuous ? client.captureStartedAtMs ?? nowMs : nowMs : null;
+  client.captureLastAtMs = capturing ? nowMs : null;
+  const locked = client.captureStartedAtMs !== null
+    && nowMs - client.captureStartedAtMs >= ARCADE_LOCK.holdMs;
+  const changed = Boolean(client.lockNotified) !== locked;
+  client.lockNotified = locked;
+  return { locked, changed };
+}
+
+export function schoolRankedLock(client, peer, nowMs) {
+  if (!client.latestPose?.view) return undefined;
+  const range = weaponById.get("missile")?.activationRadiusM ?? 0;
+  return Boolean(client.lockNotified && peer?.latestPose
+    && nowMs - client.latestPoseReceivedAtMs <= ARCADE_LOCK.sampleGapMs
+    && nowMs - peer.latestPoseReceivedAtMs <= ARCADE_LOCK.sampleGapMs
+    && nowMs - client.captureLastAtMs <= ARCADE_LOCK.sampleGapMs
+    && gameCaptureAvailable(client.latestPose, peer.latestPose, range));
+}
+
 function distanceM(a, b) {
   const earthRadiusM = 6_371_000;
   const toRad = Math.PI / 180;
@@ -156,6 +196,7 @@ export function resolveSchoolRankedAction(
   localPose,
   peerPose,
   requestedWeaponId = "missile",
+  confirmedLock,
 ) {
   let advanced = advanceSchoolRankedRuntime(state, nowMs);
   const local = advanced.participants[slot - 1];
@@ -200,6 +241,7 @@ export function resolveSchoolRankedAction(
     localPose.pose,
     peerPose.pose,
     weapon.activationRadiusM,
+    confirmedLock,
   );
   advanced = {
     ...advanced,

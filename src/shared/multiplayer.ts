@@ -25,6 +25,7 @@ export type AircraftPose = Readonly<{
   latitudeDeg: number;
   longitudeDeg: number;
   altitudeM: number;
+  groundHeightM?: number;
   orientation: NetworkQuaternion;
 }>;
 
@@ -32,6 +33,7 @@ export type GameView = Readonly<{
   yawRad: number;
   pitchRad: number;
   weaponId: WeaponId;
+  looking?: boolean;
 }>;
 
 export type PoseSnapshot = AircraftPose & Readonly<{
@@ -117,6 +119,9 @@ export function isAircraftPose(value: unknown): value is AircraftPose {
     || !finite(value.altitudeM)
     || value.altitudeM < 0
     || value.altitudeM > 20_000
+    || (value.groundHeightM !== undefined && (
+      !finite(value.groundHeightM) || value.groundHeightM < -500 || value.groundHeightM > 9_000
+    ))
     || !finite(orientation.w)
     || !finite(orientation.x)
     || !finite(orientation.y)
@@ -144,6 +149,7 @@ export function isPoseSnapshot(value: unknown): value is PoseSnapshot {
       && finite(snapshotRecord.view.pitchRad)
       && Math.abs(snapshotRecord.view.pitchRad) <= 1.1
       && isWeaponId(snapshotRecord.view.weaponId)
+      && (snapshotRecord.view.looking === undefined || typeof snapshotRecord.view.looking === "boolean")
     ));
 }
 

@@ -8,6 +8,7 @@ import {
   gameLockAvailable,
   gamePointToPosition,
 } from "../src/shared/arcade-projectiles.mjs";
+import { GAME_GROUND_CLEARANCE_M, gameGroundContact } from "../src/shared/game-ground.mjs";
 
 const pilot = {
   latitudeDeg: 34.4,
@@ -56,8 +57,16 @@ assert.equal(gameCaptureAvailable(viewedPilot, point(850), 900), true,
   "Extended game interaction region accepts a distant target");
 assert.equal(gameCaptureAvailable(viewedPilot, point(950), 900), false,
   "Distant targets remain outside the new interaction boundary");
-assert.equal(gameCaptureAvailable({ ...viewedPilot, view: { ...viewedPilot.view, yawRad: -Math.PI / 2 } }, point(0, 120), 600), true,
-  "Camera drag alone can bring an off-axis game target into the center");
+assert.equal(gameCaptureAvailable({ ...viewedPilot, view: { ...viewedPilot.view, yawRad: -Math.PI / 2 } }, point(0, 120), 600), false,
+  "Looking sideways cannot establish a lock, even with the peer centered on screen");
+assert.equal(gameCaptureAvailable({ ...viewedPilot, view: { ...viewedPilot.view, looking: true } }, point(120), 600), false,
+  "A centered target cannot progress while the look pointer is held");
+assert.equal(gameCaptureAvailable({ ...viewedPilot, view: { ...viewedPilot.view, yawRad: 0.05 } }, point(120), 600), false,
+  "A displaced look direction must return to forward before capture");
+assert.equal(gameCaptureAvailable(viewedPilot, point(120), 600), true,
+  "Forward view restores capture without changing its duration");
+assert.equal(gameGroundContact(500 + GAME_GROUND_CLEARANCE_M, 500), true);
+assert.equal(gameGroundContact(500 + GAME_GROUND_CLEARANCE_M + 1, 500), false);
 assert.equal(createArcadeProjectile(7, 1, "missile", 0, viewedPilot, point(120), 600, false).targetSlot, null,
   "A server-declined capture must not create a tracking projectile");
 assert.equal(createArcadeProjectile(8, 1, "missile", 0, viewedPilot, point(0, 120), 600, true).targetSlot, 2,

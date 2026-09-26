@@ -1,6 +1,7 @@
 import {
   Cartesian2,
   Cartesian3,
+  Cartographic,
   Color,
   ConstantPositionProperty,
   ConstantProperty,
@@ -18,6 +19,7 @@ import "cesium/Build/Cesium/Widgets/widgets.css";
 import { useEffect, useRef, useState } from "react";
 import { aircraftById } from "../../shared/aircraft";
 import { aircraftVisualForSpec } from "../../shared/aircraft-visuals";
+import { GAME_GROUND_CLEARANCE_M, gameGroundContact } from "../../shared/game-ground.mjs";
 import { ARCADE_LOCK, ARCADE_PROJECTILES } from "../../shared/arcade-projectiles.mjs";
 import type { CompetitionProjectileSnapshot } from "../../shared/competition";
 import { C2_RESOURCE_BUDGET } from "../../shared/config";
@@ -67,6 +69,8 @@ const NOSE_OFFSET_M = 11;
 const REMOTE_MARKER_LIFT_M = 19;
 const MULTIPLAYER_STAGING_LONGITUDE_OFFSET_DEG = 0.00055;
 const SIMULATION_FRAME_INTERVAL_MS = 1_000 / C2_RESOURCE_BUDGET.runtimeFrameCapFps;
+const MODEL_HEADING_CORRECTION = Matrix3.fromRotationZ(Math.PI, new Matrix3());
+const MODEL_HEADING_QUATERNION = Quaternion.fromRotationMatrix(MODEL_HEADING_CORRECTION);
 
 type LocalAxes = Readonly<{
   forward: readonly [number, number, number];
@@ -178,8 +182,13 @@ function orientationFromFrame(frame: FlightFrame) {
   return Quaternion.fromRotationMatrix(bodyRotationFromFrame(frame));
 }
 
+function modelOrientationFromFrame(frame: FlightFrame) {
+  return Quaternion.multiply(orientationFromFrame(frame), MODEL_HEADING_QUATERNION, new Quaternion());
+}
+
 function modelMatrixFromFrame(position: Cartesian3, frame: FlightFrame) {
-  return Matrix4.fromRotationTranslation(bodyRotationFromFrame(frame), position, new Matrix4());
+  const rotation = Matrix3.multiply(bodyRotationFromFrame(frame), MODEL_HEADING_CORRECTION, new Matrix3());
+  return Matrix4.fromRotationTranslation(rotation, position, new Matrix4());
 }
 
 function offsetFrom(position: Cartesian3, direction: Cartesian3, distanceM: number) {
@@ -328,6 +337,8 @@ export function EarthScene({
     let removeViewListeners = () => {};
     let viewYawRad = 0;
     let viewPitchRad = 0;
+    let localGroundHeightM = 0;
+    let groundContactSent = false;
     let activePointerId: number | null = null;
     let pointerX = 0;
     let pointerY = 0;
@@ -392,14 +403,15 @@ export function EarthScene({
         flightState.altitudeM,
       );
       const initialFrame = computeFlightFrame(initialPosition, flightState);
-      // Cesium applies glTF axis conversion internally; both Entity and
-      // primitive model matrices use the +X nose / +Y left / +Z up body frame.
+      // The Bell X-1 asset points opposite the game's forward axis. Correct
+      // its horizontal heading only; the flight frame and camera stay intact.
       const initialOrientation = orientationFromFrame(initialFrame);
       const positionProperty = new ConstantPositionProperty(initialPosition);
       const nosePositionProperty = new ConstantPositionProperty(
         offsetFrom(initialPosition, initialFrame.forward, NOSE_OFFSET_M),
       );
       const orientationProperty = new ConstantProperty(initialOrientation);
+      const modelOrientationProperty = new ConstantProperty(modelOrientationFromFrame(initialFrame));
       const aircraftMaterial = Color.fromCssColorString("#d9fbff").withAlpha(0.92);
       const aircraftAccent = Color.fromCssColorString("#64e8ff").withAlpha(0.88);
       const localFallback: Entity[] = [];
@@ -409,7 +421,7 @@ export function EarthScene({
         viewer.entities.add({
           name: `CAS local aircraft // ${localVisual.realAircraftName}`,
           position: positionProperty,
-          orientation: orientationProperty,
+          orientation: modelOrientationProperty,
           model: {
             uri: localVisual.modelUri,
             scale: localVisual.scale * (localAircraft?.visualScale ?? 1),
@@ -460,6 +472,7 @@ export function EarthScene({
       );
       const remoteInitialOrientation = orientationFromFrame(initialFrame);
       const remoteOrientationProperty = new ConstantProperty(remoteInitialOrientation);
+      const remoteModelOrientationProperty = new ConstantProperty(modelOrientationFromFrame(initialFrame));
       const remoteMaterial = Color.fromCssColorString("#ffd48a").withAlpha(0.9);
       const remoteAccent = Color.fromCssColorString("#ff9f43").withAlpha(0.9);
       const remoteEntities: Entity[] = [];
@@ -471,7 +484,7 @@ export function EarthScene({
           name: `C3 peer aircraft // ${peerVisual.realAircraftName}`,
           show: false,
           position: remotePositionProperty,
-          orientation: remoteOrientationProperty,
+          orientation: remoteModelOrientationProperty,
           model: {
             uri: peerVisual.modelUri,
             scale: peerVisual.scale * (peerAircraft?.visualScale ?? 1),
@@ -680,6 +693,7 @@ export function EarthScene({
         remoteOrientationProperty.setValue(
           orientationFromFrame(frame),
         );
+        remoteModelOrientationProperty.setValue(modelOrientationFromFrame(frame));
       };
 
       const updateProjectileVisuals = (now: number, deltaSeconds: number) => {
@@ -714,6 +728,7 @@ export function EarthScene({
           latitudeDeg: flightState.latitudeDeg,
           longitudeDeg: flightState.longitudeDeg,
           altitudeM: flightState.altitudeM,
+          groundHeightM: localGroundHeightM,
           orientation: {
             w: flightState.orientation.w,
             x: flightState.orientation.x,
@@ -721,7 +736,8 @@ export function EarthScene({
             z: flightState.orientation.z,
           },
           ...(competitiveModels && weaponRef.current ? {
-            view: { yawRad: viewYawRad, pitchRad: viewPitchRad, weaponId: weaponRef.current },
+            view: { yawRad: viewYawRad, pitchRad: viewPitchRad,
+              weaponId: weaponRef.current, looking: activePointerId !== null },
           } : {}),
         });
       };
@@ -733,6 +749,7 @@ export function EarthScene({
         pointerY = event.clientY;
         viewport.setPointerCapture(event.pointerId);
         viewport.classList.add("is-looking");
+        publishNetworkPose();
         event.preventDefault();
       };
       const handlePointerMove = (event: PointerEvent) => {
@@ -750,11 +767,13 @@ export function EarthScene({
         activePointerId = null;
         viewport.classList.remove("is-looking");
         if (viewport.hasPointerCapture(event.pointerId)) viewport.releasePointerCapture(event.pointerId);
+        publishNetworkPose();
       };
       const handleViewReset = (event: MouseEvent) => {
         if (!competitiveModels) return;
         viewYawRad = 0;
         viewPitchRad = 0;
+        publishNetworkPose();
         event.preventDefault();
       };
 
@@ -767,6 +786,7 @@ export function EarthScene({
         if (appliedMultiplayerSlot === slot) return;
 
         flightState = stagedFlightState(slot);
+        groundContactSent = false;
         appliedMultiplayerSlot = slot;
         lastNetworkSnapshotTime = 0;
       };
@@ -789,6 +809,19 @@ export function EarthScene({
           throttle: keyAxis(pressedKeys, "ArrowUp", "ArrowDown"),
         };
         flightState = integrateFlightElapsed(flightState, input, deltaSeconds);
+        const sampledGround = viewer.scene.globe.getHeight(
+          Cartographic.fromDegrees(flightState.longitudeDeg, flightState.latitudeDeg),
+        );
+        localGroundHeightM = Number.isFinite(sampledGround)
+          ? Math.max(-500, Math.min(9_000, sampledGround!)) : 0;
+        const touchedGround = gameGroundContact(flightState.altitudeM, localGroundHeightM);
+        if (touchedGround) {
+          flightState = {
+            ...flightState,
+            altitudeM: Math.max(0, localGroundHeightM) + GAME_GROUND_CLEARANCE_M,
+            verticalSpeedMps: 0,
+          };
+        }
 
         const position = Cartesian3.fromDegrees(
           flightState.longitudeDeg,
@@ -806,9 +839,17 @@ export function EarthScene({
         positionProperty.setValue(position);
         nosePositionProperty.setValue(offsetFrom(position, flightFrame.forward, NOSE_OFFSET_M));
         orientationProperty.setValue(orientationFromFrame(flightFrame));
+        modelOrientationProperty.setValue(modelOrientationFromFrame(flightFrame));
         updateCamera(position, flightFrame);
         updateRemoteAircraft(now, elapsedMs);
         updateProjectileVisuals(now, deltaSeconds);
+
+        if (competitiveModels && touchedGround && !groundContactSent) {
+          groundContactSent = true;
+          lastNetworkSnapshotTime = now;
+          publishNetworkPose();
+        }
+        if (!touchedGround) groundContactSent = false;
 
         if (now - lastTelemetryTime >= 90) {
           lastTelemetryTime = now;
