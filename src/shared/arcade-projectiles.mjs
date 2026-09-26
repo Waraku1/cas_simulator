@@ -1,8 +1,8 @@
 // Fictional CAS game-space motion only. These values are gameplay timing and
 // contact sizes, not a model of any real aircraft or weapon.
 export const ARCADE_PROJECTILES = Object.freeze({
-  missile: Object.freeze({ speed: 400, lifetimeMs: 3_400, touchRadius: 18, trackingBlendPer50Ms: 0.38 }),
-  gun: Object.freeze({ speed: 450, lifetimeMs: 900, maxTravelM: 360, touchRadius: 10 }),
+  missile: Object.freeze({ speed: 400, lifetimeMs: 5_100, touchRadius: 18, trackingBlendPer50Ms: 0.38 }),
+  gun: Object.freeze({ speed: 450, lifetimeMs: 1_800, maxTravelM: 720, touchRadius: 10 }),
 });
 export const MAX_ARCADE_PROJECTILES = 8;
 export const ARCADE_TICK_MS = 100;

@@ -45,6 +45,9 @@ jobs:
       - name: Verify arcade projectile contact and lock
         run: node scripts/verify-arcade-projectiles.mjs
 
+      - name: Verify look return timing
+        run: node scripts/verify-look-return.mjs
+
       - name: Verify flight direction speed contract
         run: node scripts/verify-flight-response.mjs
 

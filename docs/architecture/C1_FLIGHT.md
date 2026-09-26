@@ -66,6 +66,8 @@ Ranked flight loads the Bell X-1 GLB as two scene models and updates their model
 
 Ranked viewport dragging orbits the chase camera around the own aircraft, with a bounded vertical view angle and double-click recentering. The camera offset is published as a separate view value for screen-center capture. It never enters `FlightInput`, `FlightState`, model orientation, or the bank-mediated turn integration. The accepted flight controls and angular response remain fixed.
 
+On pointer release, camera yaw and pitch ease from their current offsets to the forward view over 200 ms. A new drag interrupts the return without snapping the camera. The network view remains marked as looking until the return completes; a forward-view pose is sent immediately at completion so capture can resume. This changes only the camera, never the aircraft controls or attitude.
+
 Follow-up display correction: the Bell X-1 asset receives a 180° rotation around the body's up axis in both Entity and ranked primitive rendering. The fallback geometry, camera, network pose, flight direction, and up axis are unchanged. The local speed target now depends on the vertical component of the aircraft's forward vector: climbing reduces speed and descending increases it within the existing game speed bounds. At exactly level flight, the previous throttle target and response are unchanged. The game samples rendered terrain height below the aircraft; contact during a ranked match is sent in the pose and resolved as an opponent win by the Worker.
 
 ## Verification evidence

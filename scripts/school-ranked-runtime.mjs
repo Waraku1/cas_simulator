@@ -227,7 +227,7 @@ export function resolveSchoolRankedAction(
     return reject("pose_stale");
   }
 
-  if (distanceM(localPose.pose, peerPose.pose) > weapon.activationRadiusM) {
+  if (requestedWeaponId === "missile" && distanceM(localPose.pose, peerPose.pose) > weapon.activationRadiusM) {
     return reject("outside_interaction");
   }
   if ((advanced.projectiles?.length ?? 0) >= MAX_ARCADE_PROJECTILES) return reject("projectile_limit");

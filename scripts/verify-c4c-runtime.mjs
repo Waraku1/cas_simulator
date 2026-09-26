@@ -103,11 +103,44 @@ const miss = resolveSchoolRankedAction(state, 1, 10_010,
   { pose: { ...poseSample.pose, ...gamePointToPosition(poseSample.pose, [0, 90, 0]) }, receivedAtMs: 10_010 },
   "gun");
 if (!miss.accepted) throw new Error("Off-axis GUN launch unexpectedly rejected");
-const afterMiss = advanceSchoolRankedProjectiles(miss.state, 10_950, (slot) => slot === 2
-  ? { pose: { ...poseSample.pose, ...gamePointToPosition(poseSample.pose, [0, 90, 0]) }, receivedAtMs: 10_950 }
-  : { ...poseSample, receivedAtMs: 10_950 });
+const afterMiss = advanceSchoolRankedProjectiles(miss.state, 11_810, (slot) => slot === 2
+  ? { pose: { ...poseSample.pose, ...gamePointToPosition(poseSample.pose, [0, 90, 0]) }, receivedAtMs: 11_810 }
+  : { ...poseSample, receivedAtMs: 11_810 });
 if (afterMiss.participants[1].heartPoints !== 100 || afterMiss.projectiles.length !== 0) {
   throw new Error("Off-axis GUN projectile must miss and expire");
+}
+
+const extendedTargetPose = {
+  ...poseSample.pose,
+  ...gamePointToPosition(poseSample.pose, [650, 0, 0]),
+};
+const extendedGun = resolveSchoolRankedAction(
+  state, 1, 10_010, { ...poseSample, receivedAtMs: 10_010 },
+  { pose: extendedTargetPose, receivedAtMs: 10_010 }, "gun",
+);
+if (!extendedGun.accepted) throw new Error("GUN must launch beyond the legacy catalog indicator");
+const extendedContact = advanceSchoolRankedProjectiles(extendedGun.state, 11_610, (slot) => slot === 2
+  ? { pose: extendedTargetPose, receivedAtMs: 11_610 }
+  : { ...poseSample, receivedAtMs: 11_610 });
+if (extendedContact.participants[1].heartPoints !== 96) {
+  throw new Error("GUN must contact on its doubled game path");
+}
+const missileAtNewRange = resolveSchoolRankedAction(
+  state, 1, 10_010, { ...poseSample, receivedAtMs: 10_010 },
+  {
+    pose: { ...poseSample.pose, ...gamePointToPosition(poseSample.pose, [1_300, 0, 0]) },
+    receivedAtMs: 10_010,
+  }, "missile",
+);
+const missileBeyondNewRange = resolveSchoolRankedAction(
+  state, 1, 10_010, { ...poseSample, receivedAtMs: 10_010 },
+  {
+    pose: { ...poseSample.pose, ...gamePointToPosition(poseSample.pose, [1_400, 0, 0]) },
+    receivedAtMs: 10_010,
+  }, "missile",
+);
+if (!missileAtNewRange.accepted || missileBeyondNewRange.code !== "outside_interaction") {
+  throw new Error("MISSILE interaction boundary must use the expanded catalog range");
 }
 
 const regulationEnd = state.regulationEndsAtMs;
