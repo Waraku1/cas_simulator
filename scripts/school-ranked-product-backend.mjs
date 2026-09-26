@@ -177,8 +177,9 @@ function scheduleMatch(match) {
 }
 
 function updateState(match, state, nowMs = Date.now(), broadcast = true) {
+  const timed = advanceSchoolRankedRuntime(state, Math.min(nowMs, state.regulationEndsAtMs));
   match.state = advanceSchoolRankedRuntime(
-    advanceSchoolRankedProjectiles(state, nowMs, (slot) => rankedPoseForSlot(match, slot)), nowMs);
+    advanceSchoolRankedProjectiles(timed, nowMs, (slot) => rankedPoseForSlot(match, slot)), nowMs);
   if (match.state.result) void persistResult(match, nowMs);
   scheduleMatch(match);
   if (broadcast) broadcastState(match, nowMs);

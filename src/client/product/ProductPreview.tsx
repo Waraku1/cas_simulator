@@ -274,7 +274,7 @@ function CountdownPreview({
         <p className="product-eyebrow">MATCH {assignment.matchId.slice(0, 8).toUpperCase()}</p>
         <h1>{Math.max(1, Math.ceil(remainingMs / 1_000))}</h1>
         <p className="product-copy">Room {assignment.roomCode} // synchronized start</p>
-        <div className="queue-meta"><span>100 HP</span><span>04:00</span><span>{assignment.spawnSide.toUpperCase()} SIDE</span></div>
+        <div className="queue-meta"><span>100 HP</span><span>05:00 + OVERTIME</span><span>{assignment.spawnSide.toUpperCase()} SIDE</span></div>
       </section>
     </div>
   );

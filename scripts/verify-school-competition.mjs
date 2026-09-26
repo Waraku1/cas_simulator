@@ -150,12 +150,12 @@ const gunHpUpdate = await waitForMessage(
   ranked2,
   (message) => message.type === "match_state"
     && message.state.participants.some(
-      (participant) => participant.slot === peerSlot && participant.heartPoints === 76,
+      (participant) => participant.slot === peerSlot && participant.heartPoints === 72,
     ),
-  "gun HP update",
+  "two-projectile gun HP update",
 );
 const afterGun = gunHpUpdate.state.participants.find((participant) => participant.slot === peerSlot);
-if (!afterGun || afterGun.heartPoints !== 76) throw new Error("gun did not apply 4 HP effect");
+if (!afterGun || afterGun.heartPoints !== 72) throw new Error("two gun projectiles did not apply 8 HP combined");
 
 ranked1.socket.send(JSON.stringify({ type: "action", weaponId: "gun", clientTimeMs: performance.now() }));
 const gunCooldown = await waitForMessage(

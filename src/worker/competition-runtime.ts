@@ -17,6 +17,7 @@ import {
 } from "../shared/competition";
 import type { AircraftPose, GameView } from "../shared/multiplayer";
 import { gameGroundContact } from "../shared/game-ground.mjs";
+import { overtimeSecondsForHpGap } from "../shared/match-duration.mjs";
 import {
   clampHeartPoints,
   MATCH_RULES,
@@ -172,14 +173,9 @@ export function advanceCompetitionRuntime(
   let advanced = state;
 
   if (state.phase !== "overtime") {
-    if (first.heartPoints !== second.heartPoints) {
-      return completed(
-        state,
-        first.heartPoints > second.heartPoints ? 1 : 2,
-        "regulation-heart-points",
-      );
-    }
-    advanced = { ...state, phase: "overtime" };
+    advanced = { ...state, phase: "overtime",
+      overtimeEndsAtMs: state.regulationEndsAtMs
+        + overtimeSecondsForHpGap(first.heartPoints - second.heartPoints) * 1_000 };
   }
 
   if (nowMs < advanced.overtimeEndsAtMs) return advanced;
@@ -306,19 +302,16 @@ export function resolveCompetitionAction(
   if (requestedWeaponId === "missile" && competitionDistanceM(localPose.pose, peerPose.pose) > weapon.activationRadiusM) {
     return reject("outside_interaction");
   }
-  if ((advanced.projectiles?.length ?? 0) >= MAX_ARCADE_PROJECTILES) return reject("projectile_limit");
+  const volleySize = requestedWeaponId === "gun" ? 2 : 1;
+  if ((advanced.projectiles?.length ?? 0) + volleySize > MAX_ARCADE_PROJECTILES) return reject("projectile_limit");
 
   const nextReadyAt = nowMs + weapon.cooldownMs;
-  const projectile = createArcadeProjectile(
-    (advanced.nextProjectileSequence ?? 0) + 1,
-    slot,
-    requestedWeaponId,
-    nowMs,
-    localPose.pose,
-    peerPose.pose,
-    weapon.activationRadiusM,
-    confirmedLock,
-  );
+  const nextSequence = (advanced.nextProjectileSequence ?? 0) + volleySize;
+  const volley = Array.from({ length: volleySize }, (_, index) => createArcadeProjectile(
+    nextSequence - volleySize + index + 1, slot, requestedWeaponId, nowMs,
+    localPose.pose, peerPose.pose, weapon.activationRadiusM, confirmedLock,
+    requestedWeaponId === "gun" ? (index === 0 ? -2 : 2) : 0,
+  ));
   const participants = advanced.participants.map((participant) => {
     if (participant.slot === local.slot) {
       return {
@@ -334,15 +327,15 @@ export function resolveCompetitionAction(
   }) as [StoredCompetitionParticipant, StoredCompetitionParticipant];
 
   advanced = { ...advanced, participants,
-    projectiles: [...(advanced.projectiles ?? []), projectile],
-    nextProjectileSequence: projectile.id,
+    projectiles: [...(advanced.projectiles ?? []), ...volley],
+    nextProjectileSequence: nextSequence,
   };
   return {
     state: advanced,
     accepted: true,
     code: "accepted",
     weaponId: requestedWeaponId,
-    locked: projectile.targetSlot !== null,
+    locked: volley[0].targetSlot !== null,
     nextActionAtMs: weaponReadyAt(
       participantBySlot(advanced, slot).weaponReadyAtMs,
       requestedWeaponId,
@@ -359,9 +352,7 @@ export function advanceCompetitionProjectiles(
   poseForSlot: (slot: CompetitionSlot) => ServerPoseSample | null,
 ): StoredCompetitionRuntime {
   if (state.result || !state.projectiles?.length) return state;
-  const cutoff = Math.min(nowMs, state.overtimeEndsAtMs,
-    state.phase === "active" && state.participants[0].heartPoints !== state.participants[1].heartPoints
-      ? state.regulationEndsAtMs : Number.POSITIVE_INFINITY);
+  const cutoff = Math.min(nowMs, state.overtimeEndsAtMs);
   const projectiles: ArcadeProjectile[] = [];
   const damage: [number, number] = [0, 0];
   for (const projectile of state.projectiles) {

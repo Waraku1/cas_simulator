@@ -1,7 +1,10 @@
+import { REGULATION_SECONDS, MAX_OVERTIME_SECONDS, MIN_OVERTIME_SECONDS } from "./match-duration.mjs";
+
 export const MATCH_RULES = Object.freeze({
   startingHeartPoints: 100,
-  regulationSeconds: 4 * 60,
-  overtimeSeconds: 60,
+  regulationSeconds: REGULATION_SECONDS,
+  overtimeSeconds: MAX_OVERTIME_SECONDS,
+  minimumOvertimeSeconds: MIN_OVERTIME_SECONDS,
   disconnectGraceSeconds: 20,
 });
 
@@ -76,6 +79,7 @@ export type AircraftSpec = Readonly<{
   maximumSpeedMps: number;
   pitchAccelerationDegS2: number;
   rollAccelerationDegS2: number;
+  turnAccelerationDegS2: number;
   visualScale: number;
   appearanceKey: string;
   weaponIds: readonly WeaponId[];

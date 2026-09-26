@@ -50,6 +50,8 @@ const required = [
   "src/shared/competition.ts",
   "src/shared/arcade-projectiles.mjs",
   "src/shared/arcade-projectiles.d.mts",
+  "src/shared/match-duration.mjs",
+  "src/shared/match-duration.d.mts",
   "src/shared/game-ground.mjs",
   "src/shared/game-ground.d.mts",
   "src/client/flight/look-return.mjs",
@@ -128,10 +130,10 @@ const aircraftCatalog = await readFile(join(root, "src/shared/aircraft-catalog.j
 if (!aircraftCatalog.includes('"aircraftId": "orbit-a1"') || !aircraftCatalog.includes('"appearanceKey": "bell-x1"')) {
   throw new Error("orbit-a1 must retain the reviewed Bell X-1 visual identity");
 }
-for (const aircraft of JSON.parse(aircraftCatalog)) {
-  if (aircraft.appearanceKey !== "bell-x1" || aircraft.visualScale !== 1) {
-    throw new Error(`${aircraft.aircraftId} must use the shared Bell X-1 geometry at the same visual scale`);
-  }
+const aircraftProfiles = JSON.parse(aircraftCatalog);
+if (aircraftProfiles.map((aircraft) => aircraft.appearanceKey).join(",") !== "bell-x1,bell-x2,bell-x3"
+  || new Set(aircraftProfiles.map((aircraft) => aircraft.turnAccelerationDegS2)).size !== 3) {
+  throw new Error("The three random aircraft profiles must retain distinct variant shapes and turns");
 }
 
 const aircraftSync = await readFile(join(root, "scripts/sync-aircraft-assets.mjs"), "utf8");
@@ -169,7 +171,7 @@ for (const token of ["DEFAULT_WEAPON_LOADOUT", "weaponById", "weaponReadyAt"]) {
 }
 
 const aircraftVisuals = await readFile(join(root, "src/shared/aircraft-visuals.ts"), "utf8");
-for (const token of ["Bell X-1", "/aircraft/bell-x1.glb", "Smithsonian Institution", 'license: "CC0"']) {
+for (const token of ["Bell X-1", "Bell X-2", "Bell X-3", "/aircraft/bell-x1.glb", "Smithsonian Institution", 'license: "CC0"', "proportions:"]) {
   if (!aircraftVisuals.includes(token)) throw new Error(`Bell X-1 visual metadata missing: ${token}`);
 }
 
@@ -188,6 +190,7 @@ for (const token of [
   "viewer.scene.primitives.add(model)",
   "localModel.modelMatrix = latestLocalModelMatrix",
   "remoteModel.modelMatrix = latestRemoteModelMatrix",
+  "Matrix4.multiplyByScale(matrix",
   "localFallback) entity.show = !localModel.ready",
   "remoteModel?.ready || remoteModelFailed",
 ]) {
@@ -230,6 +233,8 @@ for (const token of [
   'import { returningLook } from "../flight/look-return.mjs"',
   "looking: activePointerId !== null || lookReturn !== null",
   "if (returned.completed)",
+  "lastLookSnapshotTime",
+  "cameraOrientation = interpolateNetworkOrientation",
 ]) {
   if (!earthScene.includes(token)) throw new Error(`Ranked view return integration missing: ${token}`);
 }

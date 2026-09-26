@@ -1,4 +1,5 @@
 import { THEATER } from "../../shared/config";
+import type { AircraftSpec } from "../../shared/product";
 
 export type FlightInput = Readonly<{
   pitch: number;
@@ -27,6 +28,7 @@ export type FlightState = Readonly<{
   orientation: QuaternionState;
   pitchRateDegS: number;
   rollRateDegS: number;
+  headingRateDegS: number;
   speedMps: number;
   throttle: number;
   verticalSpeedMps: number;
@@ -69,7 +71,8 @@ const LEVEL_CAPTURE_RATE_THRESHOLD_DEG_S = 1.5;
 // smooth through continuous rolls and naturally returns turn authority to zero
 // when the aircraft is wings-level or fully inverted. Near vertical flight,
 // heading authority fades out because geographic heading is poorly defined.
-const BANK_TURN_MAX_RATE_DEG_S = 3.5;
+const BANK_TURN_MAX_RATE_DEG_S = 4.2;
+const DEFAULT_TURN_ACCEL_DEG_S2 = 24;
 
 const THROTTLE_RATE_PER_S = 0.42;
 const EPSILON = 1e-9;
@@ -242,6 +245,7 @@ export function createInitialFlightState(): FlightState {
     orientation: orientationFromNavigationAttitude(35, 0, 0),
     pitchRateDegS: 0,
     rollRateDegS: 0,
+    headingRateDegS: 0,
     speedMps: 155,
     throttle: 0.56,
     verticalSpeedMps: 0,
@@ -252,6 +256,7 @@ export function integrateFlightState(
   previous: FlightState,
   input: FlightInput,
   deltaSeconds: number,
+  aircraft?: AircraftSpec | null,
 ): FlightState {
   const dt = clamp(Number.isFinite(deltaSeconds) ? deltaSeconds : 0, 0, 0.05);
   const pitchInput = clamp(input.pitch, -1, 1);
@@ -267,7 +272,7 @@ export function integrateFlightState(
     previous.pitchRateDegS,
     pitchInput,
     MAX_PITCH_RATE_DEG_S,
-    PITCH_ACCEL_DEG_S2,
+    aircraft?.pitchAccelerationDegS2 ?? PITCH_ACCEL_DEG_S2,
     PITCH_RELEASE_DECEL_DEG_S2,
     dt,
   );
@@ -275,7 +280,7 @@ export function integrateFlightState(
     previous.rollRateDegS,
     rollInput,
     MAX_ROLL_RATE_DEG_S,
-    ROLL_ACCEL_DEG_S2,
+    aircraft?.rollAccelerationDegS2 ?? ROLL_ACCEL_DEG_S2,
     ROLL_RELEASE_DECEL_DEG_S2,
     dt,
   );
@@ -332,21 +337,25 @@ export function integrateFlightState(
   // Pre-multiplication applies the bounded turn about local/world up, rotating
   // the complete aircraft attitude while preserving the current body attitude.
   attitude = attitudeFromOrientation(orientation);
-  const headingTurnRateDegS = bankDrivenHeadingRateDegS(attitude.bankDeg, attitude.pitchDeg);
-  if (Math.abs(headingTurnRateDegS) > EPSILON) {
+  const targetHeadingRateDegS = bankDrivenHeadingRateDegS(attitude.bankDeg, attitude.pitchDeg);
+  const headingRateDegS = approach(previous.headingRateDegS ?? 0,
+    targetHeadingRateDegS, (aircraft?.turnAccelerationDegS2 ?? DEFAULT_TURN_ACCEL_DEG_S2) * dt);
+  if (Math.abs(headingRateDegS) > EPSILON) {
     const headingTurnDelta = axisAngleQuaternion(
       [0, 0, 1],
-      radians(-headingTurnRateDegS * dt),
+      radians(-headingRateDegS * dt),
     );
     orientation = multiplyQuaternion(headingTurnDelta, orientation);
   }
 
   const forward = rotateVector(orientation, [1, 0, 0]);
-  const levelTargetSpeedMps = MIN_SPEED_MPS + (MAX_SPEED_MPS - MIN_SPEED_MPS) * throttle;
+  const minimumSpeedMps = aircraft?.minimumSpeedMps ?? MIN_SPEED_MPS;
+  const maximumSpeedMps = aircraft?.maximumSpeedMps ?? MAX_SPEED_MPS;
+  const levelTargetSpeedMps = minimumSpeedMps + (maximumSpeedMps - minimumSpeedMps) * throttle;
   const targetSpeedMps = clamp(
     levelTargetSpeedMps - forward[2] * VERTICAL_SPEED_OFFSET_MPS,
-    MIN_SPEED_MPS,
-    MAX_SPEED_MPS,
+    minimumSpeedMps,
+    maximumSpeedMps,
   );
   const speedMps = approach(previous.speedMps, targetSpeedMps, SPEED_RESPONSE_MPS2 * dt);
   const rawVerticalSpeedMps = speedMps * forward[2];
@@ -368,6 +377,7 @@ export function integrateFlightState(
     orientation,
     pitchRateDegS,
     rollRateDegS,
+    headingRateDegS,
     speedMps,
     throttle,
     verticalSpeedMps,
@@ -383,6 +393,7 @@ export function integrateFlightState(
     next.orientation.z,
     next.pitchRateDegS,
     next.rollRateDegS,
+    next.headingRateDegS,
     next.speedMps,
     next.throttle,
     next.verticalSpeedMps,
@@ -396,13 +407,14 @@ export function integrateFlightElapsed(
   previous: FlightState,
   input: FlightInput,
   elapsedSeconds: number,
+  aircraft?: AircraftSpec | null,
 ): FlightState {
   // Bound catch-up after a suspended tab, but never discard ordinary slow frames.
   let remaining = clamp(Number.isFinite(elapsedSeconds) ? elapsedSeconds : 0, 0, 0.25);
   let state = previous;
   while (remaining > 1e-8) {
     const step = Math.min(remaining, 1 / 60);
-    state = integrateFlightState(state, input, step);
+    state = integrateFlightState(state, input, step, aircraft);
     remaining -= step;
   }
   return state;

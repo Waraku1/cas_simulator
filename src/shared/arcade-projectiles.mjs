@@ -65,6 +65,26 @@ export function gameForward(orientation) {
   return gameAxis(orientation, [1, 0, 0]);
 }
 
+// Reconstruct the orbit camera's sight direction from its shared geometry.
+// Cancel the fixed camera lift so neutral view stays on the established
+// forward gun line, even at the far end of the bounded game path.
+export function gameViewAimDirection(pose) {
+  const view = pose.view;
+  if (!view) return gameForward(pose.orientation);
+  const forward = gameForward(pose.orientation);
+  const left = gameAxis(pose.orientation, [0, 1, 0]);
+  const up = gameAxis(pose.orientation, [0, 0, 1]);
+  const yaw = view.yawRad;
+  const pitch = view.pitchRad;
+  const orbit = Math.cos(pitch);
+  const forwardWeight = (ARCADE_LOCK.cameraBackM
+    + (Math.cos(yaw) > 0 ? ARCADE_LOCK.cameraLookAheadM : 0)) * Math.cos(yaw) * orbit;
+  const leftWeight = -ARCADE_LOCK.cameraBackM * Math.sin(yaw) * orbit;
+  const upWeight = -ARCADE_LOCK.cameraBackM * Math.sin(pitch);
+  return normalized(forward.map((value, index) =>
+    value * forwardWeight + left[index] * leftWeight + up[index] * upWeight));
+}
+
 export function gameLockAvailable(localPose, peerPose, maximumDistance) {
   const delta = relativeGamePoint(localPose, peerPose);
   const distance = length(delta);
@@ -99,9 +119,15 @@ export function gameCaptureAvailable(localPose, peerPose, maximumDistance) {
   return dot(direction, toTarget) >= ARCADE_LOCK.centerCosine;
 }
 
-export function createArcadeProjectile(id, ownerSlot, weaponId, nowMs, localPose, peerPose, maximumDistance, confirmedLock) {
+export function createArcadeProjectile(id, ownerSlot, weaponId, nowMs, localPose, peerPose, maximumDistance, confirmedLock, lateralOffsetM = 0) {
   const rules = ARCADE_PROJECTILES[weaponId];
-  const direction = gameForward(localPose.orientation);
+  const direction = weaponId === "gun" ? gameViewAimDirection(localPose) : gameForward(localPose.orientation);
+  const up = gameAxis(localPose.orientation, [0, 0, 1]);
+  const left = normalized([
+    up[1] * direction[2] - up[2] * direction[1],
+    up[2] * direction[0] - up[0] * direction[2],
+    up[0] * direction[1] - up[1] * direction[0],
+  ]);
   const locked = weaponId === "missile" && (confirmedLock ?? gameLockAvailable(localPose, peerPose, maximumDistance));
   return {
     id,
@@ -112,7 +138,7 @@ export function createArcadeProjectile(id, ownerSlot, weaponId, nowMs, localPose
       longitudeDeg: localPose.longitudeDeg,
       altitudeM: localPose.altitudeM,
     },
-    position: addScaled([0, 0, 0], direction, 8),
+    position: addScaled(addScaled([0, 0, 0], direction, 8), left, lateralOffsetM),
     direction,
     targetSlot: locked ? (ownerSlot === 1 ? 2 : 1) : null,
     lastStepAtMs: nowMs,

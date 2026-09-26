@@ -2,7 +2,8 @@
 
 ## Bell X-1
 
-CAS gameplay identities: `orbit-a1`, `strata-b2`, `kite-c3`, and free flight
+CAS gameplay identities: `orbit-a1` (Bell X-1), `strata-b2` (fictional Bell
+X-2 variant), `kite-c3` (fictional Bell X-3 variant), and X-1 free flight
 
 Visual identity: **Bell X-1**
 
@@ -36,7 +37,16 @@ The synchronization log and `bell-x1.source.json` retain the source bounds, norm
 
 ### Product semantics
 
-The Bell X-1 geometry is used as the **shared visual identity** for every current aircraft. Each aircraft retains its own fictional ranked handling profile. The 2.2× scene presentation scale and 72-pixel minimum make the 9.373 m model readable from the existing chase camera, without changing gameplay movement. The peer marker is displayed above the same live pose as the 3D aircraft so it does not hide the model. SPEED / PITCH / ROLL / ACTION values shown by CAS are game-balance values and must not be represented as historical Bell X-1 performance data.
+The Bell X-1 GLB is the **shared source geometry**. X-1 keeps the base shape;
+X-2 scales the nose/tail, wings, and height by 1.16/1.08/0.94 with a 1.08
+display multiplier; X-3 uses 0.84/0.90/1.08 with a 0.92 multiplier. These
+are fictional game variants, not models of historical X-2 or X-3 aircraft.
+Each has distinct minimum/maximum speed and turn acceleration values in the
+ranked flight simulation. The base 2.2× scene presentation scale and
+72-pixel minimum make the GLB readable from the existing chase camera. The
+peer marker uses the same interpolated pose as its model. SPEED / PITCH /
+ROLL / ACTION values shown by CAS are game values and must not be represented
+as historical aircraft performance data.
 
 Basic source credit should remain visible in project documentation even though CC0 does not require attribution.
 

@@ -10,10 +10,11 @@ import {
   gameCaptureAvailable,
 } from "../src/shared/arcade-projectiles.mjs";
 import { gameGroundContact } from "../src/shared/game-ground.mjs";
+import { REGULATION_SECONDS, MAX_OVERTIME_SECONDS, overtimeSecondsForHpGap } from "../src/shared/match-duration.mjs";
 
 const STARTING_HP = 100;
-const REGULATION_MS = 4 * 60 * 1_000;
-const OVERTIME_MS = 60 * 1_000;
+const REGULATION_MS = REGULATION_SECONDS * 1_000;
+const OVERTIME_MS = MAX_OVERTIME_SECONDS * 1_000;
 const DISCONNECT_GRACE_MS = 20 * 1_000;
 const POSE_FRESHNESS_MS = 1_500;
 
@@ -91,10 +92,9 @@ export function advanceSchoolRankedRuntime(state, nowMs) {
   const [first, second] = state.participants;
   let advanced = state;
   if (state.phase !== "overtime") {
-    if (first.heartPoints !== second.heartPoints) {
-      return completed(state, first.heartPoints > second.heartPoints ? 1 : 2, "regulation-heart-points");
-    }
-    advanced = { ...state, phase: "overtime" };
+    advanced = { ...state, phase: "overtime",
+      overtimeEndsAtMs: state.regulationEndsAtMs
+        + overtimeSecondsForHpGap(first.heartPoints - second.heartPoints) * 1_000 };
   }
 
   if (nowMs < advanced.overtimeEndsAtMs) return advanced;
@@ -230,23 +230,20 @@ export function resolveSchoolRankedAction(
   if (requestedWeaponId === "missile" && distanceM(localPose.pose, peerPose.pose) > weapon.activationRadiusM) {
     return reject("outside_interaction");
   }
-  if ((advanced.projectiles?.length ?? 0) >= MAX_ARCADE_PROJECTILES) return reject("projectile_limit");
+  const volleySize = requestedWeaponId === "gun" ? 2 : 1;
+  if ((advanced.projectiles?.length ?? 0) + volleySize > MAX_ARCADE_PROJECTILES) return reject("projectile_limit");
 
   const nextReadyAt = nowMs + weapon.cooldownMs;
-  const projectile = createArcadeProjectile(
-    (advanced.nextProjectileSequence ?? 0) + 1,
-    slot,
-    requestedWeaponId,
-    nowMs,
-    localPose.pose,
-    peerPose.pose,
-    weapon.activationRadiusM,
-    confirmedLock,
-  );
+  const nextSequence = (advanced.nextProjectileSequence ?? 0) + volleySize;
+  const volley = Array.from({ length: volleySize }, (_, index) => createArcadeProjectile(
+    nextSequence - volleySize + index + 1, slot, requestedWeaponId, nowMs,
+    localPose.pose, peerPose.pose, weapon.activationRadiusM, confirmedLock,
+    requestedWeaponId === "gun" ? (index === 0 ? -2 : 2) : 0,
+  ));
   advanced = {
     ...advanced,
-    projectiles: [...(advanced.projectiles ?? []), projectile],
-    nextProjectileSequence: projectile.id,
+    projectiles: [...(advanced.projectiles ?? []), ...volley],
+    nextProjectileSequence: nextSequence,
     participants: advanced.participants.map((participant) => {
       if (participant.slot === local.slot) {
         return {
@@ -267,16 +264,14 @@ export function resolveSchoolRankedAction(
     accepted: true,
     code: "accepted",
     weaponId: requestedWeaponId,
-    locked: projectile.targetSlot !== null,
+    locked: volley[0].targetSlot !== null,
     nextActionAtMs: weaponReadiness(advanced.participants[slot - 1])[requestedWeaponId],
   };
 }
 
 export function advanceSchoolRankedProjectiles(state, nowMs, poseForSlot) {
   if (state.result || !state.projectiles?.length) return state;
-  const cutoff = Math.min(nowMs, state.overtimeEndsAtMs,
-    state.phase === "active" && state.participants[0].heartPoints !== state.participants[1].heartPoints
-      ? state.regulationEndsAtMs : Number.POSITIVE_INFINITY);
+  const cutoff = Math.min(nowMs, state.overtimeEndsAtMs);
   const projectiles = [];
   const damage = [0, 0];
   for (const projectile of state.projectiles) {

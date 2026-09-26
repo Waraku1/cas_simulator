@@ -6,6 +6,7 @@ import {
   createArcadeProjectile,
   gameCaptureAvailable,
   gameLockAvailable,
+  gameViewAimDirection,
   gamePointToPosition,
 } from "../src/shared/arcade-projectiles.mjs";
 import { GAME_GROUND_CLEARANCE_M, gameGroundContact } from "../src/shared/game-ground.mjs";
@@ -54,6 +55,19 @@ assert.equal(advanceArcadeProjectile(gunAtExtendedRange, 1_600, point(650)).touc
 const gunBeyondSimulation = createArcadeProjectile(10, 1, "gun", 0, pilot, point(760), 360);
 assert.equal(advanceArcadeProjectile(gunBeyondSimulation, 1_800, point(760)).touched, false,
   "GUN cannot contact a peer beyond the simulated segment");
+
+const sideView = { ...pilot, view: { yawRad: Math.PI / 2, pitchRad: 0, looking: true, weaponId: "gun" } };
+const sight = gameViewAimDirection(sideView);
+assert.ok(Math.abs(sight[0]) < 1e-8 && sight[1] < -0.99,
+  "Positive drag yaw turns the GUN sight toward the camera's right");
+const sideGun = createArcadeProjectile(11, 1, "gun", 0, sideView, point(0, -80), 360, false, -2);
+assert.equal(advanceArcadeProjectile(sideGun, 200, point(0, -80)).touched, true,
+  "GUN can reach the changed look direction without tracking");
+const sameGunMiss = createArcadeProjectile(12, 1, "gun", 0, sideView, point(80), 360, false, 2);
+assert.equal(advanceArcadeProjectile(sameGunMiss, 200, point(80)).touched, false,
+  "Side-look GUN cannot continue along the old forward path");
+assert.deepEqual(gameViewAimDirection(pilot), [1, 0, 0],
+  "No view metadata preserves the existing forward trajectory");
 
 const viewedPilot = { ...pilot, view: { yawRad: 0, pitchRad: 0, weaponId: "missile" } };
 assert.equal(gameCaptureAvailable(viewedPilot, point(120), 600), true);

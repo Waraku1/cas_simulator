@@ -10,6 +10,15 @@ import {
   updateSchoolRankedCapture,
 } from "./school-ranked-runtime.mjs";
 import { gamePointToPosition } from "../src/shared/arcade-projectiles.mjs";
+import { overtimeSecondsForHpGap } from "../src/shared/match-duration.mjs";
+import aircraftCatalog from "../src/shared/aircraft-catalog.json" with { type: "json" };
+
+if (aircraftCatalog.map(({ displayName }) => displayName).join(",") !== "Bell X-1,Bell X-2,Bell X-3"
+  || new Set(aircraftCatalog.map(({ turnAccelerationDegS2 }) => turnAccelerationDegS2)).size !== 3
+  || new Set(aircraftCatalog.map(({ maximumSpeedMps }) => maximumSpeedMps)).size !== 3
+  || new Set(aircraftCatalog.map(({ minimumSpeedMps }) => minimumSpeedMps)).size !== 3) {
+  throw new Error("Random aircraft pool must contain three distinct playable profiles");
+}
 
 function baseState(activeAtMs = 10_000) {
   return createSchoolRankedRuntime({
@@ -80,8 +89,12 @@ const gun = resolveSchoolRankedAction(
   targetAt(10_262),
   "gun",
 );
-if (!gun.accepted || gun.locked || gun.state.participants[1].heartPoints !== 80) {
+if (!gun.accepted || gun.locked || gun.state.participants[1].heartPoints !== 80
+  || gun.state.projectiles.length !== 2 || gun.state.nextProjectileSequence !== 3) {
   throw new Error("GUN independent cooldown/effect contract failed");
+}
+if (gun.state.projectiles[0].position[1] === gun.state.projectiles[1].position[1]) {
+  throw new Error("A GUN trigger must spawn two separately visible projectiles");
 }
 const gunCooldown = resolveSchoolRankedAction(
   gun.state,
@@ -96,7 +109,26 @@ if (gunCooldown.accepted || gunCooldown.code !== "cooldown") {
 }
 weaponState = advanceSchoolRankedProjectiles(gun.state, 10_460, (slot) =>
   slot === 2 ? targetAt(10_460) : { ...poseSample, receivedAtMs: 10_460 });
-if (weaponState.participants[1].heartPoints !== 76) throw new Error("GUN contact did not apply HP effect");
+if (weaponState.participants[1].heartPoints !== 72) throw new Error("Both GUN projectiles must resolve contact");
+
+const draggedGun = resolveSchoolRankedAction(state, 1, 10_010,
+  { pose: { ...poseSample.pose, view: { yawRad: Math.PI / 2, pitchRad: 0, weaponId: "gun", looking: true } }, receivedAtMs: 10_010 },
+  { pose: { ...poseSample.pose, ...gamePointToPosition(poseSample.pose, [0, -80, 0]) }, receivedAtMs: 10_010 }, "gun");
+if (!draggedGun.accepted || draggedGun.state.projectiles.length !== 2) {
+  throw new Error("Dragged-view GUN volley must launch while looking");
+}
+const draggedContact = advanceSchoolRankedProjectiles(draggedGun.state, 10_250, (slot) => slot === 2
+  ? { pose: { ...poseSample.pose, ...gamePointToPosition(poseSample.pose, [0, -80, 0]) }, receivedAtMs: 10_250 }
+  : { ...poseSample, receivedAtMs: 10_250 });
+if (draggedContact.participants[1].heartPoints !== 92) {
+  throw new Error("Dragged-view GUN volley must contact only along the changed sight direction");
+}
+const fullVolleyRejected = resolveSchoolRankedAction(
+  { ...state, projectiles: Array(7).fill(draggedGun.state.projectiles[0]) }, 1, 10_010,
+  { ...poseSample, receivedAtMs: 10_010 }, targetAt(10_010), "gun");
+if (fullVolleyRejected.code !== "projectile_limit" || fullVolleyRejected.state.projectiles.length !== 7) {
+  throw new Error("GUN volley must reserve two free projectile slots atomically");
+}
 
 const miss = resolveSchoolRankedAction(state, 1, 10_010,
   { ...poseSample, receivedAtMs: 10_010 },
@@ -122,7 +154,7 @@ if (!extendedGun.accepted) throw new Error("GUN must launch beyond the legacy ca
 const extendedContact = advanceSchoolRankedProjectiles(extendedGun.state, 11_610, (slot) => slot === 2
   ? { pose: extendedTargetPose, receivedAtMs: 11_610 }
   : { ...poseSample, receivedAtMs: 11_610 });
-if (extendedContact.participants[1].heartPoints !== 96) {
+if (extendedContact.participants[1].heartPoints !== 92) {
   throw new Error("GUN must contact on its doubled game path");
 }
 const missileAtNewRange = resolveSchoolRankedAction(
@@ -152,15 +184,25 @@ state = {
   ],
 };
 let regulationResult = advanceSchoolRankedRuntime(state, regulationEnd);
-if (regulationResult.phase !== "completed" || regulationResult.result?.winnerSlot !== 1 || regulationResult.result?.reason !== "regulation-heart-points") {
-  throw new Error("regulation HP result failed");
+if (regulationResult.phase !== "overtime" || regulationResult.overtimeEndsAtMs !== regulationEnd + 4 * 60_000) {
+  throw new Error("A 12 HP gap must award four minutes of overtime");
+}
+if (advanceSchoolRankedRuntime(regulationResult, regulationResult.overtimeEndsAtMs - 1).result !== null
+  || advanceSchoolRankedRuntime(regulationResult, regulationResult.overtimeEndsAtMs).result?.winnerSlot !== 1) {
+  throw new Error("Unequal HP must be decided after, not before, the allotted overtime");
+}
+for (const [gap, minutes] of [[0, 5], [9, 5], [10, 4], [19, 4], [20, 3], [30, 2], [40, 1], [100, 1]]) {
+  if (overtimeSecondsForHpGap(gap) !== minutes * 60) throw new Error(`Incorrect overtime for HP gap ${gap}`);
 }
 
 state = baseState();
 state = markSchoolRankedConnected(state, 1, 10_001);
 state = markSchoolRankedConnected(state, 2, 10_001);
 let overtimeState = advanceSchoolRankedRuntime(state, state.regulationEndsAtMs);
-if (overtimeState.phase !== "overtime" || overtimeState.result !== null) throw new Error("overtime transition failed");
+if (overtimeState.phase !== "overtime" || overtimeState.result !== null
+  || overtimeState.overtimeEndsAtMs !== overtimeState.regulationEndsAtMs + 5 * 60_000) {
+  throw new Error("An equal HP match must enter five minutes of overtime");
+}
 
 overtimeState = {
   ...overtimeState,
@@ -171,7 +213,7 @@ overtimeState = {
 };
 const duringOvertime = advanceSchoolRankedRuntime(overtimeState, overtimeState.overtimeEndsAtMs - 1);
 if (duringOvertime.phase !== "overtime" || duringOvertime.result !== null) {
-  throw new Error("overtime ended before the full 60 seconds");
+  throw new Error("overtime ended before its assigned full duration");
 }
 const overtimeResult = advanceSchoolRankedRuntime(duringOvertime, duringOvertime.overtimeEndsAtMs);
 if (overtimeResult.result?.winnerSlot !== 1 || overtimeResult.result?.reason !== "overtime-heart-points") {

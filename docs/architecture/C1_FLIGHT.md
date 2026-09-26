@@ -47,7 +47,8 @@ C1.6 established near-level capture. The C5 release refinement narrows the captu
 Release turning is generated from bank rather than a direct yaw input.
 
 - Positive/right bank generates a positive/right heading change; negative/left bank generates the opposite change.
-- Turn authority is bounded to a maximum 3.5 deg/s.
+- Turn authority is bounded to a maximum 4.2 deg/s. Each aircraft ramps
+  toward the bank-derived rate with its own angular acceleration.
 - The response uses `sin(bank)` so it remains continuous and bounded through unrestricted rolls, is zero when wings-level, and returns to zero when fully inverted rather than diverging near 90° bank.
 - Turn authority is multiplied by the horizontal component implied by pitch, fading toward zero near vertical flight where geographic heading becomes poorly defined.
 - The heading turn is applied as a local/world-up quaternion rotation to the complete attitude, rather than as a pilot-commanded body-axis yaw.
@@ -62,11 +63,27 @@ Post-release correction: Cesium already converts a standard glTF model's axes wh
 
 Bell X-1 presentation: the official, physically normalized GLB is shared by all three current gameplay profiles and by free flight. Its display multiplier matches the previous game silhouette at the existing chase-camera distance; it does not change flight handling or source-model dimensions. The peer's orange marker is lifted above the same live pose used by the 3D model so it does not cover the aircraft. The marker and model still update from the same interpolated peer pose.
 
+The Bell X-1 source geometry now has three fictional ranked appearances. X-1
+retains the baseline proportions; X-2 is longer and wider, X-3 shorter and
+narrower. The model matrix scales its body axes independently while the shared
+licensed GLB, horizontal nose correction, and authoritative pose stay intact.
+The existing fixed-aircraft choice and three-entry random pool remain in place.
+The selected profile supplies distinct minimum/maximum game speeds and turn
+angular acceleration to the flight integrator; the original key mapping,
+rate caps, and throttle response remain unchanged. The HUD speed uses the
+resulting simulated speed during climb and descent as well.
+
 Ranked flight loads the Bell X-1 GLB as two scene models and updates their model matrices in the same frame loop as the local aircraft and interpolated peer pose. The generic body, wings, and nose remain visible only while each model loads or if it fails. A concise notice reports failures instead of leaving an apparently missing aircraft. Free flight retains the Entity model path.
 
 Ranked viewport dragging orbits the chase camera around the own aircraft, with a bounded vertical view angle and double-click recentering. The camera offset is published as a separate view value for screen-center capture. It never enters `FlightInput`, `FlightState`, model orientation, or the bank-mediated turn integration. The accepted flight controls and angular response remain fixed.
 
 On pointer release, camera yaw and pitch ease from their current offsets to the forward view over 200 ms. A new drag interrupts the return without snapping the camera. The network view remains marked as looking until the return completes; a forward-view pose is sent immediately at completion so capture can resume. This changes only the camera, never the aircraft controls or attitude.
+
+The chase camera's orientation follows the aircraft with an 85 ms display
+time constant; the aircraft model, simulation, network pose, and numeric speed
+remain current. Dragged look offsets still orbit as before, and view samples
+are sent at most every 40 ms during a drag so the game-space gun direction
+follows the latest view when firing.
 
 Follow-up display correction: the Bell X-1 asset receives a 180° rotation around the body's up axis in both Entity and ranked primitive rendering. The fallback geometry, camera, network pose, flight direction, and up axis are unchanged. The local speed target now depends on the vertical component of the aircraft's forward vector: climbing reduces speed and descending increases it within the existing game speed bounds. At exactly level flight, the previous throttle target and response are unchanged. The game samples rendered terrain height below the aircraft; contact during a ranked match is sent in the pose and resolved as an opponent win by the Worker.
 
