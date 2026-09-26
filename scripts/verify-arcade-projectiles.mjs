@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import {
+  ARCADE_LOCK,
+  ARCADE_PROJECTILES,
   advanceArcadeProjectile,
   createArcadeProjectile,
   gameCaptureAvailable,
@@ -14,6 +16,8 @@ const pilot = {
   orientation: { w: 1, x: 0, y: 0, z: 0 },
 };
 const point = (east, north = 0) => gamePointToPosition(pilot, [east, north, 0]);
+assert.equal(ARCADE_LOCK.holdMs, 1_200, "Capture hold time remains unchanged");
+assert.equal(ARCADE_PROJECTILES.gun.speed, 450, "GUN movement remains unchanged");
 
 assert.equal(gameLockAvailable(pilot, point(120), 600), true);
 assert.equal(gameLockAvailable(pilot, point(0, 120), 600), false);
@@ -44,6 +48,14 @@ assert.equal(advanceArcadeProjectile(gunBeyondSimulation, 900, point(420)).touch
 const viewedPilot = { ...pilot, view: { yawRad: 0, pitchRad: 0, weaponId: "missile" } };
 assert.equal(gameCaptureAvailable(viewedPilot, point(120), 600), true);
 assert.equal(gameCaptureAvailable(viewedPilot, point(0, 120), 600), false);
+assert.equal(gameCaptureAvailable(viewedPilot, point(300, 80), 900), true,
+  "Wider central region includes a moderately offset target");
+assert.equal(gameCaptureAvailable(viewedPilot, point(300, 130), 900), false,
+  "Central capture still has a boundary");
+assert.equal(gameCaptureAvailable(viewedPilot, point(850), 900), true,
+  "Extended game interaction region accepts a distant target");
+assert.equal(gameCaptureAvailable(viewedPilot, point(950), 900), false,
+  "Distant targets remain outside the new interaction boundary");
 assert.equal(gameCaptureAvailable({ ...viewedPilot, view: { ...viewedPilot.view, yawRad: -Math.PI / 2 } }, point(0, 120), 600), true,
   "Camera drag alone can bring an off-axis game target into the center");
 assert.equal(createArcadeProjectile(7, 1, "missile", 0, viewedPilot, point(120), 600, false).targetSlot, null,
@@ -72,5 +84,21 @@ for (const now of [100, 200, 300, 400, 500]) {
   tracking = lockedStep.projectile;
 }
 assert.equal(tracking, null, "Locked MISSILE did not touch a moving game target");
+
+const widerTarget = point(500, 260);
+let widerTracking = createArcadeProjectile(9, 1, "missile", 0, pilot, widerTarget, 900, true);
+const earlyStep = advanceArcadeProjectile(widerTracking, 100, widerTarget);
+assert.ok(earlyStep.projectile.position[1] > 8,
+  "Stronger arcade tracking must respond promptly to an offset target");
+widerTracking = earlyStep.projectile;
+for (const now of [200, 400, 800, 1_200, 1_600]) {
+  const step = advanceArcadeProjectile(widerTracking, now, widerTarget);
+  if (step.touched) {
+    widerTracking = null;
+    break;
+  }
+  widerTracking = step.projectile;
+}
+assert.equal(widerTracking, null, "Extended-duration tracking should reach the offset target");
 
 console.log(JSON.stringify({ ok: true, gate: "ARCADE_PROJECTILE_CONTACT_AND_LOCK" }));

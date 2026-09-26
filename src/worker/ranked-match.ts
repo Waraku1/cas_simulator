@@ -462,21 +462,15 @@ export class RankedMatch {
     }
 
     const nowMs = Date.now();
-    if (state.projectiles?.length) {
-      state = await this.persist(state, nowMs);
-    } else {
-      const advanced = advanceCompetitionRuntime(state, nowMs);
-      if (advanced !== state) state = await this.persist(advanced, nowMs);
-    }
-
     if (parsed.type === "pose") {
+      const advanced = advanceCompetitionRuntime(state, nowMs);
       socket.serializeAttachment({
         ...sender,
         latestPose: parsed.pose,
         latestPoseReceivedAtMs: nowMs,
       } satisfies RankedSocketAttachment);
-      this.updateCaptureForSlot(sender.slot, state, nowMs);
-      this.updateCaptureForSlot(sender.slot === 1 ? 2 : 1, state, nowMs);
+      this.updateCaptureForSlot(sender.slot, advanced, nowMs);
+      this.updateCaptureForSlot(sender.slot === 1 ? 2 : 1, advanced, nowMs);
       const relay: ServerRoomMessage = {
         type: "peer_pose",
         playerId: sender.playerId,
@@ -484,8 +478,17 @@ export class RankedMatch {
         pose: parsed.pose,
       };
       for (const peer of this.openSockets(socket)) this.send(peer, relay);
-      if (state.projectiles?.length) await this.persist(state, nowMs);
+      // Advance once with this fresh pose. A duplicate broadcast with the
+      // previous pose makes moving projectiles appear to hesitate.
+      if (state.projectiles?.length || advanced !== state) await this.persist(advanced, nowMs);
       return;
+    }
+
+    if (state.projectiles?.length) {
+      state = await this.persist(state, nowMs);
+    } else {
+      const advanced = advanceCompetitionRuntime(state, nowMs);
+      if (advanced !== state) state = await this.persist(advanced, nowMs);
     }
 
     if (parsed.type === "leave_match") {

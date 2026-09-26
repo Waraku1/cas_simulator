@@ -32,7 +32,7 @@ Aircraft catalog order defines the cycling order.
 
 - HP effect: 20
 - cooldown: 5.0 s
-- interaction radius: 600 m
+- interaction radius: 900 m (fictional game-space selection and launch gate)
 - fire profile: single
 
 ### GUN
@@ -82,12 +82,20 @@ Holding Space sends GUN requests at 0.44 s intervals, subject to server cooldown
 the match's eight-projectile cap. The client does not determine contact.
 
 `MISSILE` follows the opponent only when the selected missile view has kept the peer
-near the camera center for 1.2 s with fresh pose updates. The progress bar shows the
+within the expanded central camera region for 1.2 s with fresh pose updates. The progress bar shows the
 local hold estimate; the server separately verifies the hold before allowing tracking.
 Once held, the peer marker says `LOCKED` until capture is lost, and the peer receives
 `MISSILE LOCK ALERT`. Firing without a completed lock still launches a straight game
 projectile. Older clients without a view field temporarily use the previous aim rule
 during the rollout. These are abstract game rules with no real-world guidance model.
+
+The missile's fictional travel setting is now 400 game m/s for 3.4 s, and the
+server increases its per-step tracking blend for a more responsive curved path.
+The central capture cone grows from 8° to 14° while the 1.2 s hold is fixed.
+The authoritative Worker publishes one projectile update per incoming pose;
+the renderer fills between those samples with up to 120 ms of visual-only
+position prediction and a short missile trail. Visual prediction never affects
+the server's contact result.
 
 Only the server may:
 

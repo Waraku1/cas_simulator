@@ -19,6 +19,7 @@ export const ARCADE_PROJECTILES: Readonly<Record<WeaponId, Readonly<{
   lifetimeMs: number;
   touchRadius: number;
   maxTravelM?: number;
+  trackingBlendPer50Ms?: number;
 }>>>;
 export const MAX_ARCADE_PROJECTILES: number;
 export const ARCADE_TICK_MS: number;

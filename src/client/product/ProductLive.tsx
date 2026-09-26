@@ -360,6 +360,7 @@ function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFound
       localAircraftId={assignment.aircraftId}
       peerAircraftId={assignment.peerAircraftId}
       projectiles={state?.projectiles}
+      projectileServerTimeMs={state?.serverTimeMs}
       selectedWeaponId={selectedWeaponId}
       peerLocked={lockAvailable}
       onLocalPose={handleLocalPose}
