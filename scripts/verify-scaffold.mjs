@@ -148,7 +148,7 @@ for (const token of [
   '"weaponId": "missile"',
   '"heartPointEffect": 20',
   '"cooldownMs": 5000',
-  '"activationRadiusM": 600',
+  '"activationRadiusM": 900',
   '"weaponId": "gun"',
   '"heartPointEffect": 4',
   '"cooldownMs": 400',
