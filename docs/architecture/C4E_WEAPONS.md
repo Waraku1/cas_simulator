@@ -12,7 +12,7 @@ The values below are **CAS gameplay balance parameters only**. They are not inte
 
 - `Left Arrow / Right Arrow`: cycle the selected weapon.
 - `Space`: fire the selected weapon. Holding it repeats GUN fire at its 0.40 s cooldown cadence; MISSILE remains a single press.
-- Drag the ranked viewport to look around. Double-click to center the view. The drag changes only camera yaw/pitch, never the aircraft orientation or the accepted W/S, A/D, and throttle inputs.
+- Drag the ranked viewport to look around. Releasing the drag returns the view to forward over 0.2 s; double-click centers it immediately. These actions change only camera yaw/pitch, never the aircraft orientation or the accepted W/S, A/D, and throttle inputs.
 - `Up Arrow / Down Arrow`: throttle remains unchanged.
 - `W / S`: pitch remains unchanged.
 - `A / D`: bank/turn remains unchanged.
@@ -32,14 +32,14 @@ Aircraft catalog order defines the cycling order.
 
 - HP effect: 20
 - cooldown: 5.0 s
-- interaction radius: 900 m (fictional game-space selection and launch gate)
+- interaction radius: 1350 m (fictional game-space selection and launch gate)
 - fire profile: single
 
 ### GUN
 
 - HP effect: 4
 - cooldown: 0.40 s
-- interaction radius: 180 m (legacy catalog indicator; no longer a launch gate)
+- interaction radius: 360 m (legacy catalog indicator; no longer a launch gate)
 - fire profile: rapid
 
 Cooldowns are independent per weapon.
@@ -76,7 +76,7 @@ only when the two touch. A miss or an expired projectile has no HP effect. Stale
 cannot create a contact, and completing the match removes remaining projectiles.
 
 `GUN` travels straight along the aircraft's forward direction without tracking. Its
-game path is limited to 360 m and 0.9 s; contact is checked only along the traveled
+game path is limited to 720 m and 1.8 s; contact is checked only along the traveled
 segments, and the display removes the point and short trail when the path ends.
 Holding Space sends GUN requests at 0.44 s intervals, subject to server cooldown and
 the match's eight-projectile cap. The client does not determine contact.
@@ -86,12 +86,12 @@ within the expanded central camera region for 1.2 s with fresh pose updates. The
 local hold estimate; the server separately verifies the hold before allowing tracking.
 Once held, the peer marker says `LOCKED` until capture is lost, and the peer receives
 `MISSILE LOCK ALERT`. Firing without a completed lock still launches a straight game
-projectile. Capture pauses and resets while the look pointer is held, while the
-view remains displaced from forward, or when the aircraft itself is not facing
+projectile. Capture pauses and resets while the look pointer is held, during the
+0.2 s return to forward, while the view remains displaced, or when the aircraft itself is not facing
 the peer. The 1.2 s hold remains unchanged. Older clients without a view field
 cannot establish a tracked shot. These are abstract game rules with no real-world guidance model.
 
-The missile's fictional travel setting is now 400 game m/s for 3.4 s, and the
+The missile's fictional travel setting is 400 game m/s for 5.1 s, and the
 server increases its per-step tracking blend for a more responsive curved path.
 The central capture cone grows from 8° to 14° while the 1.2 s hold is fixed.
 The authoritative Worker publishes one projectile update per incoming pose;

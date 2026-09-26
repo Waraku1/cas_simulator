@@ -9,6 +9,7 @@ import {
   gamePointToPosition,
 } from "../src/shared/arcade-projectiles.mjs";
 import { GAME_GROUND_CLEARANCE_M, gameGroundContact } from "../src/shared/game-ground.mjs";
+import weaponCatalog from "../src/shared/weapon-catalog.json" with { type: "json" };
 
 const pilot = {
   latitudeDeg: 34.4,
@@ -19,6 +20,11 @@ const pilot = {
 const point = (east, north = 0) => gamePointToPosition(pilot, [east, north, 0]);
 assert.equal(ARCADE_LOCK.holdMs, 1_200, "Capture hold time remains unchanged");
 assert.equal(ARCADE_PROJECTILES.gun.speed, 450, "GUN movement remains unchanged");
+assert.equal(ARCADE_PROJECTILES.gun.maxTravelM, 720, "GUN path doubles without changing speed");
+assert.equal(ARCADE_PROJECTILES.gun.lifetimeMs, 1_800, "GUN remains simulated until its doubled path ends");
+assert.equal(ARCADE_PROJECTILES.missile.lifetimeMs, 5_100, "MISSILE travel time increases by 1.5x");
+assert.equal(weaponCatalog.find((weapon) => weapon.weaponId === "missile")?.activationRadiusM, 1_350);
+assert.equal(weaponCatalog.find((weapon) => weapon.weaponId === "gun")?.activationRadiusM, 360);
 
 assert.equal(gameLockAvailable(pilot, point(120), 600), true);
 assert.equal(gameLockAvailable(pilot, point(0, 120), 600), false);
@@ -32,7 +38,7 @@ assert.equal(gunAt200.projectile.position[1], 0, "GUN must fly straight");
 const gunExpired = advanceArcadeProjectile(gunAt200.projectile, 501, point(0, 90));
 assert.equal(gunExpired.touched, false);
 assert.ok(gunExpired.projectile, "GUN remains visible after a short flight");
-const gunAtLimit = advanceArcadeProjectile(gunExpired.projectile, 900, point(420));
+const gunAtLimit = advanceArcadeProjectile(gunExpired.projectile, 1_800, point(760));
 assert.equal(gunAtLimit.touched, false);
 assert.equal(gunAtLimit.projectile, null, "GUN simulation stops at the bounded game distance");
 
@@ -42,8 +48,11 @@ assert.equal(advanceArcadeProjectile(gunOnAxis, 200, point(80)).touched, true,
 const gunBeyondActivation = createArcadeProjectile(5, 1, "gun", 0, pilot, point(300), 180);
 assert.equal(advanceArcadeProjectile(gunBeyondActivation, 700, point(300)).touched, true,
   "GUN contact is decided by the path even beyond the activation indicator");
-const gunBeyondSimulation = createArcadeProjectile(6, 1, "gun", 0, pilot, point(420), 180);
-assert.equal(advanceArcadeProjectile(gunBeyondSimulation, 900, point(420)).touched, false,
+const gunAtExtendedRange = createArcadeProjectile(6, 1, "gun", 0, pilot, point(650), 360);
+assert.equal(advanceArcadeProjectile(gunAtExtendedRange, 1_600, point(650)).touched, true,
+  "GUN contact reaches the doubled path boundary");
+const gunBeyondSimulation = createArcadeProjectile(10, 1, "gun", 0, pilot, point(760), 360);
+assert.equal(advanceArcadeProjectile(gunBeyondSimulation, 1_800, point(760)).touched, false,
   "GUN cannot contact a peer beyond the simulated segment");
 
 const viewedPilot = { ...pilot, view: { yawRad: 0, pitchRad: 0, weaponId: "missile" } };
@@ -53,9 +62,9 @@ assert.equal(gameCaptureAvailable(viewedPilot, point(300, 80), 900), true,
   "Wider central region includes a moderately offset target");
 assert.equal(gameCaptureAvailable(viewedPilot, point(300, 130), 900), false,
   "Central capture still has a boundary");
-assert.equal(gameCaptureAvailable(viewedPilot, point(850), 900), true,
+assert.equal(gameCaptureAvailable(viewedPilot, point(1_300), 1_350), true,
   "Extended game interaction region accepts a distant target");
-assert.equal(gameCaptureAvailable(viewedPilot, point(950), 900), false,
+assert.equal(gameCaptureAvailable(viewedPilot, point(1_400), 1_350), false,
   "Distant targets remain outside the new interaction boundary");
 assert.equal(gameCaptureAvailable({ ...viewedPilot, view: { ...viewedPilot.view, yawRad: -Math.PI / 2 } }, point(0, 120), 600), false,
   "Looking sideways cannot establish a lock, even with the peer centered on screen");

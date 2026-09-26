@@ -52,6 +52,8 @@ const required = [
   "src/shared/arcade-projectiles.d.mts",
   "src/shared/game-ground.mjs",
   "src/shared/game-ground.d.mts",
+  "src/client/flight/look-return.mjs",
+  "src/client/flight/look-return.d.mts",
   "src/shared/matchmaking.ts",
   "scripts/dev-school.mjs",
   "scripts/sync-aircraft-assets.mjs",
@@ -75,6 +77,7 @@ const required = [
   "scripts/verify-c4c-runtime.mjs",
   "scripts/verify-arcade-projectiles.mjs",
   "scripts/verify-flight-response.mjs",
+  "scripts/verify-look-return.mjs",
   "docs/architecture/C0_FOUNDATION.md",
   "docs/architecture/C1_FLIGHT.md",
   "docs/architecture/C2_WORLD_THEATER.md",
@@ -151,11 +154,11 @@ for (const token of [
   '"weaponId": "missile"',
   '"heartPointEffect": 20',
   '"cooldownMs": 5000',
-  '"activationRadiusM": 900',
+  '"activationRadiusM": 1350',
   '"weaponId": "gun"',
   '"heartPointEffect": 4',
   '"cooldownMs": 400',
-  '"activationRadiusM": 180',
+  '"activationRadiusM": 360',
 ]) {
   if (!weaponCatalog.includes(token)) throw new Error(`Formal weapon catalog missing: ${token}`);
 }
@@ -222,6 +225,13 @@ for (const token of [
   "orientationProperty.setValue(orientationFromFrame(flightFrame))",
 ]) {
   if (!earthScene.includes(token)) throw new Error(`Bell X-1 horizontal heading correction missing: ${token}`);
+}
+for (const token of [
+  'import { returningLook } from "../flight/look-return.mjs"',
+  "looking: activePointerId !== null || lookReturn !== null",
+  "if (returned.completed)",
+]) {
+  if (!earthScene.includes(token)) throw new Error(`Ranked view return integration missing: ${token}`);
 }
 
 const appShell = await readFile(join(root, "src/client/App.tsx"), "utf8");

@@ -40,6 +40,7 @@ import {
   type FlightState,
   type FlightTelemetry,
 } from "../flight/model";
+import { returningLook } from "../flight/look-return.mjs";
 import type { RemotePoseBuffer } from "../multiplayer/useMultiplayer";
 import {
   evaluateTheaterPosition,
@@ -337,6 +338,7 @@ export function EarthScene({
     let removeViewListeners = () => {};
     let viewYawRad = 0;
     let viewPitchRad = 0;
+    let lookReturn: { startedAtMs: number; yawRad: number; pitchRad: number } | null = null;
     let localGroundHeightM = 0;
     let groundContactSent = false;
     let activePointerId: number | null = null;
@@ -737,13 +739,14 @@ export function EarthScene({
           },
           ...(competitiveModels && weaponRef.current ? {
             view: { yawRad: viewYawRad, pitchRad: viewPitchRad,
-              weaponId: weaponRef.current, looking: activePointerId !== null },
+              weaponId: weaponRef.current, looking: activePointerId !== null || lookReturn !== null },
           } : {}),
         });
       };
 
       const handlePointerDown = (event: PointerEvent) => {
         if (!competitiveModels || activePointerId !== null || (event.pointerType === "mouse" && event.button !== 0)) return;
+        lookReturn = null;
         activePointerId = event.pointerId;
         pointerX = event.clientX;
         pointerY = event.clientY;
@@ -767,10 +770,14 @@ export function EarthScene({
         activePointerId = null;
         viewport.classList.remove("is-looking");
         if (viewport.hasPointerCapture(event.pointerId)) viewport.releasePointerCapture(event.pointerId);
+        lookReturn = viewYawRad !== 0 || viewPitchRad !== 0
+          ? { startedAtMs: performance.now(), yawRad: viewYawRad, pitchRad: viewPitchRad }
+          : null;
         publishNetworkPose();
       };
       const handleViewReset = (event: MouseEvent) => {
         if (!competitiveModels) return;
+        lookReturn = null;
         viewYawRad = 0;
         viewPitchRad = 0;
         publishNetworkPose();
@@ -802,6 +809,18 @@ export function EarthScene({
         const deltaSeconds = elapsedMs / 1_000;
         lastFrameTime = now;
         applyMultiplayerStagingIfNeeded();
+        let finishedLookReturn = false;
+        if (lookReturn) {
+          const returned = returningLook(
+            lookReturn.yawRad, lookReturn.pitchRad, now - lookReturn.startedAtMs,
+          );
+          viewYawRad = returned.yawRad;
+          viewPitchRad = returned.pitchRad;
+          if (returned.completed) {
+            lookReturn = null;
+            finishedLookReturn = true;
+          }
+        }
 
         const input: FlightInput = {
           pitch: keyAxis(pressedKeys, "KeyW", "KeyS"),
@@ -843,6 +862,11 @@ export function EarthScene({
         updateCamera(position, flightFrame);
         updateRemoteAircraft(now, elapsedMs);
         updateProjectileVisuals(now, deltaSeconds);
+
+        if (finishedLookReturn) {
+          lastNetworkSnapshotTime = now;
+          publishNetworkPose();
+        }
 
         if (competitiveModels && touchedGround && !groundContactSent) {
           groundContactSent = true;

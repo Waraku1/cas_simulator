@@ -4,7 +4,7 @@
     "displayName": "MISSILE",
     "heartPointEffect": 20,
     "cooldownMs": 5000,
-    "activationRadiusM": 900,
+    "activationRadiusM": 1350,
     "fireProfile": "single"
   },
   {
@@ -12,7 +12,7 @@
     "displayName": "GUN",
     "heartPointEffect": 4,
     "cooldownMs": 400,
-    "activationRadiusM": 180,
+    "activationRadiusM": 360,
     "fireProfile": "rapid"
   }
 ]
