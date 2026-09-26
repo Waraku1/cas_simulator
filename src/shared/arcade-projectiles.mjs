@@ -1,7 +1,7 @@
 // Fictional CAS game-space motion only. These values are gameplay timing and
 // contact sizes, not a model of any real aircraft or weapon.
 export const ARCADE_PROJECTILES = Object.freeze({
-  missile: Object.freeze({ speed: 280, lifetimeMs: 2_600, touchRadius: 18 }),
+  missile: Object.freeze({ speed: 400, lifetimeMs: 3_400, touchRadius: 18, trackingBlendPer50Ms: 0.38 }),
   gun: Object.freeze({ speed: 450, lifetimeMs: 900, maxTravelM: 360, touchRadius: 10 }),
 });
 export const MAX_ARCADE_PROJECTILES = 8;
@@ -9,7 +9,7 @@ export const ARCADE_TICK_MS = 100;
 export const ARCADE_LOCK = Object.freeze({
   holdMs: 1_200,
   sampleGapMs: 400,
-  centerCosine: Math.cos(8 * Math.PI / 180),
+  centerCosine: Math.cos(14 * Math.PI / 180),
   cameraBackM: 108,
   cameraUpM: 16,
   cameraLookAheadM: 72,
@@ -72,7 +72,7 @@ export function gameLockAvailable(localPose, peerPose, maximumDistance) {
     && dot(gameForward(localPose.orientation), normalized(delta)) >= 0.9;
 }
 
-// A small, dimensionless screen-center region in the fictional game camera.
+// A bounded, dimensionless screen-center region in the fictional game camera.
 // The same view offset is used by the renderer and the server-side check.
 export function gameCaptureAvailable(localPose, peerPose, maximumDistance) {
   const view = localPose.view;
@@ -141,7 +141,7 @@ export function advanceArcadeProjectile(projectile, nowMs, peerPose) {
     if (target && projectile.targetSlot !== null) {
       // Deliberately simple game easing toward the currently visible opponent.
       const desired = normalized(target.map((value, index) => value - position[index]));
-      const blend = Math.min(0.22, stepMs / 250);
+      const blend = 1 - (1 - rules.trackingBlendPer50Ms) ** (stepMs / 50);
       direction = normalized(direction.map((value, index) => value * (1 - blend) + desired[index] * blend));
     }
     let next = addScaled(position, direction, rules.speed * stepMs / 1_000);

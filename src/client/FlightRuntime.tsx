@@ -43,6 +43,7 @@ type FlightRuntimeProps = Readonly<{
   localAircraftId?: string | null;
   peerAircraftId?: string | null;
   projectiles?: readonly CompetitionProjectileSnapshot[];
+  projectileServerTimeMs?: number;
   selectedWeaponId?: WeaponId | null;
   peerLocked?: boolean;
   onLocalPose?: (pose: AircraftPose & { view?: GameView }) => void;
@@ -65,6 +66,7 @@ export function FlightRuntime({
   localAircraftId = null,
   peerAircraftId = null,
   projectiles,
+  projectileServerTimeMs,
   selectedWeaponId = null,
   peerLocked = false,
   onLocalPose,
@@ -110,6 +112,7 @@ export function FlightRuntime({
         peerAircraftId={peerAircraftId}
         competitiveModels={externalNetworkController !== null}
         projectiles={projectiles}
+        projectileServerTimeMs={projectileServerTimeMs}
         selectedWeaponId={selectedWeaponId}
         peerLocked={peerLocked}
       />

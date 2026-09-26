@@ -4,7 +4,7 @@
     "displayName": "MISSILE",
     "heartPointEffect": 20,
     "cooldownMs": 5000,
-    "activationRadiusM": 600,
+    "activationRadiusM": 900,
     "fireProfile": "single"
   },
   {

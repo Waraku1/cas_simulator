@@ -18,7 +18,7 @@ import "cesium/Build/Cesium/Widgets/widgets.css";
 import { useEffect, useRef, useState } from "react";
 import { aircraftById } from "../../shared/aircraft";
 import { aircraftVisualForSpec } from "../../shared/aircraft-visuals";
-import { ARCADE_LOCK } from "../../shared/arcade-projectiles.mjs";
+import { ARCADE_LOCK, ARCADE_PROJECTILES } from "../../shared/arcade-projectiles.mjs";
 import type { CompetitionProjectileSnapshot } from "../../shared/competition";
 import { C2_RESOURCE_BUDGET } from "../../shared/config";
 import {
@@ -59,6 +59,8 @@ const keyAxis = (keys: Set<string>, positive: string, negative: string) =>
 const CAMERA_BACK_M = ARCADE_LOCK.cameraBackM;
 const CAMERA_UP_M = ARCADE_LOCK.cameraUpM;
 const CAMERA_LOOK_AHEAD_M = ARCADE_LOCK.cameraLookAheadM;
+const PROJECTILE_VISUAL_LEAD_MS = 120;
+const PROJECTILE_VISUAL_CORRECTION_S = 0.04;
 const REMOTE_EXTRAPOLATION_LIMIT_MS = 180;
 const REMOTE_SMOOTHING_TIME_CONSTANT_MS = 65;
 const NOSE_OFFSET_M = 11;
@@ -90,6 +92,7 @@ type EarthSceneProps = Readonly<{
   selectedWeaponId?: WeaponId | null;
   peerLocked?: boolean;
   projectiles?: readonly CompetitionProjectileSnapshot[];
+  projectileServerTimeMs?: number;
 }>;
 
 function computeFixedFrame(position: Cartesian3, localFrame: LocalAxes): FlightFrame {
@@ -242,6 +245,7 @@ export function EarthScene({
   selectedWeaponId = null,
   peerLocked = false,
   projectiles,
+  projectileServerTimeMs,
 }: EarthSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
@@ -251,7 +255,12 @@ export function EarthScene({
     position: ConstantPositionProperty;
     trail?: Entity;
     trailPositions?: ConstantProperty;
-    previous: Cartesian3;
+    displayed: Cartesian3;
+    anchor: Cartesian3;
+    velocity: Cartesian3;
+    receivedAtMs: number;
+    serverTimeMs: number;
+    weaponId: WeaponId;
   }>());
   const remotePoseRef = useRef(remotePose);
   const localSlotRef = useRef(localSlot);
@@ -673,6 +682,28 @@ export function EarthScene({
         );
       };
 
+      const updateProjectileVisuals = (now: number, deltaSeconds: number) => {
+        for (const rendered of projectileEntitiesRef.current.values()) {
+          const leadSeconds = Math.min(PROJECTILE_VISUAL_LEAD_MS, Math.max(0, now - rendered.receivedAtMs)) / 1_000;
+          const estimate = Cartesian3.add(rendered.anchor,
+            Cartesian3.multiplyByScalar(rendered.velocity, leadSeconds, new Cartesian3()), new Cartesian3());
+          const blend = Cartesian3.distance(rendered.displayed, estimate) > 100
+            ? 1
+            : 1 - Math.exp(-Math.max(0, deltaSeconds) / PROJECTILE_VISUAL_CORRECTION_S);
+          Cartesian3.lerp(rendered.displayed, estimate, blend, rendered.displayed);
+          rendered.position.setValue(rendered.displayed);
+          if (rendered.trailPositions) {
+            const speed = Cartesian3.magnitude(rendered.velocity);
+            const trailLength = rendered.weaponId === "gun" ? 32 : 38;
+            const start = speed > 0.01
+              ? Cartesian3.subtract(rendered.displayed,
+                Cartesian3.multiplyByScalar(rendered.velocity, trailLength / speed, new Cartesian3()), new Cartesian3())
+              : rendered.displayed;
+            rendered.trailPositions.setValue([start, rendered.displayed]);
+          }
+        }
+      };
+
       const publishFlightState = () => {
         onTelemetry(toFlightTelemetry(flightState));
         onTheaterStatus(evaluateTheaterPosition(flightState.latitudeDeg, flightState.longitudeDeg));
@@ -777,6 +808,7 @@ export function EarthScene({
         orientationProperty.setValue(orientationFromFrame(flightFrame));
         updateCamera(position, flightFrame);
         updateRemoteAircraft(now, elapsedMs);
+        updateProjectileVisuals(now, deltaSeconds);
 
         if (now - lastTelemetryTime >= 90) {
           lastTelemetryTime = now;
@@ -838,6 +870,8 @@ export function EarthScene({
     const viewer = viewerRef.current;
     if (!viewer) return;
     const active = new Set<number>();
+    const receivedAtMs = performance.now();
+    const serverTimeMs = projectileServerTimeMs ?? Date.now();
     for (const projectile of projectiles ?? []) {
       active.add(projectile.id);
       const position = Cartesian3.fromDegrees(
@@ -845,16 +879,19 @@ export function EarthScene({
       );
       const existing = projectileEntitiesRef.current.get(projectile.id);
       if (existing) {
-        if (existing.trailPositions) {
-          const segment = Cartesian3.subtract(position, existing.previous, new Cartesian3());
-          const segmentLength = Cartesian3.magnitude(segment);
-          const start = segmentLength > 32
-            ? Cartesian3.lerp(existing.previous, position, 1 - 32 / segmentLength, new Cartesian3())
-            : existing.previous;
-          existing.trailPositions.setValue([start, position]);
+        const elapsedMs = serverTimeMs - existing.serverTimeMs;
+        if (elapsedMs > 0) {
+          const distance = Cartesian3.distance(position, existing.anchor);
+          const maximumSpeed = ARCADE_PROJECTILES[projectile.weaponId].speed * 1.2;
+          const speed = Math.min(maximumSpeed, distance * 1_000 / elapsedMs);
+          const movement = Cartesian3.subtract(position, existing.anchor, new Cartesian3());
+          existing.velocity = distance > 0
+            ? Cartesian3.multiplyByScalar(movement, speed / distance, movement)
+            : new Cartesian3();
         }
-        existing.previous = Cartesian3.clone(position);
-        existing.position.setValue(position);
+        existing.anchor = position;
+        existing.receivedAtMs = receivedAtMs;
+        existing.serverTimeMs = serverTimeMs;
       } else {
         const property = new ConstantPositionProperty(position);
         const gun = projectile.weaponId === "gun";
@@ -863,28 +900,33 @@ export function EarthScene({
           name: `Game projectile ${projectile.id}`,
           position: property,
           point: {
-            pixelSize: gun ? 12 : 11,
+            pixelSize: gun ? 12 : 14,
             color,
             outlineColor: Color.WHITE,
             outlineWidth: gun ? 2 : 1,
-            disableDepthTestDistance: gun ? Number.POSITIVE_INFINITY : 0,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         });
-        const trailPositions = gun ? new ConstantProperty([position, position]) : undefined;
-        const trail = trailPositions ? viewer.entities.add({
+        const trailPositions = new ConstantProperty([position, position]);
+        const trail = viewer.entities.add({
           name: `Game projectile trail ${projectile.id}`,
           polyline: {
             positions: trailPositions,
             width: 3,
             material: color.withAlpha(0.88),
           },
-        }) : undefined;
+        });
         projectileEntitiesRef.current.set(projectile.id, {
           entity,
           position: property,
           trail,
           trailPositions,
-          previous: Cartesian3.clone(position),
+          displayed: Cartesian3.clone(position),
+          anchor: Cartesian3.clone(position),
+          velocity: new Cartesian3(),
+          receivedAtMs,
+          serverTimeMs,
+          weaponId: projectile.weaponId,
         });
       }
     }
@@ -894,7 +936,7 @@ export function EarthScene({
       if (rendered.trail) viewer.entities.remove(rendered.trail);
       projectileEntitiesRef.current.delete(id);
     }
-  }, [projectiles]);
+  }, [projectiles, projectileServerTimeMs]);
 
   return (
     <section className="earth-shell" aria-label="Cesium Earth flight viewport">
