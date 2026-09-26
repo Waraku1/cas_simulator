@@ -50,6 +50,8 @@ const required = [
   "src/shared/competition.ts",
   "src/shared/arcade-projectiles.mjs",
   "src/shared/arcade-projectiles.d.mts",
+  "src/shared/game-ground.mjs",
+  "src/shared/game-ground.d.mts",
   "src/shared/matchmaking.ts",
   "scripts/dev-school.mjs",
   "scripts/sync-aircraft-assets.mjs",
@@ -72,6 +74,7 @@ const required = [
   "scripts/verify-school-rated-product.mjs",
   "scripts/verify-c4c-runtime.mjs",
   "scripts/verify-arcade-projectiles.mjs",
+  "scripts/verify-flight-response.mjs",
   "docs/architecture/C0_FOUNDATION.md",
   "docs/architecture/C1_FLIGHT.md",
   "docs/architecture/C2_WORLD_THEATER.md",
@@ -209,8 +212,16 @@ const arcadeProjectiles = await readFile(join(root, "src/shared/arcade-projectil
 if (!arcadeProjectiles.includes("cameraUpM: 16")) {
   throw new Error("Accepted chase-camera lift must stay at 16 m for rendering and capture");
 }
-if (earthScene.includes("GLTF_TO_CAS_BODY") || earthScene.includes("modelOrientationFromFrame")) {
-  throw new Error("Cesium model axes must not receive a second glTF-to-body rotation");
+if (earthScene.includes("GLTF_TO_CAS_BODY")) {
+  throw new Error("Legacy glTF-to-body axis conversion must remain removed");
+}
+for (const token of [
+  "Matrix3.fromRotationZ(Math.PI",
+  "modelOrientationFromFrame(frame)",
+  "Matrix3.multiply(bodyRotationFromFrame(frame), MODEL_HEADING_CORRECTION",
+  "orientationProperty.setValue(orientationFromFrame(flightFrame))",
+]) {
+  if (!earthScene.includes(token)) throw new Error(`Bell X-1 horizontal heading correction missing: ${token}`);
 }
 
 const appShell = await readFile(join(root, "src/client/App.tsx"), "utf8");
