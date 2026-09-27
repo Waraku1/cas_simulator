@@ -77,6 +77,10 @@ Ranked flight loads the Bell X-1 GLB as two scene models and updates their model
 
 Ranked viewport dragging orbits the chase camera around the own aircraft, with a bounded vertical view angle and double-click recentering. The camera offset is published as a separate view value for screen-center capture. It never enters `FlightInput`, `FlightState`, model orientation, or the bank-mediated turn integration. The accepted flight controls and angular response remain fixed.
 
+Ranked aircraft spawn symmetrically 2.5 km east and west of the theater center,
+giving a 5 km local east-west separation at equal latitude and altitude. Both
+slots retain the same initial heading and orientation.
+
 On pointer release, camera yaw and pitch ease from their current offsets to the forward view over 200 ms. A new drag interrupts the return without snapping the camera. The network view remains marked as looking until the return completes; a forward-view pose is sent immediately at completion so capture can resume. This changes only the camera, never the aircraft controls or attitude.
 
 The chase camera's orientation follows the aircraft with an 85 ms display

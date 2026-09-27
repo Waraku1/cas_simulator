@@ -10,6 +10,7 @@ import {
   Matrix3,
   Matrix4,
   Model,
+  PerspectiveFrustum,
   Quaternion,
   Terrain,
   Transforms,
@@ -33,6 +34,7 @@ import type { WeaponId } from "../../shared/product";
 import { recordRenderedFrame } from "../diagnostics/useRuntimeDiagnostics";
 import {
   createInitialFlightState,
+  createStagedFlightState,
   getLocalBodyFrame,
   integrateFlightElapsed,
   toFlightTelemetry,
@@ -41,6 +43,7 @@ import {
   type FlightTelemetry,
 } from "../flight/model";
 import { returningLook } from "../flight/look-return.mjs";
+import { gunProjectilePixelSize } from "../flight/projectile-visual.mjs";
 import type { RemotePoseBuffer } from "../multiplayer/useMultiplayer";
 import {
   evaluateTheaterPosition,
@@ -68,7 +71,6 @@ const REMOTE_EXTRAPOLATION_LIMIT_MS = 180;
 const REMOTE_SMOOTHING_TIME_CONSTANT_MS = 65;
 const NOSE_OFFSET_M = 11;
 const REMOTE_MARKER_LIFT_M = 19;
-const MULTIPLAYER_STAGING_LONGITUDE_OFFSET_DEG = 0.00055;
 const SIMULATION_FRAME_INTERVAL_MS = 1_000 / C2_RESOURCE_BUDGET.runtimeFrameCapFps;
 const MODEL_HEADING_CORRECTION = Matrix3.fromRotationZ(Math.PI, new Matrix3());
 const MODEL_HEADING_QUATERNION = Quaternion.fromRotationMatrix(MODEL_HEADING_CORRECTION);
@@ -229,15 +231,6 @@ function predictRemotePose(buffer: RemotePoseBuffer, now: number) {
   };
 }
 
-function stagedFlightState(slot: 1 | 2): FlightState {
-  const initial = createInitialFlightState();
-  return {
-    ...initial,
-    longitudeDeg: initial.longitudeDeg
-      + (slot === 1 ? -MULTIPLAYER_STAGING_LONGITUDE_OFFSET_DEG : MULTIPLAYER_STAGING_LONGITUDE_OFFSET_DEG),
-  };
-}
-
 function isFormTarget(target: EventTarget | null) {
   return target instanceof HTMLInputElement
     || target instanceof HTMLSelectElement
@@ -265,6 +258,7 @@ export function EarthScene({
   const projectileEntitiesRef = useRef(new Map<number, {
     entity: Entity;
     position: ConstantPositionProperty;
+    pixelSize?: ConstantProperty;
     trail?: Entity;
     trailPositions?: ConstantProperty;
     displayed: Cartesian3;
@@ -707,6 +701,8 @@ export function EarthScene({
       };
 
       const updateProjectileVisuals = (now: number, deltaSeconds: number) => {
+        const fov = viewer!.camera.frustum instanceof PerspectiveFrustum
+          ? viewer!.camera.frustum.fovy ?? Math.PI / 3 : Math.PI / 3;
         for (const rendered of projectileEntitiesRef.current.values()) {
           const leadSeconds = Math.min(PROJECTILE_VISUAL_LEAD_MS, Math.max(0, now - rendered.receivedAtMs)) / 1_000;
           const estimate = Cartesian3.add(rendered.anchor,
@@ -716,6 +712,13 @@ export function EarthScene({
             : 1 - Math.exp(-Math.max(0, deltaSeconds) / PROJECTILE_VISUAL_CORRECTION_S);
           Cartesian3.lerp(rendered.displayed, estimate, blend, rendered.displayed);
           rendered.position.setValue(rendered.displayed);
+          if (rendered.pixelSize) {
+            const distanceM = Cartesian3.distance(viewer!.camera.positionWC, rendered.displayed);
+            const size = gunProjectilePixelSize(distanceM, viewer!.canvas.clientHeight, fov);
+            if (Math.abs(size - Number(rendered.pixelSize.getValue())) >= 0.25) {
+              rendered.pixelSize.setValue(size);
+            }
+          }
           if (rendered.trailPositions) {
             const speed = Cartesian3.magnitude(rendered.velocity);
             const trailLength = rendered.weaponId === "gun" ? 32 : 38;
@@ -805,7 +808,7 @@ export function EarthScene({
         }
         if (appliedMultiplayerSlot === slot) return;
 
-        flightState = stagedFlightState(slot);
+        flightState = createStagedFlightState(slot);
         cameraOrientation = flightState.orientation;
         groundContactSent = false;
         appliedMultiplayerSlot = slot;
@@ -978,14 +981,19 @@ export function EarthScene({
         const property = new ConstantPositionProperty(position);
         const gun = projectile.weaponId === "gun";
         const color = Color.fromCssColorString(gun ? "#ffe18a" : "#7ef5ff");
+        const pixelSize = gun ? new ConstantProperty(gunProjectilePixelSize(
+          Cartesian3.distance(viewer.camera.positionWC, position), viewer.canvas.clientHeight,
+          viewer.camera.frustum instanceof PerspectiveFrustum
+            ? viewer.camera.frustum.fovy ?? Math.PI / 3 : Math.PI / 3,
+        )) : undefined;
         const entity = viewer.entities.add({
           name: `Game projectile ${projectile.id}`,
           position: property,
           point: {
-            pixelSize: gun ? 12 : 14,
+            pixelSize: pixelSize ?? 14,
             color,
             outlineColor: Color.WHITE,
-            outlineWidth: gun ? 2 : 1,
+            outlineWidth: 1,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         });
@@ -1001,6 +1009,7 @@ export function EarthScene({
         projectileEntitiesRef.current.set(projectile.id, {
           entity,
           position: property,
+          pixelSize,
           trail,
           trailPositions,
           displayed: Cartesian3.clone(position),

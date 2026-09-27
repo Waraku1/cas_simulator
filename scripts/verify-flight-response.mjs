@@ -12,11 +12,23 @@ const isolated = source.replace(configImport,
 const output = ts.transpileModule(isolated, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
 }).outputText;
-const { createInitialFlightState, integrateFlightState, toFlightTelemetry } = await import(
+const { createInitialFlightState, createStagedFlightState, MATCH_SPAWN_SEPARATION_M,
+  integrateFlightState, toFlightTelemetry } = await import(
   `data:text/javascript;base64,${Buffer.from(output).toString("base64")}`
 );
 
 const initial = createInitialFlightState();
+const leftSpawn = createStagedFlightState(1);
+const rightSpawn = createStagedFlightState(2);
+const initialSeparationM = (rightSpawn.longitudeDeg - leftSpawn.longitudeDeg)
+  * Math.PI / 180 * 6_371_000 * Math.cos(initial.latitudeDeg * Math.PI / 180);
+assert.equal(MATCH_SPAWN_SEPARATION_M, 5_000);
+assert.ok(Math.abs(initialSeparationM - 5_000) < 0.01,
+  "Opposing slots must start five kilometers apart in the local east-west plane");
+assert.deepEqual(leftSpawn.orientation, rightSpawn.orientation,
+  "Both pilots retain their parallel initial direction");
+assert.equal(leftSpawn.latitudeDeg, rightSpawn.latitudeDeg);
+assert.equal(leftSpawn.altitudeM, rightSpawn.altitudeM);
 const starting = { ...initial, orientation: { w: 1, x: 0, y: 0, z: 0 } };
 const half = Math.PI / 12;
 const climb = { ...starting, orientation: { w: Math.cos(half), x: 0, y: -Math.sin(half), z: 0 } };

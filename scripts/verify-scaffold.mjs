@@ -159,7 +159,7 @@ for (const token of [
   '"activationRadiusM": 1350',
   '"weaponId": "gun"',
   '"heartPointEffect": 4',
-  '"cooldownMs": 400',
+  '"cooldownMs": 250',
   '"activationRadiusM": 360',
 ]) {
   if (!weaponCatalog.includes(token)) throw new Error(`Formal weapon catalog missing: ${token}`);

@@ -45,6 +45,7 @@ export type FlightTelemetry = Readonly<{
 }>;
 
 const EARTH_RADIUS_M = 6_371_000;
+export const MATCH_SPAWN_SEPARATION_M = 5_000;
 const MIN_SPEED_MPS = 90;
 const MAX_SPEED_MPS = 230;
 const MIN_ALTITUDE_M = 0;
@@ -249,6 +250,17 @@ export function createInitialFlightState(): FlightState {
     speedMps: 155,
     throttle: 0.56,
     verticalSpeedMps: 0,
+  };
+}
+
+export function createStagedFlightState(slot: 1 | 2): FlightState {
+  const initial = createInitialFlightState();
+  const halfSeparationM = MATCH_SPAWN_SEPARATION_M / 2;
+  const longitudeOffsetDeg = degrees(halfSeparationM
+    / (EARTH_RADIUS_M * Math.cos(radians(initial.latitudeDeg))));
+  return {
+    ...initial,
+    longitudeDeg: initial.longitudeDeg + (slot === 1 ? -longitudeOffsetDeg : longitudeOffsetDeg),
   };
 }
 

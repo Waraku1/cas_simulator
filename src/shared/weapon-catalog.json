@@ -11,7 +11,7 @@
     "weaponId": "gun",
     "displayName": "GUN",
     "heartPointEffect": 4,
-    "cooldownMs": 400,
+    "cooldownMs": 250,
     "activationRadiusM": 360,
     "fireProfile": "rapid"
   }

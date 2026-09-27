@@ -473,6 +473,16 @@ const gunAccepted = await rankedA.waitFor(
 );
 assert(gunAccepted.accepted === true, "GUN was not independently ready while MISSILE was cooling down");
 
+rankedA.send({ type: "action", weaponId: "gun", clientTimeMs: performance.now() });
+const gunCooldown = await rankedA.waitFor(
+  (message) => message.type === "action_feedback"
+    && message.code === "cooldown"
+    && message.weaponId === "gun",
+  "GUN cooldown rejection",
+  4_000,
+);
+assert(gunCooldown.accepted === false, "GUN cooldown was bypassed");
+
 const afterGunState = await rankedB.waitFor(
   (message) => message.type === "match_state"
     && message.state?.participants?.some(
@@ -483,16 +493,6 @@ const afterGunState = await rankedB.waitFor(
 );
 const afterGun = afterGunState.state.participants.find((participant) => participant.slot === targetSlot);
 assert(afterGun?.heartPoints === 72, "GUN did not apply the expected two-projectile effect");
-
-rankedA.send({ type: "action", weaponId: "gun", clientTimeMs: performance.now() });
-const gunCooldown = await rankedA.waitFor(
-  (message) => message.type === "action_feedback"
-    && message.code === "cooldown"
-    && message.weaponId === "gun",
-  "GUN cooldown rejection",
-  4_000,
-);
-assert(gunCooldown.accepted === false, "GUN cooldown was bypassed");
 
 rankedA.send({ type: "leave_match" });
 const resolved = await rankedB.waitFor(

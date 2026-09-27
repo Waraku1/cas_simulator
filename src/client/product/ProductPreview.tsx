@@ -321,11 +321,15 @@ function MatchPreview({ assignment, onResolved }: Readonly<{ assignment: MatchFo
   }, []);
 
   useEffect(() => {
+    let gunTimer: number | null = null;
+    const stopGun = () => {
+      if (gunTimer !== null) window.clearInterval(gunTimer);
+      gunTimer = null;
+    };
     const handleActionKey = (event: KeyboardEvent) => {
-      if (event.repeat) return;
       const target = event.target;
       if (target instanceof HTMLInputElement || target instanceof HTMLButtonElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)) return;
-      if (event.code === "ArrowLeft" || event.code === "ArrowRight") {
+      if ((event.code === "ArrowLeft" || event.code === "ArrowRight") && !event.repeat) {
         event.preventDefault();
         setSelectedWeaponId((current) => {
           const currentIndex = Math.max(0, weaponIds.indexOf(current));
@@ -336,11 +340,28 @@ function MatchPreview({ assignment, onResolved }: Readonly<{ assignment: MatchFo
       }
       if (event.code === "Space") {
         event.preventDefault();
+        if (event.repeat) return;
         ranked.fireWeapon(selectedWeaponId);
+        if (selectedWeaponId === "gun") {
+          stopGun();
+          gunTimer = window.setInterval(() => ranked.fireWeapon("gun"),
+            (weaponById("gun")?.cooldownMs ?? 250) + 20);
+        }
       }
     };
+    const handleKeyUp = (event: KeyboardEvent) => { if (event.code === "Space") stopGun(); };
+    const handleVisibility = () => { if (document.hidden) stopGun(); };
     window.addEventListener("keydown", handleActionKey, { passive: false });
-    return () => window.removeEventListener("keydown", handleActionKey);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", stopGun);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      stopGun();
+      window.removeEventListener("keydown", handleActionKey);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", stopGun);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [ranked.fireWeapon, selectedWeaponId, weaponIds]);
 
   const state = ranked.matchState;
