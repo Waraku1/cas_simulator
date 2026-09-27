@@ -9,7 +9,7 @@ import {
   schoolRankedLock,
   updateSchoolRankedCapture,
 } from "./school-ranked-runtime.mjs";
-import { gamePointToPosition } from "../src/shared/arcade-projectiles.mjs";
+import { gamePointToPosition, MAX_ARCADE_PROJECTILES } from "../src/shared/arcade-projectiles.mjs";
 import { overtimeSecondsForHpGap } from "../src/shared/match-duration.mjs";
 import aircraftCatalog from "../src/shared/aircraft-catalog.json" with { type: "json" };
 
@@ -107,6 +107,11 @@ const gunCooldown = resolveSchoolRankedAction(
 if (gunCooldown.accepted || gunCooldown.code !== "cooldown") {
   throw new Error("GUN cooldown was not enforced");
 }
+const repeatGun = resolveSchoolRankedAction(gun.state, 1, 10_512,
+  { ...poseSample, receivedAtMs: 10_512 }, targetAt(10_512), "gun");
+if (!repeatGun.accepted || repeatGun.state.projectiles.length !== 4) {
+  throw new Error("A second GUN volley must be ready at the new 250 ms cadence");
+}
 weaponState = advanceSchoolRankedProjectiles(gun.state, 10_460, (slot) =>
   slot === 2 ? targetAt(10_460) : { ...poseSample, receivedAtMs: 10_460 });
 if (weaponState.participants[1].heartPoints !== 72) throw new Error("Both GUN projectiles must resolve contact");
@@ -124,10 +129,25 @@ if (draggedContact.participants[1].heartPoints !== 92) {
   throw new Error("Dragged-view GUN volley must contact only along the changed sight direction");
 }
 const fullVolleyRejected = resolveSchoolRankedAction(
-  { ...state, projectiles: Array(7).fill(draggedGun.state.projectiles[0]) }, 1, 10_010,
+  { ...state, projectiles: Array(MAX_ARCADE_PROJECTILES - 1).fill(draggedGun.state.projectiles[0]) }, 1, 10_010,
   { ...poseSample, receivedAtMs: 10_010 }, targetAt(10_010), "gun");
-if (fullVolleyRejected.code !== "projectile_limit" || fullVolleyRejected.state.projectiles.length !== 7) {
+if (fullVolleyRejected.code !== "projectile_limit"
+  || fullVolleyRejected.state.projectiles.length !== MAX_ARCADE_PROJECTILES - 1) {
   throw new Error("GUN volley must reserve two free projectile slots atomically");
+}
+let concurrentVolleys = state;
+for (let cycle = 0; cycle < 8; cycle += 1) {
+  const nowMs = 10_010 + cycle * 250;
+  for (const slot of [1, 2]) {
+    const sample = { ...poseSample, receivedAtMs: nowMs };
+    const launched = resolveSchoolRankedAction(concurrentVolleys, slot, nowMs,
+      sample, sample, "gun");
+    if (!launched.accepted) throw new Error("Two pilots must sustain the faster cadence within the bounded cap");
+    concurrentVolleys = launched.state;
+  }
+}
+if (concurrentVolleys.projectiles.length !== 32) {
+  throw new Error("Concurrent GUN volleys must remain bounded to 32 projectiles");
 }
 
 const miss = resolveSchoolRankedAction(state, 1, 10_010,

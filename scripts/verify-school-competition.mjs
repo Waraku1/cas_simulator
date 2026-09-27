@@ -146,6 +146,16 @@ const gunAccepted = await waitForMessage(
 );
 if (!gunAccepted.accepted) throw new Error("gun was not independently ready");
 
+ranked1.socket.send(JSON.stringify({ type: "action", weaponId: "gun", clientTimeMs: performance.now() }));
+const gunCooldown = await waitForMessage(
+  ranked1,
+  (message) => message.type === "action_feedback"
+    && message.code === "cooldown"
+    && message.weaponId === "gun",
+  "gun cooldown rejection",
+);
+if (gunCooldown.accepted) throw new Error("gun cooldown was bypassed");
+
 const gunHpUpdate = await waitForMessage(
   ranked2,
   (message) => message.type === "match_state"
@@ -156,16 +166,6 @@ const gunHpUpdate = await waitForMessage(
 );
 const afterGun = gunHpUpdate.state.participants.find((participant) => participant.slot === peerSlot);
 if (!afterGun || afterGun.heartPoints !== 72) throw new Error("two gun projectiles did not apply 8 HP combined");
-
-ranked1.socket.send(JSON.stringify({ type: "action", weaponId: "gun", clientTimeMs: performance.now() }));
-const gunCooldown = await waitForMessage(
-  ranked1,
-  (message) => message.type === "action_feedback"
-    && message.code === "cooldown"
-    && message.weaponId === "gun",
-  "gun cooldown rejection",
-);
-if (gunCooldown.accepted) throw new Error("gun cooldown was bypassed");
 
 ranked1.socket.send(JSON.stringify({ type: "leave_match" }));
 const forfeit = await waitForMessage(

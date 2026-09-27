@@ -266,7 +266,8 @@ function MatchLive({ assignment, onResolved }: Readonly<{ assignment: MatchFound
         ranked.fireWeapon(selectedWeaponId);
         if (selectedWeaponId === "gun") {
           stopGun();
-          gunTimer = window.setInterval(() => ranked.fireWeapon("gun"), 440);
+          gunTimer = window.setInterval(() => ranked.fireWeapon("gun"),
+            (weaponById("gun")?.cooldownMs ?? 250) + 20);
         }
       }
     };

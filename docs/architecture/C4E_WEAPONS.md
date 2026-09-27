@@ -11,7 +11,7 @@ The values below are **CAS gameplay balance parameters only**. They are not inte
 ## Player controls
 
 - `Left Arrow / Right Arrow`: cycle the selected weapon.
-- `Space`: fire the selected weapon. Holding it repeats GUN fire at its 0.40 s cooldown cadence; MISSILE remains a single press.
+- `Space`: fire the selected weapon. Holding it repeats GUN fire at its 0.25 s cooldown cadence; MISSILE remains a single press.
 - Drag the ranked viewport to look around. Releasing the drag returns the view to forward over 0.2 s; double-click centers it immediately. These actions change only camera yaw/pitch, never the aircraft orientation or the accepted W/S, A/D, and throttle inputs.
 - `Up Arrow / Down Arrow`: throttle remains unchanged.
 - `W / S`: pitch remains unchanged.
@@ -38,7 +38,7 @@ Aircraft catalog order defines the cycling order.
 ### GUN
 
 - HP effect: 4
-- cooldown: 0.40 s
+- cooldown: 0.25 s
 - interaction radius: 360 m (legacy catalog indicator; no longer a launch gate)
 - fire profile: rapid
 
@@ -76,7 +76,7 @@ The production RankedMatch authority verifies:
 - selected weapon cooldown;
 - fresh authoritative pose samples;
 - 3D participant distance against the MISSILE interaction radius; GUN can launch at any peer distance.
-- available game projectile slots (at most eight in flight per match, with
+- available game projectile slots (at most 32 in flight per match, with
   two slots reserved together for a GUN request).
 - for a tracking MISSILE, fresh view and target poses in the central camera region continuously for 1.2 s.
 
@@ -93,10 +93,13 @@ neutral view this is the original aircraft-forward path; during a drag the
 camera's orbit angle determines the new line while the aircraft's bank and
 flight direction remain unchanged. Each projectile resolves its own contact
 and 4 HP effect. Its
-game path is limited to 720 m and 1.8 s; contact is checked only along the traveled
+game path is limited to 1440 m and 1.8 s at 900 game m/s; contact is checked only along the traveled
 segments, and the display removes the point and short trail when the path ends.
-Holding Space sends GUN requests at 0.44 s intervals, subject to server cooldown and
-the match's eight-projectile cap. The client does not determine contact.
+Holding Space sends GUN requests at 0.27 s intervals, subject to server cooldown and
+the match's 32-projectile cap. The renderer projects a stylized tracer diameter
+against its camera distance, viewport height, and vertical field of view; its
+3–18 pixel clamp keeps it visible without affecting server contact. The client
+does not determine contact.
 
 `MISSILE` follows the opponent only when the selected missile view has kept the peer
 within the expanded central camera region for 1.2 s with fresh pose updates. The progress bar shows the

@@ -2,9 +2,11 @@
 // contact sizes, not a model of any real aircraft or weapon.
 export const ARCADE_PROJECTILES = Object.freeze({
   missile: Object.freeze({ speed: 400, lifetimeMs: 5_100, touchRadius: 18, trackingBlendPer50Ms: 0.38 }),
-  gun: Object.freeze({ speed: 450, lifetimeMs: 1_800, maxTravelM: 720, touchRadius: 10 }),
+  gun: Object.freeze({ speed: 900, lifetimeMs: 1_800, maxTravelM: 1_440, touchRadius: 10 }),
 });
-export const MAX_ARCADE_PROJECTILES = 8;
+// Two pilots can sustain paired GUN volleys throughout their bounded flight
+// without hitting the shared cap; the cap still bounds server and render work.
+export const MAX_ARCADE_PROJECTILES = 32;
 export const ARCADE_TICK_MS = 100;
 export const ARCADE_LOCK = Object.freeze({
   holdMs: 1_200,
